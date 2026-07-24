@@ -52,6 +52,11 @@ class Activity {
   virtual uint8_t getUiTransitionRefreshWeight() const { return UI_TRANSITION_REFRESH_WEIGHT_NONE; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
+  /// Free temporary memory that is not needed while this activity is in the
+  /// background (under a reader or screensaver).  Default: no-op.
+  /// Called by ActivityManager::pushActivity() before the new activity runs.
+  virtual void freeBackgroundMemory() {}
+
   // Start a new activity without destroying the current one
   // Note: requestUpdate() will be invoked automatically once resultHandler finishes
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler);

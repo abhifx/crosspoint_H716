@@ -44,6 +44,7 @@ class FontDecompressor {
   void logStats(const char* label = "FDC");
   void resetStats();
   const Stats& getStats() const { return stats; }
+  bool isInitialized() const { return _initialized; }
 
  private:
   Stats stats;
@@ -74,6 +75,7 @@ class FontDecompressor {
   // Scratch buffer for compacting a single glyph from the hot group.
   // Valid until the next getBitmap() call.
   std::vector<uint8_t> hotGlyphBuf;
+  bool _initialized = false;
 
   void freePageBuffer();
   void freeHotGroup();

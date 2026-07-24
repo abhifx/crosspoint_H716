@@ -167,6 +167,12 @@ void ActivityManager::loop() {
           stackActivities.pop_back();
         }
       } else if (pendingAction == PendingAction::Push) {
+        // Notify the current activity that it is going into background so it
+        // can release temporary memory (library entries, page caches, etc.)
+        // before the new activity takes over.
+        if (currentActivity) {
+          currentActivity->freeBackgroundMemory();
+        }
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());

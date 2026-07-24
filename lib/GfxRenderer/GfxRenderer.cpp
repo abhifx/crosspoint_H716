@@ -2015,3 +2015,12 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
       break;
   }
 }
+
+void GfxRenderer::freeUnusedRenderMemory() {
+  freeBwBufferChunks();
+  // Release capacity of temporary render vectors.
+  rowBuf_.clear();
+  std::vector<uint8_t>().swap(rowBuf_);
+  polyBuf_.clear();
+  std::vector<int>().swap(polyBuf_);
+}

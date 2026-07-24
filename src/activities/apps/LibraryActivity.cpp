@@ -5,6 +5,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -252,6 +253,27 @@ void LibraryActivity::onExit() {
   unfilteredEntries_.clear();
   pageTitleCache_.clear();
   pageTitleCacheKey_ = -1;
+}
+
+void LibraryActivity::freeBackgroundMemory() {
+  // Library data will be reloaded on next render() or loop() if needed.
+  // Clearing these vectors releases ~30-60 KB while the reader or screensaver
+  // is active on top of us.
+  entries_.clear();
+  std::vector<LibraryCache::Entry>().swap(entries_);
+  unfilteredEntries_.clear();
+  std::vector<LibraryCache::Entry>().swap(unfilteredEntries_);
+  pageTitleCache_.clear();
+  std::vector<std::vector<std::string>>().swap(pageTitleCache_);
+  pageTitleCacheKey_ = -1;
+  cachedRenderSelector_ = -1;
+  cachedRenderPage_ = -1;
+  cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
+  cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
+  cachedInfoSearch_.clear();
+  coverGeneratedMask_ = 0;
+  coversComplete_ = false;
+  coverGenIndex_ = -1;
 }
 
 
@@ -728,7 +750,13 @@ void LibraryActivity::loop() {
       COVER_LOG("LIB", "Cover: slot=%d idx=%d gen... path=%s free=%u maxA=%u",
                 slot, idx, entries_[idx].path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
-      // Free render caches so the EPUB cover decoder gets more contiguous heap.
+      // Force CPU to normal frequency during cover generation (EPUB parsing +
+      // JPEG/PNG decoding is extremely slow at 40 MHz low-power mode).
+      HalPowerManager::Lock powerLock;
+
+      // Free render buffers and font caches so the cover decoder gets more
+      // contiguous heap (BW grayscale chunks, row/poly vectors, glyph cache).
+      renderer.freeUnusedRenderMemory();
       if (auto* fcm = renderer.getFontCacheManager()) {
         fcm->clearCache();
       }

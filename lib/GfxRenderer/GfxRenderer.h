@@ -117,6 +117,10 @@ class GfxRenderer {
                              uint8_t styleMask = 0x0F) const;
   bool releaseSdCardFontForLowMemory(int fontId) const;
 
+  /// Free all temporary render buffers that are not needed between frames.
+  /// Call before cover generation or screensaver to reclaim BW chunks + row/poly vectors.
+  void freeUnusedRenderMemory();
+
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }
   Orientation getOrientation() const { return orientation; }

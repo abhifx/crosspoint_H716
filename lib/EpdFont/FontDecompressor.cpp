@@ -10,6 +10,7 @@ FontDecompressor::~FontDecompressor() { deinit(); }
 
 bool FontDecompressor::init() {
   clearCache();
+  _initialized = true;
   return true;
 }
 
@@ -59,6 +60,15 @@ uint16_t FontDecompressor::getGroupIndex(const EpdFontData* fontData, uint32_t g
 
 bool FontDecompressor::decompressGroup(const EpdFontData* fontData, uint16_t groupIndex, uint8_t* outBuf,
                                        uint32_t outSize) {
+  // Lazy init — defer the 48 KB heap allocation (page buffers + inflate ring buffer)
+  // until the first font group is actually decompressed.  Most fonts on this device
+  // are loaded from SD card (pre-decompressed), so the FontDecompressor may never
+  // be needed at all.
+  if (!_initialized && !init()) {
+    LOG_ERR("FDC", "Lazy init failed");
+    return false;
+  }
+
   const EpdFontGroup& group = fontData->groups[groupIndex];
 
   const uint32_t tDecomp = millis();

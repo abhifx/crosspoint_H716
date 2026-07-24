@@ -384,11 +384,12 @@ static bool startReplacementScreenSaver() {
   if (activityManager.isScreenSaverActive()) return false;
   if (!activityManager.isReaderActivity()) return false;
 
-  // Free font caches to maximize contiguous heap for the PNG decoder (~38 KB).
-  // These caches will be rebuilt by the reader's normal prewarm flow on the
-  // next chapter/page render.
+  // Free font caches and decompressor memory to maximise contiguous heap for
+  // the PNG decoder (~58 KB).  These will be rebuilt on the next font access.
   fontCacheManager.clearCache();
-  fontDecompressor.clearCache();
+  if (fontDecompressor.isInitialized()) {
+    fontDecompressor.deinit();
+  }
 
   activityManager.pushActivity(std::make_unique<ScreenSaverActivity>(renderer, mappedInputManager, true));
   return true;
@@ -466,10 +467,10 @@ void setupDisplayAndFonts(bool seamless = false) {
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
 
-  // Initialize font decompressor for compressed reader fonts
-  if (!fontDecompressor.init()) {
-    LOG_ERR("MAIN", "Font decompressor init failed");
-  }
+  // Font decompressor is initialised lazily on first use (decompressGroup).
+  // This avoids allocating the 48 KB pool (page buffers + inflate ring buffer)
+  // at boot when most rendering uses SD-card fonts (already decompressed).
+  // fontDecompressor.init() is called internally when needed.
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
   renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);

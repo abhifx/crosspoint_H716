@@ -222,10 +222,10 @@ std::string thumbPathFor(const std::string& path, int coverW, int coverH) {
 // ============================================================================
 bool generateCoverForBook(const std::string& path, int coverW, int coverH) {
   yield(); esp_task_wdt_reset();
-  if (ESP.getMaxAllocHeap() < 40 * 1024) return false;
+    if (ESP.getMaxAllocHeap() < 40 * 1024 || ESP.getFreeHeap() < 32 * 1024) return false;
 
   if (FsHelpers::hasEpubExtension(path)) {
-    if (ESP.getMaxAllocHeap() < 32 * 1024 || ESP.getFreeHeap() < 28 * 1024) return false;
+    if (ESP.getMaxAllocHeap() < 28 * 1024 || ESP.getFreeHeap() < 24 * 1024) return false;
     
     // 1. Primo tentativo: estrattore leggero ZIP-only (nessun expat, nessun book.bin)
     if (EpubParser::generateCover(path, coverW, coverH)) return true;
@@ -495,8 +495,8 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
     out.push_back(Entry{std::move(rec.path), std::move(rec.title), std::move(rec.author)});
   }
 
-  cached.clear(); cached.shrink_to_fit();
-  records.clear(); records.shrink_to_fit();
+  cached.clear();
+  records.clear();
 
   return save(out);
 }
@@ -543,7 +543,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, std::vector<Entry>& out,
   }
   emitProgress(renderer, popupRect, totalCandidates, totalCandidates);
 
-  paths.clear(); paths.shrink_to_fit();
+  paths.clear();
   std::sort(records.begin(), records.end(), compareRecords);
 
   out.reserve(records.size());

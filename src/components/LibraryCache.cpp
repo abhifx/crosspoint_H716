@@ -143,7 +143,7 @@ void enumerateBooks(std::vector<std::string>& outPaths, const char* rootDir, int
       if (name[0] == '.') continue;
       std::string lowerName = name;
       for (auto& c : lowerName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (lowerName == "system volume information") continue;
+      if (lowerName == "system volume information" || lowerName == "my clippings.txt" || lowerName == "my lookups.txt") continue;
       if (isDir && (lowerName == "crosspoint" || lowerName.compare(0, 5, "sleep") == 0 ||
                     lowerName == "font" || lowerName == "fonts" || lowerName == "dictionaries" || lowerName == "exports")) continue;
 
@@ -433,7 +433,7 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
       if (name[0] == '.') continue;
       std::string lowerName = name;
       for (auto& c : lowerName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (lowerName == "system volume information") continue;
+      if (lowerName == "system volume information" || lowerName == "my clippings.txt" || lowerName == "my lookups.txt") continue;
       if (isDir && (lowerName == "crosspoint" || lowerName.compare(0, 5, "sleep") == 0 ||
                     lowerName == "font" || lowerName == "fonts" || lowerName == "dictionaries" || lowerName == "exports")) continue;
 

@@ -52,6 +52,7 @@ class TextBlock final : public Block {
   const BlockStyle& getBlockStyle() const { return blockStyle; }
   const std::vector<std::string>& getWords() const { return words; }
   const std::vector<int16_t>& getWordXpos() const { return wordXpos; }
+  const std::vector<EpdFontFamily::Style>& getWordStyles() const { return wordStyles; }
   bool hasGuideDots() const { return !wordGuideDotXOffset.empty(); }
   const std::vector<uint16_t>& getWordGuideDotXOffset() const { return wordGuideDotXOffset; }
   bool hasWordFlags() const { return !wordFlags.empty(); }
@@ -63,6 +64,12 @@ class TextBlock final : public Block {
   }
   void recordFontUsage(FontCacheManager& fontCacheManager, int fontId, uint8_t bionicReadingMode = 0) const;
   void render(const GfxRenderer& renderer, int fontId, int x, int y, uint8_t bionicReadingMode = 0) const;
+
+  /// Render a single word with optional bionic reading, used by clipping/bookmark highlights
+  /// so they match the page's rendering style.
+  static void renderWord(const GfxRenderer& renderer, int fontId, int x, int y, const std::string& word,
+                         EpdFontFamily::Style style, uint8_t bionicReadingMode);
+
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(FsFile& file) const;
   static std::unique_ptr<TextBlock> deserialize(FsFile& file);

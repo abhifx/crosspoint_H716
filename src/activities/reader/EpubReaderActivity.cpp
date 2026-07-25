@@ -934,7 +934,7 @@ void EpubReaderActivity::renderClippingSelectionOverlay() {
     // Solo cursore: evidenzia la parola corrente come fa il dizionario
     if (cursorGlobalIndex >= 0 && cursorGlobalIndex < static_cast<int>(clippingWords.size())) {
       const auto& w = clippingWords[cursorGlobalIndex];
-      renderer.fillRect(w.screenX - padX, w.screenY - padY, w.width + padX * 2, lineHeight + descenderPad, true);
+      renderer.fillRect(w.screenX - padX - 1, w.screenY - padY - 1, w.width + padX * 2 + 2, lineHeight + descenderPad + 2, true);
       renderer.drawText(fontId, w.screenX, w.screenY, w.text.c_str(), false, EpdFontFamily::REGULAR);
     }
     return;
@@ -950,11 +950,11 @@ void EpubReaderActivity::renderClippingSelectionOverlay() {
 
     const bool isCursor = w.globalIndex == cursorGlobalIndex;
     if (isCursor) {
-      renderer.fillRect(w.screenX - padX, w.screenY - padY, w.width + padX * 2, lineHeight + descenderPad, true);
+      renderer.fillRect(w.screenX - padX - 1, w.screenY - padY - 1, w.width + padX * 2 + 2, lineHeight + descenderPad + 2, true);
       renderer.drawText(fontId, w.screenX, w.screenY, w.text.c_str(), false, EpdFontFamily::REGULAR);
     } else {
-      renderer.fillRectDither(w.screenX - padX, w.screenY - padY, w.width + padX * 2, lineHeight + descenderPad, Color::LightGray);
-      renderer.drawText(fontId, w.screenX, w.screenY, w.text.c_str(), true, EpdFontFamily::REGULAR);
+      renderer.fillRect(w.screenX - padX - 1, w.screenY - padY - 1, w.width + padX * 2 + 2, lineHeight + descenderPad + 2, true);
+      renderer.drawText(fontId, w.screenX, w.screenY, w.text.c_str(), false, EpdFontFamily::REGULAR);
     }
   }
 }
@@ -986,7 +986,7 @@ void EpubReaderActivity::renderBookmarkHighlight(std::shared_ptr<Page> page, int
           const int16_t sx = static_cast<int16_t>(line.xPos + xPositions[wi] + marginLeft);
           const int16_t sy = static_cast<int16_t>(line.yPos + marginTop);
           const int16_t sw = static_cast<int16_t>(std::max(1, renderer.getTextAdvanceX(fontId, words[wi].c_str(), EpdFontFamily::REGULAR)));
-          renderer.fillRectDither(sx - 1, sy - 1, sw + 2, ascender + 6, Color::LightGray);
+          renderer.fillRectDither(sx - 2, sy - 2, sw + 4, ascender + 8, Color::LightGray);
           renderer.drawText(fontId, sx, sy, words[wi].c_str(), true, EpdFontFamily::REGULAR);
           return;
         }
@@ -1063,7 +1063,7 @@ void EpubReaderActivity::renderBookmarkHighlight(std::shared_ptr<Page> page, int
       const int16_t sx = static_cast<int16_t>(line.xPos + xPositions[0] + marginLeft);
       const int16_t sy = static_cast<int16_t>(line.yPos + marginTop);
       const int16_t sw = static_cast<int16_t>(std::max(1, renderer.getTextAdvanceX(fontId, block->getWords()[0].c_str(), EpdFontFamily::REGULAR)));
-      renderer.fillRectDither(sx - 1, sy - 1, sw + 2, ascender + 6, Color::LightGray);
+      renderer.fillRectDither(sx - 2, sy - 2, sw + 4, ascender + 8, Color::LightGray);
       renderer.drawText(fontId, sx, sy, block->getWords()[0].c_str(), true, EpdFontFamily::REGULAR);
       return;
     }
@@ -1194,7 +1194,8 @@ void EpubReaderActivity::renderClippingHighlights(std::shared_ptr<Page> page, in
   std::sort(resolvedRanges.begin(), resolvedRanges.end(),
             [](const ClipRange& a, const ClipRange& b) { return a.startWord < b.startWord; });
 
-  // Render: iterate all page words, highlight those in any resolved range.
+  // Render: highlight entire ranges as continuous blocks instead of
+  // word-by-word rectangles, so spaces between words are also highlighted.
   int globalWordIndex = 0;
   size_t rangeCursor = 0;
   for (const auto& element : page->elements) {
@@ -1207,8 +1208,13 @@ void EpubReaderActivity::renderClippingHighlights(std::shared_ptr<Page> page, in
     const auto& xPositions = block->getWordXpos();
     const size_t count = std::min(words.size(), xPositions.size());
 
+    // Collect highlighted words on this line that belong to the current range.
+    struct HighRun { int16_t xMin, xMax; };
+    std::vector<HighRun> runs;
+    // Also store which words are highlighted for text rendering.
+    std::vector<int> highlightedIndices;
+
     for (size_t i = 0; i < count; ++i) {
-      // Advance rangeCursor past ranges that end before the current word.
       while (rangeCursor < resolvedRanges.size() && resolvedRanges[rangeCursor].endWord < static_cast<uint16_t>(globalWordIndex)) {
         ++rangeCursor;
       }
@@ -1216,19 +1222,47 @@ void EpubReaderActivity::renderClippingHighlights(std::shared_ptr<Page> page, in
                                  static_cast<uint16_t>(globalWordIndex) >= resolvedRanges[rangeCursor].startWord &&
                                  static_cast<uint16_t>(globalWordIndex) <= resolvedRanges[rangeCursor].endWord);
 
-      if (!highlighted) {
-        ++globalWordIndex;
-        continue;
+      if (highlighted) {
+        highlightedIndices.push_back(static_cast<int>(i));
+        const int16_t sx = static_cast<int16_t>(line.xPos + xPositions[i] + marginLeft);
+        const int16_t sw = static_cast<int16_t>(std::max(1, renderer.getTextAdvanceX(fontId, words[i].c_str(), EpdFontFamily::REGULAR)));
+        const int16_t endX = sx + sw;
+        if (!runs.empty() && endX >= runs.back().xMax) {
+          // Extend run if words are adjacent or overlapping
+          runs.back().xMax = endX;
+        } else {
+          runs.push_back({sx, endX});
+        }
       }
-
-      const int16_t screenX = static_cast<int16_t>(line.xPos + xPositions[i] + marginLeft);
-      const int16_t screenY = static_cast<int16_t>(line.yPos + marginTop);
-      const int16_t width = static_cast<int16_t>(std::max(1, renderer.getTextAdvanceX(fontId, words[i].c_str(), EpdFontFamily::REGULAR)));
-      const int ascender = renderer.getFontAscenderSize(fontId);
-      const int descenderPad = 6;
-      renderer.fillRect(screenX - 1, screenY - 1, width + 2, ascender + descenderPad, true);
-      renderer.drawText(fontId, screenX, screenY, words[i].c_str(), false, EpdFontFamily::REGULAR);
       ++globalWordIndex;
+    }
+
+    // Draw highlight background — single continuous rectangle per run.
+    // Saltato durante i pass LSB/MSB dell'antialiasing grayscale:
+    // il fill rect sbiadisce il testo, quindi lo disegniamo solo in modalità BW.
+    const bool isGrayPass = (renderer.getRenderMode() != GfxRenderer::BW);
+    const int ascender = renderer.getFontAscenderSize(fontId);
+    const int descenderPad = 8;
+    if (!isGrayPass) {
+      for (const auto& run : runs) {
+        const int16_t screenY = static_cast<int16_t>(line.yPos + marginTop);
+        renderer.fillRectDither(run.xMin - 2, screenY, run.xMax - run.xMin + 6, ascender + descenderPad, Color::LightGray);
+      }
+    }
+
+    // Draw text for each highlighted word — sempre, anche in grayscale.
+    // Usa TextBlock::renderWord per applicare bionic reading se attivo.
+    const auto& wordStyles = block->getWordStyles();
+    // La mappa tra indice parola in block->getWords() e indice in xPositions/words non è 1:1
+    // perché xPositions è la lista completa delle parole renderizzate mentre block->getWords()
+    // può essere più piccolo (parole della linea). Usiamo un offset per sincronizzare.
+    // highlightedIndices contiene indici relativi a words[] (la lista per-riga).
+    for (int idx : highlightedIndices) {
+      const int16_t sx = static_cast<int16_t>(line.xPos + xPositions[idx] + marginLeft);
+      const int16_t sy = static_cast<int16_t>(line.yPos + marginTop);
+      const EpdFontFamily::Style ws = (idx < static_cast<int>(wordStyles.size()))
+                                          ? wordStyles[idx] : EpdFontFamily::REGULAR;
+      TextBlock::renderWord(renderer, fontId, sx, sy, words[idx], ws, SETTINGS.bionicReading);
     }
   }
 }

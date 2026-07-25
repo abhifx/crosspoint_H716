@@ -85,6 +85,85 @@ void TextBlock::recordFontUsage(FontCacheManager& fontCacheManager, const int fo
   }
 }
 
+void TextBlock::renderWord(const GfxRenderer& renderer, const int fontId, const int x, const int y,
+                           const std::string& word, const EpdFontFamily::Style style,
+                           const uint8_t bionicReadingMode) {
+  const bool alreadyBold = (style & EpdFontFamily::BOLD) != 0;
+  const bool bionicEnabled = bionicReadingMode == BIONIC_READING_NORMAL || bionicReadingMode == BIONIC_READING_SUBTLE;
+  const bool bionicNormal = bionicReadingMode == BIONIC_READING_NORMAL;
+
+  if (bionicReadingMode == BIONIC_READING_OFF || !bionicEnabled || alreadyBold || word.size() >= 128) {
+    renderer.drawText(fontId, x, y, word.c_str(), true, style);
+    return;
+  }
+
+  // Stack slice buffer (<128 bytes).
+  char buf[128];
+  int cursorX = x;
+  size_t i0 = 0;
+
+  while (i0 < word.size()) {
+    // Non-word run: draw in original style, advance cursor.
+    size_t j = i0;
+    while (j < word.size() && !isWordByte(static_cast<uint8_t>(word[j]))) ++j;
+    if (j > i0) {
+      const size_t n = j - i0;
+      if (n < sizeof(buf)) {
+        memcpy(buf, word.data() + i0, n);
+        buf[n] = '\0';
+        renderer.drawText(fontId, cursorX, y, buf, true, style);
+        cursorX += renderer.getTextAdvanceX(fontId, buf, style);
+      }
+      i0 = j;
+      if (i0 >= word.size()) break;
+    }
+
+    // Word run: emphasize the first M codepoints, regular for the rest.
+    size_t k = i0;
+    while (k < word.size() && isWordByte(static_cast<uint8_t>(word[k]))) ++k;
+
+    const int ncp = utf8CodepointCount(word.data() + i0, word.data() + k);
+    const int mcp = bionicMidpoint(ncp);
+
+    // Find byte boundary after the M-th codepoint.
+    size_t split = i0;
+    int cpCount = 0;
+    while (split < k && cpCount < mcp) {
+      if ((static_cast<uint8_t>(word[split]) & 0xC0) != 0x80) ++cpCount;
+      ++split;
+    }
+
+    if (split > i0 && split <= k) {
+      const size_t n1 = split - i0;
+      const size_t n2 = k - split;
+      const EpdFontFamily::Style boldStyle = bionicNormal
+                                                 ? static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD)
+                                                 : style;
+      if (n1 < sizeof(buf) && n2 < sizeof(buf)) {
+        memcpy(buf, word.data() + i0, n1);
+        buf[n1] = '\0';
+        renderer.drawText(fontId, cursorX, y, buf, true, boldStyle);
+        cursorX += renderer.getTextAdvanceX(fontId, buf, boldStyle);
+
+        if (n2 > 0) {
+          memcpy(buf, word.data() + split, n2);
+          buf[n2] = '\0';
+          renderer.drawText(fontId, cursorX, y, buf, true, style);
+          cursorX += renderer.getTextAdvanceX(fontId, buf, style);
+        }
+      } else {
+        renderer.drawText(fontId, cursorX, y, word.c_str() + i0, true, style);
+        cursorX += renderer.getTextAdvanceX(fontId, word.c_str() + i0, style);
+      }
+    } else {
+      renderer.drawText(fontId, cursorX, y, word.c_str() + i0, true, style);
+      cursorX += renderer.getTextAdvanceX(fontId, word.c_str() + i0, style);
+    }
+
+    i0 = k;
+  }
+}
+
 void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int x, const int y,
                        const uint8_t bionicReadingMode) const {
   // Validate iterator bounds before rendering

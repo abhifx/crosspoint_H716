@@ -196,6 +196,25 @@ Several targeted optimizations to keep the library and UI responsive on the ESP3
 - **Inventory caching** — metadata scan results are cached, avoiding repeated SD traversal
 - **System directory exclusion** — skips `.`, `crosspoint`, `sleep*`, `font*`, `dictionaries`, `exports` during scan
 - **Zero-size thumbnail cleanup** — periodic (once/day) removal of corrupted cover files
+
+#### Heap Optimizations (v1.3.0.35)
+
+- 🧠 **Font decompressor lazy init** — the 48 KB pool (4 page buffers + 32 KB inflate ring buffer) is no longer allocated at boot. Most rendering uses SD-card fonts (pre-decompressed), and the decompressor only initialises when a compressed font group is actually needed. Saves ~48 KB of heap from boot until first use.
+- 🗑️ **GfxRenderer freeUnusedRenderMemory()** — new public method that releases BW grayscale buffer chunks (up to 48 KB), rowBuf_, and polyBuf_. Called before cover generation and screensaver to maximise contiguous heap.
+- 📚 **LibraryActivity background memory release** — when a reader or screensaver is pushed on top of the library, the library releases its entry vectors (30–60 KB), page title cache, and cover state. Data is reloaded automatically when the library becomes active again.
+- 🔄 **LibraryCache vector capacity retained** — removed `shrink_to_fit()` calls in `sync()` and `scan()`. Keeping capacity reduces reallocation churn and heap fragmentation during repeated scans.
+- 📉 **Lowered heap guards for cover generation** — relaxed the minimum MaxAllocHeap / FreeHeap thresholds for EPUB cover creation (from 32/28 KB to 28/24 KB), allowing cover generation in tighter memory conditions.
+- 🚀 **Full CPU speed during cover generation** — `HalPowerManager::Lock` inserted in the library's cover-generation loop, forcing 160 MHz instead of 40 MHz low-power mode. Cover generation time reduced ~4×.
+
+#### PNG Decoder Stability (v1.3.0.35)
+
+- 🖼️ **Heap-safe PNG decoder** — the ~58 KB `PNG` object is allocated once on heap and kept alive for the entire screensaver session. Font caches and decompressor are freed before allocation so contiguous heap is maximised (up to +48 KB via `fontDecompressor.deinit()`).
+- 🚫 **No BSS, no arena, no reboot** — allocation uses plain `malloc()` with careful lifetime management; no permanent BSS overhead, no arena pool, no silent reboot tricks.
+- ♻️ **Release on exit** — `PngSleepRenderer::releaseDecoder()` frees the decoder when the screensaver exits, returning the heap to its pre-screensaver state.
+
+#### Screensaver & Image Handling (v1.3.0.35)
+
+- 🛡️ **Duplicate pushActivity guard** — repeated power-button double-push storms no longer overwrite the pending activity, preventing a crash race that previously triggered `abort()` inside the PNG decoder.
 - **Redundant `Storage.exists()` removal** — eliminated from the scan hot loop
 - **Heap exhaustion fix** — cover-generation loops now respect memory budget, preventing stuck-state hangs
 - **Corrupted favorite heart icon fix** — drawn at native 32×32 size instead of mismatch-scaled dimensions

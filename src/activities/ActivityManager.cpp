@@ -303,7 +303,7 @@ void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
     // happen when the power button is pressed multiple times in quick succession,
     // or when an activity requests a push while another push is already pending.
     if (pendingActivity->name == activity->name) {
-      LOG_INF("ACT", "Duplicate push of pending activity '%s', ignoring", activity->name.c_str());
+      //LOG_INF("ACT", "Duplicate push of pending activity '%s', ignoring", activity->name.c_str());
       return;
     }
     LOG_ERR("ACT", "pendingActivity while pushActivity is not expected");

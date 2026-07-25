@@ -905,8 +905,13 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
         renderer.getScreenWidth() - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
 
     const int leftContentWidth = timeLeftEndX - metrics.statusBarHorizontalMargin - orientedMarginLeft;
-    const int titleMarginLeft = leftContentWidth + 10;
-    const int titleMarginRight = progressTextWidth + 30;
+    int titleMarginLeft = leftContentWidth + 15;
+    int titleMarginRight = progressTextWidth + 30;
+
+    // Ensure the left margin is never smaller than the battery+time-left area
+    // plus a safety gap, even when the centering logic tries to shrink it.
+    const int minTitleLeft = leftContentWidth + 8;
+    if (titleMarginLeft < minTitleLeft) titleMarginLeft = minTitleLeft;
 
     // Attempt to center title on the screen, but if title is too wide then later we will center it within the
     // available space.

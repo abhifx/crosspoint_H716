@@ -1,7 +1,6 @@
 #include "LibraryCache.h"
 
 #include <Bitmap.h>
-#include <Epub.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -227,42 +226,14 @@ bool generateCoverForBook(const std::string& path, int coverW, int coverH) {
   if (FsHelpers::hasEpubExtension(path)) {
     if (ESP.getMaxAllocHeap() < 28 * 1024 || ESP.getFreeHeap() < 24 * 1024) return false;
     
-    // 1. Primo tentativo: estrattore leggero ZIP-only (nessun expat, nessun book.bin)
-    if (EpubParser::generateCover(path, coverW, coverH)) return true;
-
-    // 2. Fallback: generazione stile HomeActivity (parser completo)
-    Epub epub(path, "/.crosspoint");
-    if (epub.load(true, true)) {
-      yield();
-      esp_task_wdt_reset();
-      
-      // Ricontrolla l'heap dopo il caricamento, poiché il parsing OPF/TOC può frammentarlo
-      if (ESP.getMaxAllocHeap() < 28 * 1024) {
-        LOG_DBG("BSC", "EPUB SKIP post-load (low heap): maxA=%u", ESP.getMaxAllocHeap());
-        return false;
-      }
-
-      const bool genOk = epub.generateThumbBmp(coverW, coverH);
-      if (genOk) {
-        // VALIDAZIONE OBBLIGATORIA: verifica che il file sia stato scritto correttamente
-        const std::string epubThumbPath = epub.getThumbBmpPath();
-        FsFile file;
-        bool isValid = false;
-        if (!epubThumbPath.empty() && Storage.openFileForRead("LIB", epubThumbPath, file)) {
-          Bitmap bmp(file);
-          isValid = (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0);
-          file.close();
-        }
-        
-        if (!isValid) {
-          LOG_DBG("BSC", "EPUB fallback generated invalid cover, removing: %s", epubThumbPath.c_str());
-          if (!epubThumbPath.empty()) Storage.remove(epubThumbPath.c_str());
-          return false;
-        }
-        return true;
-      }
-    }
-    return false;
+    // Fast ZIP-only cover extraction — no expat, no book.bin, no cache write.
+    // Covers are generated directly from the EPUB ZIP by:
+    //   1. Reading META-INF/container.xml to find content.opf path
+    //   2. Parsing OPF XML for cover image ID (meta name="cover" or properties="cover-image")
+    //   3. Extracting the cover image (JPEG/PNG) from ZIP and converting to 1-bit BMP thumbnail
+    // This avoids the heavy Epub::load() parser which creates book.bin,
+    // parses TOC/CSS, and fragments heap with expat buffers.
+    return EpubParser::generateCover(path, coverW, coverH);
   }
   
   if (FsHelpers::hasXtcExtension(path)) {

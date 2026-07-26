@@ -393,7 +393,7 @@ void LibraryActivity::openSortPopup() {
     {StrId::STR_SORT_AUTHOR_DESC, SortDescIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC},
     {StrId::STR_SORT_PROGRESS, TimeFastIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_PROGRESS},
   };
-  for (int i = 0; i < 6; ++i) {
+  for (int i = 0; i < 5; ++i) {
     PopupItem item;
     item.label = I18N.get(sorts[i].id);
     item.icon = sorts[i].icon;

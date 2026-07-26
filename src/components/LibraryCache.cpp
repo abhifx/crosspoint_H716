@@ -1,20 +1,17 @@
 #include "LibraryCache.h"
 
-#include <Bitmap.h>
+#include <ArduinoJson.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <MemoryBudget.h>
-#include <CoverDebugLog.h>
 #include <HomepageDebugLog.h>
 #include <Txt.h>
 #include <Xtc.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
-#include <cstdint>
 
 #include "components/UITheme.h"
 #include "EpubParser.h"
@@ -22,8 +19,8 @@
 namespace LibraryCache {
 
 namespace {
-constexpr const char* kCacheFile = "/.crosspoint/library.bin";
-constexpr uint8_t kVersion = 2;
+constexpr const char* kIndexFile = "/.crosspoint/library_index.json";
+constexpr uint8_t kIndexVersion = 1;
 constexpr int kProgressUpdateInterval = 2;
 
 struct ScanRecord {
@@ -78,33 +75,39 @@ void emitProgress(GfxRenderer& renderer, const Rect& popupRect, int processed, i
   UITheme::getInstance().getTheme().fillPopupProgress(renderer, popupRect, pct);
 }
 
-bool writeU8(HalFile& file, uint8_t value) { return file.write(&value, 1) == 1; }
-bool writeU16(HalFile& file, uint16_t value) {
-  const uint8_t buf[2] = {static_cast<uint8_t>(value & 0xff), static_cast<uint8_t>(value >> 8)};
-  return file.write(buf, 2) == 2;
-}
-bool writeString(HalFile& file, const std::string& s) {
-  const size_t len = s.size();
-  if (len > 0xffff) return false;
-  if (!writeU16(file, static_cast<uint16_t>(len))) return false;
-  if (len == 0) return true;
-  return file.write(s.data(), len) == static_cast<int>(len);
-}
-bool readU8(HalFile& file, uint8_t& out) { return file.read(&out, 1) == 1; }
-bool readU16(HalFile& file, uint16_t& out) {
-  uint8_t buf[2];
-  if (file.read(buf, 2) != 2) return false;
-  out = static_cast<uint16_t>(buf[0]) | (static_cast<uint16_t>(buf[1]) << 8);
+// ---- Metadata extraction (shared by sync and scan) ----
+
+bool extractBookMetadata(ScanRecord& rec) {
+  rec.title.clear(); rec.author.clear();
+  if (rec.path.empty() || rec.path[0] != '/') return false;
+
+  HalFile stat = Storage.open(rec.path.c_str());
+  if (!stat || stat.isDirectory() || stat.size() == 0) { if (stat) stat.close(); return false; }
+  stat.close();
+
+  if (FsHelpers::hasEpubExtension(rec.path)) {
+    EpubParser::extractMetadata(rec.path, "/.crosspoint", rec.title, rec.author);
+  } else if (FsHelpers::hasXtcExtension(rec.path)) {
+    if (ESP.getFreeHeap() < 20000) return false;
+    Xtc xtc(rec.path, "/.crosspoint");
+    if (xtc.load()) { rec.title = xtc.getTitle(); rec.author = xtc.getAuthor(); }
+  } else if (FsHelpers::hasTxtExtension(rec.path) || FsHelpers::hasMarkdownExtension(rec.path)) {
+    if (ESP.getFreeHeap() < 16000) return false;
+    Txt txt(rec.path, "/.crosspoint");
+    if (txt.load()) rec.title = txt.getTitle();
+  }
+
+  if (rec.title.empty()) {
+    const auto slash = rec.path.find_last_of('/');
+    const auto dot = rec.path.find_last_of('.');
+    const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+    const size_t end = (dot == std::string::npos || dot < start) ? rec.path.size() : dot;
+    rec.title = rec.path.substr(start, end - start);
+  }
   return true;
 }
-bool readString(HalFile& file, std::string& out) {
-  uint16_t len = 0;
-  if (!readU16(file, len)) return false;
-  out.clear();
-  if (len == 0) return true;
-  out.resize(len);
-  return file.read(out.data(), len) == static_cast<int>(len);
-}
+
+// ---- Book enumeration (DFS walk) ----
 
 void enumerateBooks(std::vector<std::string>& outPaths, const char* rootDir, int maxBooks) {
   std::string root = rootDir ? rootDir : "";
@@ -122,9 +125,9 @@ void enumerateBooks(std::vector<std::string>& outPaths, const char* rootDir, int
 
   int dirCount = 0;
   while (!worklist.empty() && static_cast<int>(outPaths.size()) < maxBooks) {
-    const std::string folder = std::move(worklist.back());
+    std::string folder = std::move(worklist.back());
     worklist.pop_back();
-    const uint8_t folderDepth = depth.back();
+    uint8_t folderDepth = depth.back();
     depth.pop_back();
 
     if ((++dirCount & 0x7) == 0) { yield(); esp_task_wdt_reset(); }
@@ -169,39 +172,9 @@ void enumerateBooks(std::vector<std::string>& outPaths, const char* rootDir, int
   }
 }
 
-bool extractBookMetadata(ScanRecord& rec) {
-  rec.title.clear(); rec.author.clear();
-  if (rec.path.empty() || rec.path[0] != '/') return false;
-  
-  HalFile stat = Storage.open(rec.path.c_str());
-  if (!stat || stat.isDirectory() || stat.size() == 0) { if (stat) stat.close(); return false; }
-  stat.close();
+}  // namespace
 
-  if (FsHelpers::hasEpubExtension(rec.path)) {
-    if (!EpubParser::extractMetadata(rec.path, "/.crosspoint", rec.title, rec.author)) {
-      // Fallback handled by caller or empty title
-    }
-  } else if (FsHelpers::hasXtcExtension(rec.path)) {
-    if (ESP.getFreeHeap() < 20000) return false;
-    Xtc xtc(rec.path, "/.crosspoint");
-    if (xtc.load()) { rec.title = xtc.getTitle(); rec.author = xtc.getAuthor(); }
-  } else if (FsHelpers::hasTxtExtension(rec.path) || FsHelpers::hasMarkdownExtension(rec.path)) {
-    if (ESP.getFreeHeap() < 16000) return false;
-    Txt txt(rec.path, "/.crosspoint");
-    if (txt.load()) rec.title = txt.getTitle();
-  }
-
-  if (rec.title.empty()) {
-    const auto slash = rec.path.find_last_of('/');
-    const auto dot = rec.path.find_last_of('.');
-    const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
-    const size_t end = (dot == std::string::npos || dot < start) ? rec.path.size() : dot;
-    rec.title = rec.path.substr(start, end - start);
-  }
-  return true;
-}
-
-} // namespace
+// ---- Public API ----
 
 std::string thumbPathFor(const std::string& path, int coverW, int coverH) {
   const auto hash = static_cast<unsigned long long>(std::hash<std::string>{}(path));
@@ -216,136 +189,84 @@ std::string thumbPathFor(const std::string& path, int coverW, int coverH) {
   return buf;
 }
 
-// ============================================================================
-// FIX CRITICO: Allineamento totale al sistema di failover di HomeActivity
-// ============================================================================
-bool generateCoverForBook(const std::string& path, int coverW, int coverH) {
-  yield(); esp_task_wdt_reset();
-    if (ESP.getMaxAllocHeap() < 40 * 1024 || ESP.getFreeHeap() < 32 * 1024) {
-      LOG_DBG("LIB", "Cover: SKIP low heap maxA=%u free=%u path=%s", ESP.getMaxAllocHeap(), ESP.getFreeHeap(), path.c_str());
-      return false;
-    }
+bool exists() { return Storage.exists(kIndexFile); }
 
-  if (FsHelpers::hasEpubExtension(path)) {
-    if (ESP.getMaxAllocHeap() < 28 * 1024 || ESP.getFreeHeap() < 24 * 1024) {
-      LOG_DBG("LIB", "Cover: SKIP EPUB low heap maxA=%u free=%u path=%s", ESP.getMaxAllocHeap(), ESP.getFreeHeap(), path.c_str());
-      return false;
-    }
-    
-    // Fast ZIP-only cover extraction — no expat, no book.bin, no cache write.
-    // Covers are generated directly from the EPUB ZIP by:
-    //   1. Reading META-INF/container.xml to find content.opf path
-    //   2. Parsing OPF XML for cover image ID (meta name="cover" or properties="cover-image")
-    //   3. Extracting the cover image (JPEG/PNG) from ZIP and converting to 1-bit BMP thumbnail
-    // This avoids the heavy Epub::load() parser which creates book.bin,
-    // parses TOC/CSS, and fragments heap with expat buffers.
-    const bool ok = EpubParser::generateCover(path, coverW, coverH);
-    if (!ok) LOG_DBG("LIB", "Cover: EPUB ZIP gen FAILED path=%s", path.c_str());
-    return ok;
-  }
-  
-  if (FsHelpers::hasXtcExtension(path)) {
-    if (ESP.getFreeHeap() < 20000) {
-      LOG_DBG("LIB", "Cover: SKIP XTC low heap free=%u path=%s", ESP.getFreeHeap(), path.c_str());
-      return false;
-    }
-
-    // Lambda per tentativo di generazione con validazione
-    auto tryXtc = [&]() -> bool {
-      Xtc xtc(path, "/.crosspoint");
-      if (!xtc.load()) { LOG_DBG("LIB", "Cover: XTC load FAILED path=%s", path.c_str()); return false; }
-      if (!xtc.generateThumbBmp(coverW, coverH)) { LOG_DBG("LIB", "Cover: XTC gen FAILED path=%s", path.c_str()); return false; }
-      
-      const std::string xtcThumbPath = xtc.getThumbBmpPath();
-      FsFile file;
-      bool isValid = false;
-      if (!xtcThumbPath.empty() && Storage.openFileForRead("LIB", xtcThumbPath, file)) {
-        Bitmap bmp(file);
-        isValid = (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0);
-        file.close();
-      }
-      if (!isValid && !xtcThumbPath.empty()) {
-        Storage.remove(xtcThumbPath.c_str());
-      }
-      return isValid;
-    };
-
-    // Primo tentativo
-    if (tryXtc()) return true;
-    
-    // Fallback: riprova con un'istanza fresca in caso di frammentazione temporanea dell'heap
-    if (tryXtc()) return true;
-    
-    return false;
-  }
-  
-  if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
-    if (ESP.getFreeHeap() < 16000) return false;
-    Txt txt(path, "/.crosspoint");
-    if (txt.load() && txt.generateCoverBmp()) {
-      const std::string txtCoverPath = txt.getCoverBmpPath();
-      FsFile file;
-      bool isValid = false;
-      if (!txtCoverPath.empty() && Storage.openFileForRead("LIB", txtCoverPath, file)) {
-        Bitmap bmp(file);
-        isValid = (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0);
-        file.close();
-      }
-      if (!isValid && !txtCoverPath.empty()) {
-        Storage.remove(txtCoverPath.c_str());
-      }
-      return isValid;
-    }
-    return false;
-  }
-  
-  return false;
-}
-
-bool exists() { return Storage.exists(kCacheFile); }
+// ---- JSON index persistence ----
 
 bool load(std::vector<Entry>& out) {
   out.clear();
   HalFile file;
-  if (!Storage.openFileForRead("BSC", kCacheFile, file)) return false;
+  if (!Storage.openFileForRead("LIB", kIndexFile, file)) return false;
 
-  uint8_t version = 0;
-  if (!readU8(file, version) || version != kVersion) { file.close(); return false; }
+  const size_t fsize = file.size();
+  if (fsize == 0 || fsize > 512 * 1024) { file.close(); return false; }
 
-  uint16_t count = 0;
-  if (!readU16(file, count)) { file.close(); return false; }
-
-  out.reserve(count);
-  for (uint16_t i = 0; i < count; ++i) {
-    Entry entry;
-    if (!readString(file, entry.path) || !readString(file, entry.title) || !readString(file, entry.author)) {
-      file.close(); out.clear(); return false;
-    }
-    if (!entry.path.empty()) out.push_back(std::move(entry));
-  }
+  std::string json;
+  json.resize(fsize);
+  if (file.read(json.data(), fsize) != static_cast<int>(fsize)) { file.close(); return false; }
   file.close();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) {
+    LOG_ERR("LIB", "Index JSON parse error: %s", err.c_str());
+    return false;
+  }
+
+  uint8_t version = doc["version"] | (uint8_t)0;
+  if (version != kIndexVersion) {
+    LOG_ERR("LIB", "Index version mismatch: got %u, expected %u", version, kIndexVersion);
+    return false;
+  }
+
+  JsonArray arr = doc["books"].as<JsonArray>();
+  out.reserve(arr.size());
+  for (JsonObject obj : arr) {
+    Entry e;
+    e.path = obj["path"] | std::string("");
+    e.title = obj["title"] | std::string("");
+    e.author = obj["author"] | std::string("");
+    if (!e.path.empty()) out.push_back(std::move(e));
+  }
+
+  LOG_DBG("LIB", "Loaded %u entries from JSON index", out.size());
   return true;
 }
 
 bool save(const std::vector<Entry>& entries) {
   Storage.mkdir("/.crosspoint");
+
+  JsonDocument doc;
+  doc["version"] = kIndexVersion;
+  JsonArray arr = doc["books"].to<JsonArray>();
+  for (const auto& e : entries) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["path"] = e.path;
+    obj["title"] = e.title;
+    obj["author"] = e.author;
+  }
+
+  std::string json;
+  serializeJson(doc, json);
+
   HalFile file;
-  if (!Storage.openFileForWrite("BSC", kCacheFile, file)) return false;
-
-  const size_t count = std::min<size_t>(entries.size(), 0xffff);
-  if (!writeU8(file, kVersion) || !writeU16(file, static_cast<uint16_t>(count))) { file.close(); return false; }
-
-  for (size_t i = 0; i < count; ++i) {
-    if (!writeString(file, entries[i].path) || !writeString(file, entries[i].title) || !writeString(file, entries[i].author)) {
-      file.close(); return false;
-    }
+  if (!Storage.openFileForWrite("LIB", kIndexFile, file)) {
+    LOG_ERR("LIB", "Failed to open index for write");
+    return false;
+  }
+  if (file.write(json.data(), json.size()) != static_cast<int>(json.size())) {
+    LOG_ERR("LIB", "Failed to write index");
+    file.close();
+    return false;
   }
   file.close();
+
+  LOG_DBG("LIB", "Saved %u entries to JSON index (%u bytes)", entries.size(), json.size());
   return true;
 }
 
 void invalidate() {
-  if (Storage.exists(kCacheFile)) Storage.remove(kCacheFile);
+  if (Storage.exists(kIndexFile)) Storage.remove(kIndexFile);
 }
 
 bool removeBook(const std::string& path) {
@@ -357,6 +278,8 @@ bool removeBook(const std::string& path) {
   entries.erase(it);
   return save(entries);
 }
+
+// ---- Sync (incremental, based on cached index) ----
 
 bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
   out.clear();
@@ -383,10 +306,11 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
   std::vector<ScanRecord> records;
   records.reserve(std::min<int>(static_cast<int>(cached.size()) + 16, maxBooks));
 
-  int removed = 0, added = 0, kept = 0, sdFileCount = 0, dirCount = 0;
+  int removed = 0, added = 0, kept = 0, dirCount = 0;
 
   auto cachedIndexForPath = [&cached](const std::string& path) -> int {
-    const auto it = std::lower_bound(cached.begin(), cached.end(), path, [](const Entry& e, const std::string& p) { return e.path < p; });
+    auto it = std::lower_bound(cached.begin(), cached.end(), path,
+                               [](const Entry& e, const std::string& p) { return e.path < p; });
     if (it != cached.end() && it->path == path) return static_cast<int>(it - cached.begin());
     return -1;
   };
@@ -395,9 +319,9 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
   int loopIter = 0;
 
   while (!worklist.empty() && static_cast<int>(records.size()) < maxBooks) {
-    const std::string folder = std::move(worklist.back());
+    std::string folder = std::move(worklist.back());
     worklist.pop_back();
-    const uint8_t folderDepth = depth.back();
+    uint8_t folderDepth = depth.back();
     depth.pop_back();
 
     if ((++dirCount & 0x7) == 0) { yield(); esp_task_wdt_reset(); }
@@ -435,7 +359,6 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
           !FsHelpers::hasTxtExtension(filename) && !FsHelpers::hasMarkdownExtension(filename)) continue;
       if (std::strcmp(name, "if_found.txt") == 0 || std::strcmp(name, "crash_report.txt") == 0) continue;
 
-      ++sdFileCount;
       const int ci = cachedIndexForPath(childPath);
       if (ci >= 0) {
         cachedMatched[ci] = true;
@@ -466,6 +389,8 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
     if (!cachedMatched[i]) ++removed;
   }
 
+  HOMEPAGE_LOG("LIB", "sync: %d entries (added=%d removed=%d kept=%d)", records.size(), added, removed, kept);
+
   if (removed == 0 && added == 0) {
     out.swap(cached);
     return true;
@@ -482,6 +407,8 @@ bool sync(std::vector<Entry>& out, const char* rootDir, int maxBooks) {
 
   return save(out);
 }
+
+// ---- Full scan (cold path with progress popup) ----
 
 bool scan(GfxRenderer& renderer, const Rect& popupRect, std::vector<Entry>& out, const char* rootDir, int maxBooks) {
   out.clear();
@@ -536,4 +463,4 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, std::vector<Entry>& out,
   return save(out);
 }
 
-} // namespace LibraryCache
+}  // namespace LibraryCache

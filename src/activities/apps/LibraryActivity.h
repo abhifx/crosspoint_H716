@@ -7,28 +7,18 @@
 #include "CrossPointSettings.h"
 #include "components/LibraryCache.h"
 #include "components/LibraryPopupOverlay.h"
-#include "util/ButtonNavigator.h"
 
 class LibraryActivity final : public Activity {
  private:
   int selectorIndex_ = 0;
   std::vector<LibraryCache::Entry> entries_;
   std::vector<LibraryCache::Entry> unfilteredEntries_;
-  int coverGenIndex_ = -1;
-  bool coversComplete_ = false;
-  int coverPassCount_ = 0;  // number of full indexing passes attempted on the current page
-  uint64_t coverGeneratedMask_ = 0;  // bitmask of slots already generated this page pass
-  int coverGenRenderBatch_ = 0;      // count of covers generated since last render
-  static constexpr int kCoverRenderBatchEvery = 1;  // render every N covers (1 = per-cover, 2 = every other, etc.)
-  static constexpr int kMaxCoverPasses = 2;  // give up after this many passes; failed covers fall back to placeholder
   int lastPage_ = -1;
   mutable int lastRenderedPage_ = -1;
   mutable int lastRenderedSelectorIndex_ = -1;
-  mutable bool lastRenderedCoversComplete_ = false;  // avoids redundant redraws during indexing
   mutable bool forceRender_ = true;
 
-  // Render cache: header info / selected title are rebuilt only when their
-  // inputs change, keeping render allocation-free during per-page indexing.
+  // Render cache
   std::string cachedInfo_;
   std::string cachedSelTitle_;
   std::string cachedSelAuthor_;
@@ -37,14 +27,9 @@ class LibraryActivity final : public Activity {
   CrossPointSettings::LIBRARY_FILTER cachedInfoFilter_ = CrossPointSettings::LIBRARY_FILTER_ALL;
   CrossPointSettings::LIBRARY_SORT cachedInfoSort_ = CrossPointSettings::LIBRARY_SORT_TITLE_ASC;
   std::string cachedInfoSearch_;
-  // Wrapped cover-title lines for the currently rendered page (at most
-  // gridsPerPage_ entries). Built once per page change so the render loop does
-  // not allocate during per-page cover indexing. Keyed by pageStart.
   std::vector<std::vector<std::string>> pageTitleCache_;
   int pageTitleCacheKey_ = -1;
 
-  // Tracks which tile currently has the visible selection border on screen.
-  // Set to -1 at startup (no border) and updated on every cursor move in loop().
   int prevBorderIdx_ = -1;
 
   int coverWidth_ = 100;
@@ -58,18 +43,14 @@ class LibraryActivity final : public Activity {
   std::string currentSearchText_;
   uint8_t lastLayoutSetting_ = CrossPointSettings::LIBRARY_LAYOUT_4X4;
 
-  // Popup state
   enum class PopupMode { None, Sort, Filter };
   PopupMode popupMode_ = PopupMode::None;
   LibraryPopupOverlay popupOverlay_;
 
-  // Long-press tracking for Up/Down
   bool upHeld_ = false;
   bool upLongTriggered_ = false;
   bool downHeld_ = false;
   bool downLongTriggered_ = false;
-  // Button whose long-press spawned the active popup (ordinal, or -1 when
-  // none); its release is consumed so it does not also move the popup selection.
   int popupSpawnButton_ = -1;
   static constexpr unsigned long kLongPressMs = 800;
 
@@ -77,13 +58,7 @@ class LibraryActivity final : public Activity {
   void ensureLayoutUpToDate();
   void scanSd();
   void applyFilterAndSort();
-  // Checks the thumbnail file + the current-page generation mask directly.
-  // `slot` is the zero-based position within the current page (pageStart-relative).
-  bool isBookCoverReady(const std::string& path, size_t slot) const;
-  // Draw the content of grid cell `i` (cover thumbnail, or placeholder with
-  // wrapped title + ribbon badge) at pixel (x, y). Does NOT draw the selection
-  // border — callers add that afterwards. Shared by the full grid redraw and
-  // the incremental selector-move path (P3) so both produce identical tiles.
+  bool isBookCoverReady(const std::string& path) const;
   void drawTileContent(int i, int pageStart, int x, int y) const;
   void deleteLibraryCovers(const std::string& bookPath);
   void deletePageCovers();

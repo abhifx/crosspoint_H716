@@ -2,21 +2,16 @@
 
 #include <Arduino.h>
 #include <esp_task_wdt.h>
-#include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <CoverDebugLog.h>
 #include <HomepageDebugLog.h>
-#include <FontCacheManager.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <functional>
 #include <numeric>
 #include <vector>
 
@@ -217,8 +212,6 @@ void LibraryActivity::onEnter() {
 
   applyLayoutFromSettings();
   selectorIndex_ = 0;
-  coverGenIndex_ = -1;
-  coversComplete_ = false;
   lastPage_ = 0;
   lastRenderedPage_ = -1;
   forceRender_ = true;
@@ -240,8 +233,6 @@ void LibraryActivity::ensureLayoutUpToDate() {
   if (SETTINGS.libraryLayout != lastLayoutSetting_) {
     applyLayoutFromSettings();
     lastLayoutSetting_ = SETTINGS.libraryLayout;
-    coversComplete_ = false;
-    coverGenIndex_ = -1;
     lastPage_ = selectorIndex_ / gridsPerPage_;
     forceRender_ = true;
   }
@@ -271,9 +262,6 @@ void LibraryActivity::freeBackgroundMemory() {
   cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
   cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
   cachedInfoSearch_.clear();
-  coverGeneratedMask_ = 0;
-  coversComplete_ = false;
-  coverGenIndex_ = -1;
 }
 
 
@@ -432,8 +420,6 @@ void LibraryActivity::applyFilterAndSort() {
   }
 
   selectorIndex_ = 0;
-  coversComplete_ = false;
-  coverGenIndex_ = -1;
   lastPage_ = 0;
   pageTitleCacheKey_ = -1;
   cachedRenderSelector_ = -1;
@@ -449,30 +435,23 @@ void LibraryActivity::applyFilterAndSort() {
 // SECTION 4: Cover generation — one thumb per frame, blocks input
 // ============================================================================
 
-bool LibraryActivity::isBookCoverReady(const std::string& path, size_t slot) const {
+bool LibraryActivity::isBookCoverReady(const std::string& path) const {
   const std::string tp = LibraryCache::thumbPathFor(path, coverWidth_, coverHeight_);
-  if (!tp.empty() && Storage.exists(tp.c_str())) {
-    FsFile file;
-    if (Storage.openFileForRead("LIB", tp, file)) {
-      if (file.size() > 0) {
-        Bitmap bmp(file);
-        const auto err = bmp.parseHeaders();
-        if (err == BmpReaderError::Ok &&
-            bmp.getWidth() > 0 && bmp.getHeight() > 0) {
-          file.close();
-          return true;
-        }
-        LOG_DBG("LIB", "Cover: BMP corrupt slot=%zu err=%d w=%d h=%d size=%u path=%s",
-                slot, static_cast<int>(err), bmp.getWidth(), bmp.getHeight(), file.size(), tp.c_str());
-      } else {
-        LOG_DBG("LIB", "Cover: BMP empty slot=%zu size=0 path=%s", slot, tp.c_str());
-      }
-      file.close();
-    }
+  if (tp.empty() || !Storage.exists(tp.c_str())) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("LIB", tp, file)) {
     Storage.remove(tp.c_str());
+    return false;
   }
-  if (slot < 64 && (coverGeneratedMask_ & (uint64_t{1} << slot))) return true;
-  return false;
+  if (file.size() == 0) { file.close(); Storage.remove(tp.c_str()); return false; }
+  Bitmap bmp(file);
+  const auto err = bmp.parseHeaders();
+  file.close();
+  if (err != BmpReaderError::Ok || bmp.getWidth() <= 0 || bmp.getHeight() <= 0) {
+    Storage.remove(tp.c_str());
+    return false;
+  }
+  return true;
 }
 
 
@@ -659,138 +638,12 @@ void LibraryActivity::loop() {
   ensureLayoutUpToDate();
 
   // ---- Cover generation (blocks input while running) ----------------------
-  if (!coversComplete_ && total > 0) {
-    const int pageStart = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
-    const int pageCount = std::min(gridsPerPage_, total - pageStart);
-
-    if (coverGenIndex_ < 0) {
-      // Let navigation take priority if user pressed a button.
-      if (mappedInput.wasPressed(MappedInputManager::Button::Left) ||
-          mappedInput.wasPressed(MappedInputManager::Button::Right) ||
-          mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-          mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-          mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-        return;
-      }
-      coverGeneratedMask_ = 0;
-      coverPassCount_ = 0;
-      coverGenRenderBatch_ = 0;
-
-      // Fast path: if every slot already has its thumb on disk, skip the
-      // one-slot-per-frame pass that would otherwise freeze navigation.
-      bool allReady = true;
-      for (int s = 0; s < pageCount && allReady; ++s) {
-        if (!isBookCoverReady(entries_[pageStart + s].path, static_cast<size_t>(s))) allReady = false;
-      }
-      if (allReady) {
-        COVER_LOG("LIB", "Covers: ALL READY pageStart=%d pageCount=%d", pageStart, pageCount);
-        coversComplete_ = true;
-        coverGenIndex_ = -1;
-        coverGeneratedMask_ = 0;
-        coverGenRenderBatch_ = 0;
-        cachedRenderSelector_ = -1;
-        cachedRenderPage_ = -1;
-        cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
-        cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
-        cachedInfoSearch_.clear();
-        forceRender_ = true;
-        requestUpdate();
-        return;
-      }
-
-      const uint32_t freeBefore = ESP.getFreeHeap();
-      const uint32_t maxABefore = ESP.getMaxAllocHeap();
-      LOG_DBG("LIB", "Covers: pass#%d START pageStart=%d pageCount=%d free=%u maxA=%u",
-              coverPassCount_, pageStart, pageCount, freeBefore, maxABefore);
-
-      forceRender_ = true;
-      requestUpdate();
-      coverGenIndex_ = 0;
-      return;
-    }
-
-    // End-of-pass check: are there still missing covers?
-    if (coverGenIndex_ >= pageCount) {
-      bool stillMissing = false;
-      for (int slot = 0; slot < pageCount && !stillMissing; ++slot) {
-        if (!isBookCoverReady(entries_[pageStart + slot].path, static_cast<size_t>(slot))) stillMissing = true;
-      }
-      COVER_LOG("LIB", "Cover: pass#%d DONE stillMissing=%d (free=%u)",
-                coverPassCount_ + 1, stillMissing, ESP.getFreeHeap());
-      LOG_DBG("LIB", "Covers: pass#%d DONE stillMissing=%d free=%u maxA=%u",
-              coverPassCount_ + 1, stillMissing, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      if (!stillMissing || ++coverPassCount_ >= kMaxCoverPasses) {
-        COVER_LOG("LIB", "Cover: pass#%d COMPLETE (stillMissing=%d budgetExceeded=%d)",
-                  coverPassCount_, stillMissing, coverPassCount_ >= kMaxCoverPasses);
-        coversComplete_ = true;
-        coverGenIndex_ = -1;
-        coverGeneratedMask_ = 0;
-        coverGenRenderBatch_ = 0;
-        lastRenderedCoversComplete_ = true;
-        cachedRenderSelector_ = -1;
-        cachedRenderPage_ = -1;
-        cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
-        cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
-        cachedInfoSearch_.clear();
-        if (coverGeneratedMask_ != 0) {
-          forceRender_ = true;
-          requestUpdate();
-        }
-        return;
-      }
-      coverGenIndex_ = 0;
-    }
-
-    // Process one slot per frame.
-    const int slot = coverGenIndex_;
-    const int idx = pageStart + slot;
-    const bool ready = isBookCoverReady(entries_[idx].path, static_cast<size_t>(slot));
-
-    if (!ready) {
-      yield();
-      esp_task_wdt_reset();
-      COVER_LOG("LIB", "Cover: slot=%d idx=%d gen... path=%s free=%u maxA=%u",
-                slot, idx, entries_[idx].path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-
-      // Force CPU to normal frequency during cover generation (JPEG/PNG
-      // decoding is extremely slow at 40 MHz low-power mode).
-      HalPowerManager::Lock powerLock;
-
-      // Free render buffers and font caches so the cover decoder gets more
-      // contiguous heap (BW grayscale chunks, row/poly vectors, glyph cache).
-      renderer.freeUnusedRenderMemory();
-      if (auto* fcm = renderer.getFontCacheManager()) {
-        fcm->clearCache();
-      }
-      cachedInfo_.clear();
-      cachedInfo_.shrink_to_fit();
-      cachedSelTitle_.clear();
-      cachedSelTitle_.shrink_to_fit();
-
-      vTaskDelay(1);
-      const bool genOk = LibraryCache::generateCoverForBook(entries_[idx].path, coverWidth_, coverHeight_);
-      const bool slotOk = slot < 64;
-      LOG_DBG("LIB", "Cover: slot=%d gen=%d slotOk=%d free=%u maxA=%u path=%s",
-              slot, genOk, slotOk, ESP.getFreeHeap(), ESP.getMaxAllocHeap(), entries_[idx].path.c_str());
-      // Mark slot as attempted (both success and failure) so we never retry
-      // a corrupt/broken file that would crash the ZIP reader on retry.
-      if (slotOk) {
-        coverGeneratedMask_ |= (uint64_t{1} << slot);
-      }
-      if (!genOk) {
-        LOG_DBG("LIB", "Cover: slot=%d FAILED (will not retry) path=%s", slot, entries_[idx].path.c_str());
-      }
-      forceRender_ = true;
-      coverGenRenderBatch_++;
-      if (coverGenRenderBatch_ >= kCoverRenderBatchEvery) {
-        coverGenRenderBatch_ = 0;
-        requestUpdate();
-      }
-    }
-
-    coverGenIndex_++;
-    return;
-  }
+  // *** DISABLED: cover generation has been removed from the library path.
+  // *** Only placeholders are shown. Covers generated by the Home screen
+  // *** reader (Epub::generateThumbBmp) are still picked up if they exist.
+  // *** This avoids memory pressure, corrupt-ZIP crashes, and O(n) heap
+  // *** fragmentation during library browsing.
+  // --------------------------------------------------------------------------
 
   // ---- Empty library state ------------------------------------------------
   if (total <= 0) {
@@ -867,13 +720,13 @@ void LibraryActivity::loop() {
                 }
                 case BookContextMenuActivity::MenuAction::DELETE_COVER_THUMB:
                   deleteLibraryCovers(path);
-                  coversComplete_ = false; coverGenIndex_ = -1; forceRender_ = true; requestUpdate(); return;
+                  forceRender_ = true; requestUpdate(); return;
                 case BookContextMenuActivity::MenuAction::DELETE_PAGE_COVER_THUMBS:
                   deletePageCovers();
-                  coversComplete_ = false; coverGenIndex_ = -1; forceRender_ = true; requestUpdate(); return;
+                  forceRender_ = true; requestUpdate(); return;
                 case BookContextMenuActivity::MenuAction::DELETE_ALL_LIBRARY_COVERS:
                   deleteAllLibraryCovers();
-                  coversComplete_ = false; coverGenIndex_ = -1; forceRender_ = true; requestUpdate(); return;
+                  forceRender_ = true; requestUpdate(); return;
                 default: forceRender_ = true; requestUpdate(); return;
               }
             });
@@ -930,8 +783,7 @@ void LibraryActivity::loop() {
       }
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
-        coversComplete_ = false; coverGenIndex_ = -1; coverPassCount_ = 0;
-        coverGeneratedMask_ = 0; lastPage_ = curPage;
+        lastPage_ = curPage;
         forceRender_ = true;
       }
       requestUpdate();
@@ -955,8 +807,7 @@ void LibraryActivity::loop() {
       }
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
-        coversComplete_ = false; coverGenIndex_ = -1; coverPassCount_ = 0;
-        coverGeneratedMask_ = 0; lastPage_ = curPage;
+        lastPage_ = curPage;
         forceRender_ = true;
       }
       requestUpdate();
@@ -984,8 +835,7 @@ void LibraryActivity::loop() {
   if (moved) {
     int curPage = selectorIndex_ / gridsPerPage_;
     if (curPage != lastPage_) {
-      coversComplete_ = false; coverGenIndex_ = -1; coverPassCount_ = 0;
-      coverGeneratedMask_ = 0; lastPage_ = curPage;
+      lastPage_ = curPage;
       forceRender_ = true;
     }
     requestUpdate();
@@ -1004,15 +854,14 @@ void LibraryActivity::render(RenderLock&&) {
 
   // ---- Early-out guard: nothing changed -----------------------------------
   if (!forceRender_ && popupMode_ == PopupMode::None &&
-      curPageRaw == lastRenderedPage_ && selectorIndex_ == lastRenderedSelectorIndex_ &&
-      coversComplete_ == lastRenderedCoversComplete_) {
+      curPageRaw == lastRenderedPage_ && selectorIndex_ == lastRenderedSelectorIndex_) {
     return;
   }
 
   // ---- PARTIAL RENDER: selection moved within same page -------------------
   // Only erases old border + title/author, draws new ones. No clearScreen().
   if (!forceRender_ && popupMode_ == PopupMode::None &&
-      curPageRaw == lastRenderedPage_ && coversComplete_ == lastRenderedCoversComplete_ &&
+      curPageRaw == lastRenderedPage_ &&
       selectorIndex_ != lastRenderedSelectorIndex_ && total > 0) {
 
       const auto pageWidth = renderer.getScreenWidth();
@@ -1141,25 +990,15 @@ void LibraryActivity::render(RenderLock&&) {
   const int totalPages = total > 0 ? (total + gridsPerPage_ - 1) / gridsPerPage_ : 0;
   const int curPage = total > 0 ? curPageRaw + 1 : 0;
 
-  COVER_LOG("LIB", "Render: start free=%u maxA=%u total=%d page=%d",
-            ESP.getFreeHeap(), ESP.getMaxAllocHeap(), total, curPage);
+  LOG_DBG("LIB", "Render: start free=%u maxA=%u total=%d page=%d",
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap(), total, curPage);
 
   // Header bar
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, nullptr, nullptr);
 
   if (total > 0) {
     char hdrBuf[32] = {};
-    if (!coversComplete_) {
-      const int pgStartI = (curPage - 1) * gridsPerPage_;
-      const int pgCountI = std::min(gridsPerPage_, total - pgStartI);
-      int missing = 0;
-      for (int i = 0; i < pgCountI; ++i) {
-        if (!isBookCoverReady(entries_[pgStartI + i].path, static_cast<size_t>(i))) missing++;
-      }
-      snprintf(hdrBuf, sizeof(hdrBuf), "covers %d/%d", pgCountI - missing, pgCountI);
-    } else {
-      snprintf(hdrBuf, sizeof(hdrBuf), "%d/%d (%d)", curPage, totalPages, total);
-    }
+    snprintf(hdrBuf, sizeof(hdrBuf), "%d/%d (%d)", curPage, totalPages, total);
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 6, hdrBuf, true,
                       EpdFontFamily::REGULAR);
   }
@@ -1326,11 +1165,8 @@ void LibraryActivity::render(RenderLock&&) {
 
   if (popupMode_ != PopupMode::None) popupOverlay_.render(renderer, pageWidth, pageHeight);
 
-  COVER_LOG("LIB", "Render: end free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-
   lastRenderedSelectorIndex_ = selectorIndex_;
   lastRenderedPage_ = curPageRaw;
-  lastRenderedCoversComplete_ = coversComplete_;
   prevBorderIdx_ = selectorIndex_;
 
   renderer.displayBuffer();

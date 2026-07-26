@@ -159,13 +159,13 @@ bool readRecord(uint32_t pos, Record& rec) {
 // Append one Record to library.dat.  Returns the new record position (index).
 // Returns UINT32_MAX on error.
 uint32_t appendRecord(const Record& rec) {
-  HalFile f = Storage.open(kDatFile);
+  Storage.mkdir(kLibDir);
+  // Open for write (O_WRONLY) so we can append. Use O_CREAT on first access.
+  HalFile f = Storage.open(kDatFile, O_WRONLY);
   if (!f) {
-    Storage.mkdir(kLibDir);
-    // First-time creation: use O_CREAT to create the file, then reopen for append.
     HalFile tmp = Storage.open(kDatFile, O_CREAT | O_WRONLY);
     if (tmp) tmp.close();
-    f = Storage.open(kDatFile);
+    f = Storage.open(kDatFile, O_WRONLY);
   }
   if (!f) return UINT32_MAX;
   const size_t currentSize = f.size();
@@ -440,7 +440,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
         if (!readRecord(rp, rec)) break;
         if (rec.id == old.id && !rec.tombstone()) {
           rec.setTombstone(true);
-          HalFile f = Storage.open(kDatFile);
+          HalFile f = Storage.open(kDatFile, O_WRONLY);
           if (f) { f.seek(rp * kRecordSize); f.write(reinterpret_cast<const uint8_t*>(&rec), kRecordSize); f.close(); }
           ++removed;
           break;

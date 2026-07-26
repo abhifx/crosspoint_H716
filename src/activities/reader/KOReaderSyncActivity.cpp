@@ -9,6 +9,8 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
+#include <cmath>
+
 #include "AchievementsStore.h"
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
@@ -27,6 +29,15 @@
 
 namespace {
 constexpr time_t NTP_RESYNC_MIN_INTERVAL_SEC = 15 * 60;
+
+std::string calculateDocumentHashForMethod(const std::string& path, const DocumentMatchMethod method) {
+  return method == DocumentMatchMethod::FILENAME ? KOReaderDocumentId::calculateFromFilename(path)
+                                                 : KOReaderDocumentId::calculate(path);
+}
+
+DocumentMatchMethod alternateMatchMethod(const DocumentMatchMethod method) {
+  return method == DocumentMatchMethod::FILENAME ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME;
+}
 
 void logSyncMemSnapshot(const char* stage) { NetworkMemory::logSnapshot("KOSync", stage); }
 
@@ -114,11 +125,10 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
 }
 
 void KOReaderSyncActivity::performSync() {
-  if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
-    documentHash = KOReaderDocumentId::calculateFromFilename(epubPath);
-  } else {
-    documentHash = KOReaderDocumentId::calculate(epubPath);
-  }
+  const DocumentMatchMethod primaryMethod = KOREADER_STORE.getMatchMethod();
+  const bool smartSync = KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART &&
+                         syncIntent == KOReaderSyncIntentState::COMPARE;
+  documentHash = calculateDocumentHashForMethod(epubPath, primaryMethod);
   if (documentHash.empty()) {
     {
       RenderLock lock(*this);
@@ -204,7 +214,25 @@ void KOReaderSyncActivity::performSync() {
     result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
   }
 
+  if (smartSync) {
+    const std::string alternateHash = calculateDocumentHashForMethod(epubPath, alternateMatchMethod(primaryMethod));
+    if (!alternateHash.empty() && alternateHash != documentHash) {
+      KOReaderProgress alternateProgress{};
+      const auto alternateResult = KOReaderSyncClient::getProgress(alternateHash, alternateProgress);
+      if (alternateResult == KOReaderSyncClient::OK &&
+          (result == KOReaderSyncClient::NOT_FOUND || alternateProgress.percentage > remoteProgress.percentage)) {
+        documentHash = alternateHash;
+        remoteProgress = std::move(alternateProgress);
+        result = KOReaderSyncClient::OK;
+      }
+    }
+  }
+
   if (result == KOReaderSyncClient::NOT_FOUND) {
+    if (smartSync) {
+      performUpload();
+      return;
+    }
     if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
       KOReaderSyncClient::endPersistentSession();
       wifiOff();
@@ -311,6 +339,29 @@ void KOReaderSyncActivity::performSync() {
     return;
   }
 
+  if (smartSync) {
+    static constexpr float SAME_PROGRESS_EPSILON = 0.001f;
+    const float delta = localProgress.percentage - remoteProgress.percentage;
+    if (std::fabs(delta) <= SAME_PROGRESS_EPSILON) {
+      wifiOff();
+      resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
+      return;
+    }
+    if (delta > 0.0f) {
+      performUpload();
+      return;
+    }
+    const SyncResult applied = {remotePosition.spineIndex,
+                                remotePosition.pageNumber,
+                                remotePosition.paragraphIndex,
+                                remotePosition.hasParagraphIndex,
+                                remotePosition.listItemIndex,
+                                remotePosition.hasListItemIndex};
+    wifiOff();
+    resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE, &applied);
+    return;
+  }
+
   releaseEpubForMapping();
 
   {
@@ -377,6 +428,18 @@ void KOReaderSyncActivity::performUpload() {
   progress.document = documentHash;
   progress.progress = localProgress.xpath;
   progress.percentage = localProgress.percentage;
+
+  if (KOREADER_STORE.getSendMetadata()) {
+    KOReaderMetadata metadata;
+    const auto lastSlash = epubPath.rfind('/');
+    metadata.filename = lastSlash == std::string::npos ? epubPath : epubPath.substr(lastSlash + 1);
+    if (ensureEpubLoadedForMapping()) {
+      metadata.title = epub->getTitle();
+      metadata.authors = epub->getAuthor();
+      releaseEpubForMapping();
+    }
+    progress.metadata = std::move(metadata);
+  }
 
   const auto result = KOReaderSyncClient::updateProgress(progress);
   KOReaderSyncClient::endPersistentSession();

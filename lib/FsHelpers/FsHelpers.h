@@ -11,6 +11,9 @@ std::string decodeUriEscapes(const std::string& path);
 
 std::string normalisePath(const std::string& path);
 
+// Numeric-aware, case-insensitive comparison ("2" sorts before "10").
+bool naturalLess(const std::string& str1, const std::string& str2);
+
 void sortFileList(std::vector<std::string>& strs);
 
 /**

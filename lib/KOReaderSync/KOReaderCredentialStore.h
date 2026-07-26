@@ -9,6 +9,11 @@ enum class DocumentMatchMethod : uint8_t {
   BINARY = 1,    // Match by partial MD5 of file content (more accurate, but files must be identical)
 };
 
+enum class KOReaderSyncBehavior : uint8_t {
+  ASK_EVERY_TIME = 0,
+  SMART = 1,
+};
+
 // One saved KoReader server credential set.
 struct KOReaderProfile {
   std::string name;
@@ -16,6 +21,8 @@ struct KOReaderProfile {
   std::string password;   // Plaintext in memory; obfuscated with hardware key on disk
   std::string serverUrl;  // Custom sync server URL (empty = default)
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
+  bool sendMetadata = false;
+  KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::ASK_EVERY_TIME;
 };
 
 class KOReaderCredentialStore;
@@ -87,6 +94,14 @@ class KOReaderCredentialStore {
   // Document matching method (active profile)
   void setMatchMethod(DocumentMatchMethod method);
   DocumentMatchMethod getMatchMethod() const;
+
+  void setSendMetadata(bool enabled);
+  bool getSendMetadata() const;
+  void setSyncBehavior(KOReaderSyncBehavior behavior);
+  KOReaderSyncBehavior getSyncBehavior() const;
+
+  static std::string hashPassword(const std::string& password);
+  static std::string resolveBaseUrl(const std::string& serverUrl);
 
   // --- Multi-profile management ---
 

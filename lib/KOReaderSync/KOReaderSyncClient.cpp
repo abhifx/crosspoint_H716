@@ -393,23 +393,46 @@ void KOReaderSyncClient::endPersistentSession() {
 KOReaderSyncClient::Error KOReaderSyncClient::registerUser() {
   if (!hasCredentials()) return NO_CREDENTIALS;
 
-  beginRequest("register");
-  if (!checkHeapForTls()) return NETWORK_ERROR;
+  return registerUser(KOREADER_STORE.getUsername(), KOREADER_STORE.getMd5Password(), KOREADER_STORE.getBaseUrl());
+}
 
-  std::string url = KOREADER_STORE.getBaseUrl() + "/users/create/";
+KOReaderSyncClient::Error KOReaderSyncClient::registerUser(const std::string& username,
+                                                           const std::string& md5Password,
+                                                           const std::string& baseUrl) {
+  if (username.empty() || md5Password.empty()) return NO_CREDENTIALS;
+
+  beginRequest("register");
+  if (urlUsesTls(baseUrl) && lastContigHeapAtFailure < MIN_CONTIG_HEAP_FOR_TLS) {
+    lastEspError = ESP_ERR_NO_MEM;
+    return NETWORK_ERROR;
+  }
+
+  std::string url = trimTrailingSlashes(baseUrl) + "/users/create/";
   LOG_INF("KOSync", "Registering user: %s (heap: %u, contig: %u)", url.c_str(), lastHeapAtFailure,
           lastContigHeapAtFailure);
 
   JsonDocument doc;
-  doc["username"] = KOREADER_STORE.getUsername();
-  doc["password"] = KOREADER_STORE.getMd5Password();
+  doc["username"] = username;
+  doc["password"] = md5Password;
   std::string body;
   serializeJson(doc, body);
 
   ResponseBuffer buf;
-  ResponseBuffer* activeBuf = effectiveResponseBuffer(&buf);
+  // Registration is deliberately independent from the active sync session:
+  // profile editing may target a different account and server.
+  ResponseBuffer* activeBuf = &buf;
   resetResponseBuffer(activeBuf);
-  esp_http_client_handle_t client = createClient(url.c_str(), &buf, HTTP_METHOD_POST);
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.event_handler = httpEventHandler;
+  config.user_data = activeBuf;
+  config.method = HTTP_METHOD_POST;
+  config.timeout_ms = 5000;
+  config.buffer_size = HTTP_BUF_SIZE;
+  config.buffer_size_tx = 512;
+  if (urlUsesTls(url)) config.crt_bundle_attach = esp_crt_bundle_attach;
+  config.max_redirection_count = 3;
+  esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) {
     lastEspError = ESP_ERR_NO_MEM;
     return NETWORK_ERROR;
@@ -422,9 +445,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::registerUser() {
   const int httpCode = esp_http_client_get_status_code(client);
   lastHttpCode = httpCode;
   lastEspError = err;
-  if (!g_keepSessionOpen) {
-    esp_http_client_cleanup(client);
-  }
+  esp_http_client_cleanup(client);
 
   LOG_DBG("KOSync", "Register response: %d (err: %s)", httpCode, esp_err_to_name(err));
 
@@ -679,6 +700,12 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   JsonDocument doc;
   doc["document"] = progress.document;
+  if (progress.metadata.has_value()) {
+    auto metadata = doc["metadata"].to<JsonObject>();
+    metadata["filename"] = progress.metadata->filename;
+    metadata["title"] = progress.metadata->title;
+    metadata["authors"] = progress.metadata->authors;
+  }
   doc["progress"] = progress.progress;
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;

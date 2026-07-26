@@ -1,5 +1,12 @@
 #pragma once
+#include <optional>
 #include <string>
+
+struct KOReaderMetadata {
+  std::string filename;
+  std::string title;
+  std::string authors;
+};
 
 /**
  * Progress data from KOReader sync server.
@@ -11,6 +18,7 @@ struct KOReaderProgress {
   std::string device;    // Device name
   std::string deviceId;  // Device ID
   int64_t timestamp;     // Unix timestamp of last update
+  std::optional<KOReaderMetadata> metadata;
 };
 
 /**
@@ -50,6 +58,8 @@ class KOReaderSyncClient {
    * @return OK on success, USER_EXISTS if taken, REGISTRATION_DISABLED if server disallows it
    */
   static Error registerUser();
+  static Error registerUser(const std::string& username, const std::string& md5Password,
+                            const std::string& baseUrl);
 
   /**
    * Authenticate with the sync server (validate credentials).

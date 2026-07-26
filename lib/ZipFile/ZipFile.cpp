@@ -442,7 +442,7 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   return data;
 }
 
-bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize) {
+bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop) {
   const ScopedOpenClose zip{*this};
   if (!zip) return false;
 
@@ -474,8 +474,9 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       }
 
       if (out.write(buffer, dataRead) != dataRead) {
-        LOG_ERR("ZIP", "Failed to write all output bytes to stream");
         free(buffer);
+        if (allowEarlyStop) return true;
+        LOG_ERR("ZIP", "Failed to write all output bytes to stream");
         return false;
       }
       remaining -= dataRead;
@@ -533,7 +534,11 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
       if (produced > 0) {
         if (out.write(outputBuffer, produced) != produced) {
-          LOG_ERR("ZIP", "Failed to write all output bytes to stream");
+          if (allowEarlyStop) {
+            success = true;
+          } else {
+            LOG_ERR("ZIP", "Failed to write all output bytes to stream");
+          }
           break;
         }
       }

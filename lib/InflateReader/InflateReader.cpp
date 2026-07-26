@@ -1,5 +1,7 @@
 #include "InflateReader.h"
 
+#include <BuildScratch.h>
+
 #include <cstring>
 #include <type_traits>
 
@@ -17,7 +19,9 @@ bool InflateReader::init(const bool streaming) {
   deinit();  // free any previously allocated ring buffer and reset state
 
   if (streaming) {
-    ringBuffer = static_cast<uint8_t*>(malloc(INFLATE_DICT_SIZE));
+    ringBuffer = buildscratch::claim(INFLATE_DICT_SIZE);
+    ringBufferFromScratch = ringBuffer != nullptr;
+    if (!ringBuffer) ringBuffer = static_cast<uint8_t*>(malloc(INFLATE_DICT_SIZE));
     if (!ringBuffer) return false;
     memset(ringBuffer, 0, INFLATE_DICT_SIZE);
   }
@@ -28,9 +32,14 @@ bool InflateReader::init(const bool streaming) {
 
 void InflateReader::deinit() {
   if (ringBuffer) {
-    free(ringBuffer);
+    if (ringBufferFromScratch) {
+      buildscratch::release(ringBuffer);
+    } else {
+      free(ringBuffer);
+    }
     ringBuffer = nullptr;
   }
+  ringBufferFromScratch = false;
   memset(&decomp, 0, sizeof(decomp));
 }
 

@@ -185,7 +185,10 @@ const std::string& KOReaderCredentialStore::getPassword() const {
 }
 
 std::string KOReaderCredentialStore::getMd5Password() const {
-  const std::string& password = getPassword();
+  return hashPassword(getPassword());
+}
+
+std::string KOReaderCredentialStore::hashPassword(const std::string& password) {
   if (password.empty()) {
     return "";
   }
@@ -235,8 +238,11 @@ const std::string& KOReaderCredentialStore::getServerUrl() const {
 }
 
 std::string KOReaderCredentialStore::getBaseUrl() const {
+  return resolveBaseUrl(getServerUrl());
+}
+
+std::string KOReaderCredentialStore::resolveBaseUrl(const std::string& serverUrl) {
   std::string url;
-  const std::string& serverUrl = getServerUrl();
   if (serverUrl.empty()) {
     url = DEFAULT_SERVER_URL;
   } else if (serverUrl.find("://") == std::string::npos) {
@@ -267,6 +273,28 @@ void KOReaderCredentialStore::setMatchMethod(DocumentMatchMethod method) {
 
 DocumentMatchMethod KOReaderCredentialStore::getMatchMethod() const {
   return activeIndex >= 0 ? profiles[static_cast<size_t>(activeIndex)].matchMethod : DocumentMatchMethod::FILENAME;
+}
+
+void KOReaderCredentialStore::setSendMetadata(const bool enabled) {
+  if (activeIndex < 0) return;
+  profiles[static_cast<size_t>(activeIndex)].sendMetadata = enabled;
+}
+
+bool KOReaderCredentialStore::getSendMetadata() const {
+  return activeIndex >= 0 && profiles[static_cast<size_t>(activeIndex)].sendMetadata;
+}
+
+void KOReaderCredentialStore::setSyncBehavior(KOReaderSyncBehavior behavior) {
+  if (activeIndex < 0) return;
+  if (static_cast<uint8_t>(behavior) > static_cast<uint8_t>(KOReaderSyncBehavior::SMART)) {
+    behavior = KOReaderSyncBehavior::ASK_EVERY_TIME;
+  }
+  profiles[static_cast<size_t>(activeIndex)].syncBehavior = behavior;
+}
+
+KOReaderSyncBehavior KOReaderCredentialStore::getSyncBehavior() const {
+  return activeIndex >= 0 ? profiles[static_cast<size_t>(activeIndex)].syncBehavior
+                          : KOReaderSyncBehavior::ASK_EVERY_TIME;
 }
 
 bool KOReaderCredentialStore::addProfile(const KOReaderProfile& profile) {

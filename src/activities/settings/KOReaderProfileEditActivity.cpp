@@ -9,13 +9,14 @@
 #include "MappedInputManager.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "KOReaderAuthActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
 // Editable fields: Name, Username, Password, Server URL, Document Matching.
 // Existing profiles also show Set as Active and Delete (BASE_ITEMS + 2).
-constexpr int BASE_ITEMS = 5;
+constexpr int BASE_ITEMS = 8;
 }  // namespace
 
 int KOReaderProfileEditActivity::getMenuItemCount() const {
@@ -163,7 +164,22 @@ void KOReaderProfileEditActivity::handleSelection() {
                                   : DocumentMatchMethod::FILENAME;
     saveProfile();
     requestUpdate();
-  } else if (selectedIndex == 5 && !isNewProfile) {
+  } else if (selectedIndex == 5) {
+    editProfile.sendMetadata = !editProfile.sendMetadata;
+    saveProfile();
+    requestUpdate();
+  } else if (selectedIndex == 6) {
+    editProfile.syncBehavior = editProfile.syncBehavior == KOReaderSyncBehavior::SMART
+                                   ? KOReaderSyncBehavior::ASK_EVERY_TIME
+                                   : KOReaderSyncBehavior::SMART;
+    saveProfile();
+    requestUpdate();
+  } else if (selectedIndex == 7) {
+    if (editProfile.username.empty() || editProfile.password.empty() || !saveProfile()) return;
+    startActivityForResult(
+        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::SIGN_UP, editProfile),
+        [this](const ActivityResult&) { requestUpdate(true); });
+  } else if (selectedIndex == 8 && !isNewProfile) {
     // Set as Active — persists as the new default for auto-sync and future syncs.
     if (!KOREADER_STORE.setActiveIndex(static_cast<size_t>(profileIndex))) {
       LOG_ERR("KRS", "Failed to set active KOReader profile at index %d", profileIndex);
@@ -172,7 +188,7 @@ void KOReaderProfileEditActivity::handleSelection() {
       showSaveError = false;
     }
     requestUpdate();
-  } else if (selectedIndex == 6 && !isNewProfile) {
+  } else if (selectedIndex == 9 && !isNewProfile) {
     const std::string profileLabel = editProfile.name.empty() ? editProfile.username : editProfile.name;
     startActivityForResult(
         std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_PROFILE), profileLabel),
@@ -206,8 +222,9 @@ void KOReaderProfileEditActivity::render(RenderLock&&) {
   const int menuItems = getMenuItemCount();
   const bool isActive = !isNewProfile && KOREADER_STORE.getActiveIndex() == profileIndex;
 
-  const StrId fieldNames[] = {StrId::STR_PROFILE_NAME, StrId::STR_USERNAME, StrId::STR_PASSWORD,
-                              StrId::STR_SYNC_SERVER_URL, StrId::STR_DOCUMENT_MATCHING};
+  const StrId fieldNames[] = {StrId::STR_PROFILE_NAME,      StrId::STR_USERNAME,      StrId::STR_PASSWORD,
+                              StrId::STR_SYNC_SERVER_URL,   StrId::STR_DOCUMENT_MATCHING,
+                              StrId::STR_SEND_METADATA,     StrId::STR_SYNC_BEHAVIOR, StrId::STR_SIGN_UP};
 
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, menuItems, static_cast<int>(selectedIndex),
@@ -230,6 +247,15 @@ void KOReaderProfileEditActivity::render(RenderLock&&) {
         } else if (index == 4) {
           return editProfile.matchMethod == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
                                                                           : std::string(tr(STR_BINARY));
+        } else if (index == 5) {
+          return editProfile.sendMetadata ? std::string(tr(STR_STATE_ON)) : std::string(tr(STR_STATE_OFF));
+        } else if (index == 6) {
+          return editProfile.syncBehavior == KOReaderSyncBehavior::SMART ? std::string(tr(STR_SMART_SYNC))
+                                                                          : std::string(tr(STR_ASK_EVERY_TIME));
+        } else if (index == 7) {
+          return editProfile.username.empty() || editProfile.password.empty()
+                     ? std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]"
+                     : std::string();
         } else if (index == BASE_ITEMS && isActive) {
           return std::string(tr(STR_ACTIVE_PROFILE_TAG));
         }

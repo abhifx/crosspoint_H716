@@ -277,13 +277,13 @@ class XPathParagraphResolver final : public Print {
     path.push_back({name, siblingIndex});
     parentStates.emplace_back();
 
-    if (name == "p") {
+    if (name == "p" || name == "li") {
       paragraphCount++;
-      if (paragraphCount == targetParagraph) {
-        xpath = buildParagraphXPath(spineIndex, path, 0);
-        stopped = true;
-        XML_StopParser(parser, XML_FALSE);
-      }
+    }
+    if (paragraphCount == targetParagraph && (name == "p" || name == "li")) {
+      xpath = buildParagraphXPath(spineIndex, path, 0);
+      stopped = true;
+      XML_StopParser(parser, XML_FALSE);
     }
 
     depth++;

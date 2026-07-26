@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include "KOReaderCredentialStore.h"
 #include "activities/Activity.h"
 
 /**
@@ -10,8 +11,11 @@
  */
 class KOReaderAuthActivity final : public Activity {
  public:
-  explicit KOReaderAuthActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("KOReaderAuth", renderer, mappedInput) {}
+  enum class Mode { AUTHENTICATE, SIGN_UP };
+
+  explicit KOReaderAuthActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                Mode mode = Mode::AUTHENTICATE, KOReaderProfile profile = {})
+      : Activity("KOReaderAuth", renderer, mappedInput), mode(mode), profile(std::move(profile)) {}
 
   void onEnter() override;
   void onExit() override;
@@ -23,6 +27,8 @@ class KOReaderAuthActivity final : public Activity {
   enum State { WIFI_SELECTION, CONNECTING, AUTHENTICATING, SUCCESS, FAILED };
 
   State state = WIFI_SELECTION;
+  Mode mode;
+  KOReaderProfile profile;
   std::string statusMessage;
   std::string errorMessage;
 

@@ -82,4 +82,5 @@ class InflateReader {
  private:
   uzlib_uncomp decomp = {};
   uint8_t* ringBuffer = nullptr;
+  bool ringBufferFromScratch = false;
 };

@@ -282,7 +282,7 @@ After merging upstream, verify and fix these files:
 |---|---|---|
 | `src/network/CrossPointWebServer.cpp` | Logo endpoint | Ensure `#include "html/LogoPng.generated.h"` and `server->on("/logo.png", ...)` exist |
 | `src/network/CrossPointWebServer.h` | Logo handler declaration | Ensure `void handleLogo() const;` exists |
-| `src/network/html/HomePage.html` | Steroids branding | Title, H1, footer: "CPR-vCodex Steroids"; logo `<img>`; About card with GitHub link |
+| `src/network/html/HomePage.html` | Steroids branding | Title, H1, footer: "CPR-vCodex Steroids"; logo `<img>`; About card with Author (Marco Andreacchio) + GitHub link |
 | `src/network/html/SettingsPage.html` | Steroids branding | Title, H1, footer: "CPR-vCodex Steroids"; logo `<img>` |
 | `src/network/html/FilesPage.html` | Steroids branding | Title, H1, footer, JS strings: "CPR-vCodex Steroids"; logo `<img>` |
 | `src/network/html/FontsPage.html` | Steroids branding | Title, H1, footer: "CPR-vCodex Steroids" + 📚; logo `<img>` |
@@ -358,12 +358,42 @@ The build system uses counter files in `artifacts/` (gitignored).
 After a version bump, reset manually:
 
 ```powershell
-# Set release counter to 1 for the new version line
-echo 1 > artifacts/.release-counter-X-Y-Z.txt
+# Set release counter to 0 for the new version line (dev builds start at .0)
+echo 0 > artifacts/.release-counter-X-Y-Z.txt
 
 # Reset dev counter
-echo 0 > artifacts/.dev-counter-X-Y-Z-r1.txt
+echo 0 > artifacts/.dev-counter-X-Y-Z-r0.txt
 ```
+
+### Version naming: dev builds start at .0
+
+By default, the `scripts/git_branch.py` `get_dev_release_number()` function
+forces dev builds to start at `.1` when the release counter is `0`.
+This has been patched in Steroids so dev builds use `.0` to match upstream
+tag format (e.g., `1.5.0.0-cpr-vcodex-steroids`).
+
+If you update `scripts/git_branch.py` from upstream, re-apply this patch:
+```python
+# In get_dev_release_number(~line 175):
+if release_number == 0:
+    return 0, f"{source} (new base line starting at .0)"
+```
+
+Without this patch, dev builds produce `1.5.0.1.dev1-...` instead of `1.5.0.0.dev1-...`.
+
+---
+
+## OTA Compatibility Check
+
+Steroids OTA URLs are hardcoded in `src/network/OtaUpdater.cpp` pointing to
+`marcoand75/cpr-vcodex-steroids`. After every merge verify:
+
+```powershell
+Select-String -Path src/network/OtaUpdater.cpp -Pattern "marcoand75"
+# Must return: https://github.com/marcoand75/cpr-vcodex-steroids/releases/...
+```
+
+If it returns `franssjz/cpr-vcodex`, restore the local Steroids version.
 
 ---
 
@@ -397,7 +427,7 @@ After completing a merge, verify these items ON DEVICE (not just build):
 | 5 | Open Apps Hub → Icons (LyraMarcoand75 theme) | All app icons visible with correct order |
 | 6 | Open Web Browser → Settings | Device settings visible |
 | 7 | Open Web Browser → App Settings | App settings visible with Steroids sections |
-| 8 | Open Web Browser → Home | Logo.png visible, About card with GitHub link |
+| 8 | Open Web Browser → Home | Logo.png visible, About card with Author + GitHub link |
 | 9 | Long press left/right side buttons in reader | Should trigger chapter skip |
 | 10 | Long press front buttons in reader | Should trigger bookmark/clipping (if configured) |
 | 11 | Open Reading Stats | Should show pace info and book stats |

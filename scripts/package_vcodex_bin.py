@@ -62,9 +62,9 @@ def update_readme_release_version(project_dir: Path, artifact_name: str) -> None
 
     readme_text = readme_path.read_text(encoding="utf-8")
     release_name = artifact_name[:-4]
-    release_url = f"https://github.com/franssjz/cpr-vcodex/releases/tag/{release_name}"
+    release_url = f"https://github.com/marcoand75/cpr-vcodex-steroids/releases/tag/{release_name}"
     updated_text, replacements = re.subn(
-        r"(\| Current release \(CPR-vCodex\) build \| \[`)([^\]]+)(`\]\()([^)]+)(\) \|)",
+        r"(\| Current release \(CPR-vCodex Steroids\) build \| \[`)([^\]]+)(`\]\()([^)]+)(\) \|)",
         rf"\g<1>{release_name}\g<3>{release_url}\g<5>",
         readme_text,
         count=1,
@@ -108,7 +108,7 @@ def package_vcodex_bin(source, target, env):
     output_dir = project_dir / "artifacts"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    artifact_name = f"{safe_version}-cpr-vcodex.bin"
+    artifact_name = f"{safe_version}-cpr-vcodex-steroids.bin"
     artifact_path = output_dir / artifact_name
     shutil.copy2(firmware_path, artifact_path)
 
@@ -123,7 +123,7 @@ def package_vcodex_bin(source, target, env):
     }
     if build_seq is not None:
         metadata["buildSequence"] = build_seq
-    metadata_path = output_dir / f"{safe_version}-cpr-vcodex.json"
+    metadata_path = output_dir / f"{safe_version}-cpr-vcodex-steroids.json"
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     if env.subst("$PIOENV") == "gh_release" and os.environ.get(RELEASE_DRY_RUN_ENV) == "1":

@@ -376,12 +376,12 @@ The development and feature discussion for CPR-vCodex Steroids takes place in th
 |---|---|
 | Project | `CPR-vCodex Steroids` |
 | Device | `Xteink X4`; `Xteink X3` compatibility reported by users, not personally tested |
-| Current upstream base | [`1.3.0.35-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.3.0.35-cpr-vcodex) |
-| Current Steroids build | Synced with upstream `1.3.0.35` + Steroids features (clippings, guide dots, library, carousel, web portal, screensaver, configurable long-press, EPUB render modes, OTA fixes) |
+| Current upstream base | [`1.4.5.0-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.4.5.0-cpr-vcodex) |
+| Current Steroids build | Synced with upstream `1.4.5` + Steroids features (clippings, bookmarks v4, guide dots, library, carousel, web portal, screensaver, configurable long-press, EPUB render modes, OTA fixes, time/clock X3 support) |
 | Latest SD font package | [`sd-fonts-m1-b4`](https://github.com/franssjz/cpr-vcodex/releases/tag/sd-fonts-m1-b4) |
 | Changelog | [CHANGELOG.md](./CHANGELOG.md) |
 | GitHub Releases | [Releases page](https://github.com/marcoand75/cpr-vcodex-steroids/releases) |
-| Base firmware line | `CrossPoint Reader 1.3.0` |
+| Base firmware line | `CrossPoint Reader 1.4.5` |
 | Latest official commit reviewed | [`fd5b8078`](https://github.com/crosspoint-reader/crosspoint-reader/commit/fd5b8078) |
 | Intentional upstream exclusions | Unsupported upstream theme variants such as `RoundedRaff` remain out of the supported vCodex theme list; other upstream UI/config changes are adapted selectively to preserve the existing X4 workflow. |
 
@@ -420,15 +420,15 @@ The philosophy of this fork is simple: keep the firmware fast, stable, and focus
 
 | Item | Value |
 |---|---|
-| Project | `CPR-vCodex` |
+| Project | `CPR-vCodex Steroids` |
 | Device | `Xteink X4`; `Xteink X3` compatibility reported by users, not personally tested |
-| Current release (CPR-vCodex) build | [`1.3.0.36-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.3.0.36-cpr-vcodex) |
+| Current release (CPR-vCodex Steroids) build | [`1.4.5.0-cpr-vcodex-steroids`](https://github.com/marcoand75/cpr-vcodex-steroids/releases/tag/1.4.5.0-cpr-vcodex-steroids) |
 | Latest SD font package | [`sd-fonts-m1-b4`](https://github.com/franssjz/cpr-vcodex/releases/tag/sd-fonts-m1-b4) |
 | Changelog | [CHANGELOG.md](./CHANGELOG.md) |
 | Current release sync | Stability release on the same selected CrossPoint Reader baseline through [`fd5b8078`](https://github.com/crosspoint-reader/crosspoint-reader/commit/fd5b8078) and `open-x4-sdk` [`198ad26`](https://github.com/crosspoint-reader/community-sdk/commit/198ad267219c25c8ab84418b806c66f1fb5216a3); larger upstream UI/config rewrites remain intentionally deferred. |
 | Current release fixes | Restores decorative EPUB chapter images that were incorrectly suppressed by accessibility-only markup. |
 | Latest release notes | - EPUB images marked with `role="presentation"`, `role="none"`, or `aria-hidden="true"` remain visually rendered; those attributes affect accessibility semantics rather than visual display.<br>- CSS `display:none` and the reader image setting remain the visual controls.<br>- The existing repeated-image limit remains active to protect EPUB indexing memory, and the section-cache version was bumped so affected books rebuild automatically. |
-| Base firmware line | `CrossPoint Reader 1.3.0` |
+| Base firmware line | `CrossPoint Reader 1.4.5` |
 | Latest official commit reviewed | [`fd5b8078`](https://github.com/crosspoint-reader/crosspoint-reader/commit/fd5b8078) |
 | Latest official commit incorporated | Selected EPUB/rendering, cache, filesystem, image, KOReader Sync, font-upload, SDK, and navigation fixes from [`7accc607`](https://github.com/crosspoint-reader/crosspoint-reader/commit/7accc607) through [`fd5b8078`](https://github.com/crosspoint-reader/crosspoint-reader/commit/fd5b8078); larger upstream bookmark, RTL, OTA/downloader, translation-bulk, and settings rewrites remain intentionally deferred. |
 | Intentional upstream exclusions | Unsupported upstream theme variants such as `RoundedRaff` remain out of the supported vCodex theme list; other upstream UI/config changes are adapted selectively to preserve the existing X4 workflow. |
@@ -951,9 +951,9 @@ Each packaged dev build now keeps the base firmware line and the local flash ide
 
 Practical values to look at:
 
-- base firmware line: `CrossPoint Reader 1.3.0`
-- current release build style: `1.3.0.35-cpr-vcodex`
-- packaged artifact style: `artifacts/<version>-cpr-vcodex.bin`
+- base firmware line: `CrossPoint Reader 1.4.5`
+- current release build style: `1.4.5.0-cpr-vcodex-steroids`
+- packaged artifact style: `artifacts/<version>-cpr-vcodex-steroids.bin`
 
 The incremental `.bNNNN` suffix exists specifically to help distinguish newer flashes from older ones on real hardware.
 

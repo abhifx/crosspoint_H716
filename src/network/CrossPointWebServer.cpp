@@ -32,6 +32,7 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/IfFoundPageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
+#include "html/LogoPng.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/IfFoundFile.h"
@@ -544,6 +545,7 @@ void CrossPointWebServer::begin() {
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
   server->on("/", HTTP_GET, [this] { handleRoot(); });
+  server->on("/logo.png", HTTP_GET, [this] { handleLogo(); });
   server->on("/files", HTTP_GET, [this] { handleFileList(); });
   server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
 
@@ -763,6 +765,11 @@ static void sendHtmlContent(WebServer* server, const char* data, size_t len) {
 void CrossPointWebServer::handleRoot() const {
   sendHtmlContent(server.get(), HomePageHtml, sizeof(HomePageHtml));
   LOG_DBG("WEB", "Served root page");
+}
+
+void CrossPointWebServer::handleLogo() const {
+  server->send_P(200, "image/png", LogoPng, LogoPngSize);
+  LOG_DBG("WEB", "Served logo");
 }
 
 void CrossPointWebServer::handleJszip() const {

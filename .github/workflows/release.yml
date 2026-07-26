@@ -2,7 +2,7 @@ name: Compile Release
 on:
   push:
     tags:
-      - '*-cpr-vcodex'
+      - '*-cpr-vcodex-steroids'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -31,7 +31,7 @@ jobs:
             python3 -m pip install --user --break-system-packages -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Build CPR-vCodex release
+      - name: Build CPR-vCodex Steroids release
         env:
           VCODEX_RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -89,7 +89,7 @@ jobs:
           notes_file="$(mktemp)"
 
           {
-            echo "CPR-vCodex firmware release ${tag}."
+            echo "CPR-vCodex Steroids firmware release ${tag}."
             echo
             echo "The browser auto-flash page is committed with the matching local firmware copy for this tag."
           } > "${notes_file}"

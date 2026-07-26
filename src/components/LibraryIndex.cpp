@@ -712,11 +712,11 @@ static int walkIndex(const char* idxPath, bool reverse, int skip, int needed,
 }
 
 // Full-text search without index (scans library.dat directly).
+// Full scan with optional search filter and sort
 static int scanFullText(BookRef* out, int page, int pageSize, SortMode sortMode,
                         const char* search, FilterMode filter) {
-  // For full-text search we scan library.dat linearly and collect matching books,
-  // then sort by sortMode, then output the requested page.
-  // This is O(n) but for 1000-2000 books it's acceptable (~50-200ms).
+  // O(n) scan of library.dat — used for full-text search AND for
+  // RECENT/PROGRESS sorts which can't use alphabetical indices.
   HalFile f = Storage.open(kDatFile);
   if (!f) return 0;
 
@@ -729,28 +729,48 @@ static int scanFullText(BookRef* out, int page, int pageSize, SortMode sortMode,
     if (!f.seek(static_cast<uint32_t>(rp) * kRecordSize)) break;
     if (f.read(reinterpret_cast<uint8_t*>(&rec), kRecordSize) != static_cast<int>(kRecordSize)) break;
     if (rec.tombstone()) continue;
-    if (!substringMatch(rec.title, search) && !substringMatch(rec.author, search)) continue;
+    if (search && search[0]) {
+      if (!substringMatch(rec.title, search) && !substringMatch(rec.author, search)) continue;
+    }
     if (!matchesFilter(rec, filter)) continue;
     matchOffsets.push_back(static_cast<uint32_t>(rp));
   }
   f.close();
 
   // Sort matches by sortMode
-  if (sortMode != SortMode::RECENT && sortMode != SortMode::PROGRESS) {
-    std::sort(matchOffsets.begin(), matchOffsets.end(), [sortMode](uint32_t aOff, uint32_t bOff) {
-      Record ra, rb;
-      if (!readRecord(aOff, ra) || !readRecord(bOff, rb)) return aOff < bOff;
-      if (sortMode == SortMode::TITLE_ASC || sortMode == SortMode::TITLE_DESC) {
-        int c = cmpSortKey(ra.title, rb.title);
-        return (sortMode == SortMode::TITLE_ASC) ? (c < 0) : (c > 0);
-      } else {
-        int c = cmpSortKey(ra.author, rb.author);
-        if (c != 0) return (sortMode == SortMode::AUTHOR_ASC) ? (c < 0) : (c > 0);
-        c = cmpSortKey(ra.title, rb.title);
-        return c < 0;
-      }
-    });
-  }
+  std::sort(matchOffsets.begin(), matchOffsets.end(), [sortMode](uint32_t aOff, uint32_t bOff) {
+    Record ra, rb;
+    if (!readRecord(aOff, ra) || !readRecord(bOff, rb)) return aOff < bOff;
+
+    if (sortMode == SortMode::RECENT) {
+      const auto* sa = READING_STATS.findBook(ra.path);
+      const auto* sb = READING_STATS.findBook(rb.path);
+      uint32_t ta = sa ? sa->lastReadAt : 0;
+      uint32_t tb = sb ? sb->lastReadAt : 0;
+      if (ta != tb) return ta > tb;  // most recent first
+      int c = cmpSortKey(ra.title, rb.title);
+      return c < 0;
+    }
+    if (sortMode == SortMode::PROGRESS) {
+      const auto* sa = READING_STATS.findBook(ra.path);
+      const auto* sb = READING_STATS.findBook(rb.path);
+      if (sa && sb && sa->completed != sb->completed) return sb->completed;  // unread first
+      uint8_t pa = sa ? sa->lastProgressPercent : 0;
+      uint8_t pb = sb ? sb->lastProgressPercent : 0;
+      if (pa != pb) return pa > pb;  // highest progress first
+      int c = cmpSortKey(ra.title, rb.title);
+      return c < 0;
+    }
+    if (sortMode == SortMode::TITLE_ASC || sortMode == SortMode::TITLE_DESC) {
+      int c = cmpSortKey(ra.title, rb.title);
+      return (sortMode == SortMode::TITLE_ASC) ? (c < 0) : (c > 0);
+    }
+    // AUTHOR_ASC or AUTHOR_DESC
+    int c = cmpSortKey(ra.author, rb.author);
+    if (c != 0) return (sortMode == SortMode::AUTHOR_ASC) ? (c < 0) : (c > 0);
+    c = cmpSortKey(ra.title, rb.title);
+    return c < 0;
+  });
 
   const int start = page * pageSize;
   const int end = std::min(start + pageSize, static_cast<int>(matchOffsets.size()));
@@ -769,17 +789,17 @@ int queryPage(BookRef* out, int page, int pageSize, SortMode sortMode,
   if (!exists()) return 0;
 
   const bool hasSearch = (searchFilter && searchFilter[0] != '\0');
+  const bool needsFullScan = hasSearch || sortMode == SortMode::RECENT || sortMode == SortMode::PROGRESS;
   const bool reverse = (sortMode == SortMode::TITLE_DESC || sortMode == SortMode::AUTHOR_DESC ||
-                        sortMode == SortMode::RECENT);
+                        sortMode == SortMode::RECENT || sortMode == SortMode::PROGRESS);
   const bool byAuthor = (sortMode == SortMode::AUTHOR_ASC || sortMode == SortMode::AUTHOR_DESC);
-  const char* idxPath = byAuthor ? kIdxAuthor : kIdxTitle;
 
-  if (hasSearch) {
-    // Full-text path: scan library.dat, sort results in RAM, paginate
+  if (needsFullScan) {
     return scanFullText(out, page, pageSize, sortMode, searchFilter, filterMode);
   }
 
-  // Indexed path: walk the sorted index
+  // Indexed path: walk sorted index sequentially
+  const char* idxPath = byAuthor ? kIdxAuthor : kIdxTitle;
   const int skip = page * pageSize;
   return walkIndex(idxPath, reverse, skip, pageSize, nullptr, filterMode, out);
 }

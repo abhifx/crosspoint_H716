@@ -1,6 +1,9 @@
 #include "TimeUtils.h"
 
+#include <HalClock.h>
+
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 
 #include <Arduino.h>
 #include <esp_sntp.h>
@@ -15,6 +18,17 @@ namespace {
 constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704067200UL;  // 2024-01-01 UTC
 bool syncedThisBoot = false;
 uint8_t configuredTimeZonePreset = UINT8_MAX;
+int lastBridgedRtcUtcHour = -1;
+
+bool writeRtcFromUtcEpoch(const uint32_t epochSeconds) {
+  if (!halClock.isAvailable()) {
+    return false;
+  }
+  time_t utcTime = static_cast<time_t>(epochSeconds);
+  struct tm utc{};
+  gmtime_r(&utcTime, &utc);
+  return halClock.writeUtcTm(utc);
+}
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
@@ -74,10 +88,6 @@ void civilFromDays(int z, int& year, unsigned& month, unsigned& day) {
 
 void TimeUtils::configureTimezone() {
   const uint8_t preset = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
-  if (configuredTimeZonePreset == preset) {
-    return;
-  }
-
   setenv("TZ", TimeZoneRegistry::getPresetPosixTz(preset), 1);
   tzset();
   configuredTimeZonePreset = preset;
@@ -108,6 +118,7 @@ bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
 
     if ((syncCompleted || clockJumpedToValid) && currentClockValid) {
       syncedThisBoot = true;
+      writeRtcFromUtcEpoch(static_cast<uint32_t>(currentTime));
       return true;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -121,6 +132,10 @@ bool TimeUtils::isClockValid() { return isClockValid(static_cast<uint32_t>(time(
 bool TimeUtils::isClockValid(const uint32_t epochSeconds) { return epochSeconds >= VALID_CLOCK_THRESHOLD; }
 
 uint32_t TimeUtils::getAuthoritativeTimestamp() {
+  if (isHardwareRtcAutoDayClockActive() && SETTINGS.clockHasBeenSynced && !syncedThisBoot) {
+    applySystemClockFromRtc(true);
+  }
+
   const uint32_t now = static_cast<uint32_t>(time(nullptr));
   if (syncedThisBoot && isClockValid(now)) {
     return now;
@@ -165,6 +180,7 @@ bool TimeUtils::setCurrentDate(const int year, const unsigned month, const unsig
   if (epochSeconds) {
     *epochSeconds = static_cast<uint32_t>(epoch);
   }
+  writeRtcFromUtcEpoch(static_cast<uint32_t>(epoch));
   return true;
 }
 
@@ -276,4 +292,88 @@ std::string TimeUtils::formatMonthYear(const int year, const unsigned month) {
     snprintf(buffer, sizeof(buffer), "%02u/%04d", month, year);
   }
   return buffer;
+}
+
+bool TimeUtils::isHardwareRtcAutoDayClockActive() { return SETTINGS.isHardwareRtcAutoDayClockActive(); }
+
+bool TimeUtils::formatStatusBarClockTime(char* buf, const size_t bufSize, const bool use12Hour) {
+  if (bufSize < (use12Hour ? 9u : 6u) || !halClock.isAvailable()) {
+    return false;
+  }
+
+  uint32_t epoch = 0;
+  if (!halClock.readUtcEpoch(epoch, false)) {
+    return false;
+  }
+
+  configureTimezone();
+  time_t utcTime = static_cast<time_t>(epoch);
+  struct tm localTime{};
+  if (localtime_r(&utcTime, &localTime) == nullptr) {
+    return false;
+  }
+
+  if (use12Hour) {
+    const bool pm = localTime.tm_hour >= 12;
+    int hour12 = localTime.tm_hour % 12;
+    if (hour12 == 0) {
+      hour12 = 12;
+    }
+    snprintf(buf, bufSize, "%d:%02d %s", hour12, localTime.tm_min, pm ? "PM" : "AM");
+  } else {
+    snprintf(buf, bufSize, "%02d:%02d", localTime.tm_hour, localTime.tm_min);
+  }
+  return true;
+}
+
+bool TimeUtils::applySystemClockFromRtc(const bool forceRefresh) {
+  if (!halClock.isAvailable() || !SETTINGS.clockHasBeenSynced) {
+    return false;
+  }
+
+  struct tm utc{};
+  if (!halClock.readUtcTm(utc, forceRefresh)) {
+    return false;
+  }
+
+  setenv("TZ", "UTC0", 1);
+  tzset();
+  const time_t epoch = mktime(&utc);
+  configureTimezone();
+  if (epoch < 0 || !isClockValid(static_cast<uint32_t>(epoch))) {
+    return false;
+  }
+
+  timeval tv{};
+  tv.tv_sec = epoch;
+  tv.tv_usec = 0;
+  if (settimeofday(&tv, nullptr) != 0) {
+    return false;
+  }
+
+  syncedThisBoot = true;
+  lastBridgedRtcUtcHour = utc.tm_hour;
+  APP_STATE.registerValidTimeSync(static_cast<uint32_t>(epoch));
+  return true;
+}
+
+void TimeUtils::tickSystemClockFromRtc() {
+  if (!halClock.isAvailable() || !SETTINGS.clockHasBeenSynced) {
+    return;
+  }
+
+  uint8_t utcHour = 0;
+  uint8_t utcMinute = 0;
+  if (!halClock.getUtcTime(utcHour, utcMinute, false)) {
+    return;
+  }
+
+  const int observedHour = static_cast<int>(utcHour);
+  if (lastBridgedRtcUtcHour >= 0 && observedHour == lastBridgedRtcUtcHour) {
+    return;
+  }
+
+  if (!applySystemClockFromRtc(true)) {
+    lastBridgedRtcUtcHour = observedHour;
+  }
 }

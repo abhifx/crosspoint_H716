@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CPR-vCodex Steroids</title>
+    <title>CPR-vCodex</title>
     <style>
       :root {
         --font-color: #333;
@@ -118,35 +118,22 @@
     </style>
   </head>
   <body>
-    <div style="text-align: center; margin-bottom: 15px">
-      <img src="/logo.png" alt="CPR-vCodex Steroids" style="max-width: 220px; height: auto" />
-    </div>
-
-    <h1>📚 CPR-vCodex Steroids</h1>
+    <h1>📚 CPR-vCodex</h1>
 
     <div class="nav-links">
       <a href="/" class="active">Home</a>
       <a href="/files">File Manager</a>
-      <a href="/settings">Device Settings</a>
-      <a href="/app-settings">App Settings</a>
+      <a href="/settings">Settings</a>
       <a href="/fonts">Fonts</a>
       <a href="/if-found">if_found.txt</a>
     </div>
 
     <div class="card">
-      <h2>About</h2>
-      <div class="info-row">
-        <span class="label">Author</span>
-        <span class="value"><a href="https://github.com/marcoand75" target="_blank" rel="noopener noreferrer">marcoand75 (Marco Andreacchio)</a></span>
-      </div>
-      <div class="info-row">
-        <span class="label">Repository</span>
-        <span class="value"><a href="https://github.com/marcoand75/cpr-vcodex-steroids" target="_blank" rel="noopener noreferrer">github.com/marcoand75/cpr-vcodex-steroids</a></span>
-      </div>
-    </div>
-
-    <div class="card">
       <h2>Device Status</h2>
+      <div class="info-row">
+        <span class="label">Serial #</span>
+        <span class="value" id="serial"></span>
+      </div>
       <div class="info-row">
         <span class="label">Version</span>
         <span class="value" id="version"></span>
@@ -203,7 +190,7 @@
 
     <div class="card">
       <p style="text-align: center; color: #95a5a6; margin: 0">
-        CPR-vCodex Steroids • Open Source
+        CPR-vCodex • Open Source
       </p>
     </div>
   <script>
@@ -249,6 +236,7 @@
         const data = await response.json();
         const wifiStatus = document.getElementById('wifi-status');
         document.getElementById('version').textContent = data.version || 'N/A';
+        document.getElementById('serial').textContent = data.serial || 'Not found';
         document.getElementById('ip-address').textContent = data.ip || 'N/A';
         document.getElementById('network-mode').textContent = data.mode === 'AP' ? 'Access Point' : 'WiFi Client';
         document.getElementById('signal-strength').textContent =

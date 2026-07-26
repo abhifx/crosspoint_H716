@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Device Settings - CPR-vCodex Steroids</title>
+  <title>Settings - CPR-vCodex</title>
   <style>
     :root {
       --font-color: #333;
@@ -280,17 +280,12 @@
   </style>
 </head>
 <body>
-  <div style="text-align: center; margin-bottom: 15px">
-    <img src="/logo.png" alt="CPR-vCodex Steroids" style="max-width: 220px; height: auto" />
-  </div>
-
-  <h1>📚 CPR-vCodex Steroids</h1>
+  <h1>📚 CPR-vCodex</h1>
 
   <div class="nav-links">
     <a href="/">Home</a>
     <a href="/files">File Manager</a>
-    <a href="/settings" class="active">Device Settings</a>
-    <a href="/app-settings">App Settings</a>
+    <a href="/settings" class="active">Settings</a>
     <a href="/fonts">Fonts</a>
     <a href="/if-found">if_found.txt</a>
   </div>
@@ -311,7 +306,7 @@
 
   <div class="card">
     <p style="text-align: center; color: #95a5a6; margin: 0;">
-      CPR-vCodex Steroids • Open Source
+      CPR-vCodex • Open Source
     </p>
   </div>
 
@@ -363,12 +358,6 @@
     }
 
     if (setting.type === 'string') {
-      if (setting.key === 'sdFontFamily') {
-        // Populated dynamically from installed fonts after /api/fonts is loaded.
-        const val = setting.value || '';
-        return '<select id="' + id + '" onchange="markChanged()">' +
-          '<option value="">' + escapeHtml(val || '(none)') + '</option></select>';
-      }
       const inputType = setting.name.toLowerCase().includes('password') ? 'password' : 'text';
       const val = setting.value || '';
       return '<input type="' + inputType + '" id="' + id + '" value="' + escapeHtml(val) + '"' +
@@ -404,10 +393,7 @@
   async function loadSettings() {
     try {
       allSettings = [];
-      // Device Settings: only the device hardware/reading categories
-      // (Display, Reader, Controls, System). App settings live on /app-settings.
-      const deviceCategories = [0, 1, 2, 3];
-      for (const category of deviceCategories) {
+      for (let category = 0; category < 8; category++) {
         const response = await fetch('/api/settings?category=' + category);
         if (!response.ok) {
           throw new Error('Failed to load settings category ' + category + ': ' + response.status);
@@ -446,65 +432,10 @@
       container.innerHTML = html;
       document.getElementById('save-container').style.display = '';
       document.getElementById('saveBtn').disabled = true;
-
-      // Populate the installed-font selector from /api/fonts (mirrors device UI)
-      const fontSetting = allSettings.find(function(s) { return s.key === 'sdFontFamily'; });
-      populateInstalledFonts(fontSetting ? (fontSetting.value || '') : '');
     } catch (e) {
       console.error(e);
       document.getElementById('settings-container').innerHTML =
         '<div class="card"><p style="text-align:center;color:#e74c3c;">Failed to load settings</p></div>';
-    }
-  }
-
-  // Built-in fonts shipped with the firmware (same list as the device UI).
-  // Index matches CrossPointSettings::FONT_FAMILY (0=Bookerly, 1=Noto Sans, 2=Lexend).
-  const BUILTIN_FONTS = ['Bookerly', 'Noto Sans', 'Lexend'];
-
-  async function populateInstalledFonts(current) {
-    const sel = document.getElementById('setting-sdFontFamily');
-    if (!sel) return;
-    try {
-      const resp = await fetch('/api/fonts');
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const sdFamilies = (data.families || []).map(function(f) { return f.name; });
-      const cur = current || '';
-      sel.innerHTML = '';
-
-      const noneOpt = document.createElement('option');
-      noneOpt.value = '';
-      noneOpt.textContent = '(none)';
-      sel.appendChild(noneOpt);
-
-      // Built-in firmware fonts
-      BUILTIN_FONTS.forEach(function(name, idx) {
-        const opt = document.createElement('option');
-        opt.value = '__builtin_' + idx;
-        opt.textContent = name;
-        if (cur === opt.value) opt.selected = true;
-        sel.appendChild(opt);
-      });
-
-      // Installed SD fonts
-      sdFamilies.forEach(function(name) {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        if (name === cur) opt.selected = true;
-        sel.appendChild(opt);
-      });
-
-      // Current value not present in either list (e.g. removed SD font): keep it
-      if (cur && cur.indexOf('__builtin_') !== 0 && sdFamilies.indexOf(cur) === -1) {
-        const opt = document.createElement('option');
-        opt.value = cur;
-        opt.textContent = cur;
-        opt.selected = true;
-        sel.appendChild(opt);
-      }
-    } catch (e) {
-      console.error('Failed to load installed fonts', e);
     }
   }
 

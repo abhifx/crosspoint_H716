@@ -24,4 +24,9 @@ std::string formatDateTime(uint32_t epochSeconds, bool appendBang = false);
 std::string formatDateParts(int year, unsigned month, unsigned day, bool appendBang = false);
 std::string formatMonthYear(int year, unsigned month);
 
+bool isHardwareRtcAutoDayClockActive();
+bool formatStatusBarClockTime(char* buf, size_t bufSize, bool use12Hour);
+bool applySystemClockFromRtc(bool forceRefresh = false);
+void tickSystemClockFromRtc();
+
 }  // namespace TimeUtils

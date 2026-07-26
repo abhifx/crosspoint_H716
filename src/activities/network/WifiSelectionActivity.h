@@ -12,12 +12,13 @@
 // Structure to hold WiFi network information
 struct WifiNetworkInfo {
   std::string ssid;
-  int32_t rssi;
-  bool isEncrypted;
-  bool hasSavedPassword;  // Whether we have saved credentials for this network
+  int32_t rssi = 0;
+  bool isEncrypted = false;
+  bool hasSavedPassword = false;  // Whether we have saved credentials for this network
   int32_t channel = 0;
   uint8_t bssid[6] = {};
   bool hasBssid = false;
+  bool isHiddenPlaceholder = false;
   std::string ipAddress;  // Populated after connection for display
 };
 
@@ -26,6 +27,7 @@ enum class WifiSelectionState {
   AUTO_CONNECTING,    // Trying to connect to the last known network
   SCANNING,           // Scanning for networks
   NETWORK_LIST,       // Displaying available networks
+  HIDDEN_SSID_ENTRY,  // Entering the SSID of a hidden network
   PASSWORD_ENTRY,     // Entering password for selected network
   CONNECTING,         // Attempting to connect
   CONNECTED,          // Successfully connected
@@ -51,6 +53,7 @@ class WifiSelectionActivity final : public Activity {
   WifiSelectionState state = WifiSelectionState::SCANNING;
   size_t selectedNetworkIndex = 0;
   std::vector<WifiNetworkInfo> networks;
+  size_t realNetworkCount = 0;
 
   // Selected network for connection
   std::string selectedSSID;
@@ -75,6 +78,9 @@ class WifiSelectionActivity final : public Activity {
   // Whether to attempt auto-connect on entry
   const bool allowAutoConnect;
 
+  // Whether a successful connection should perform the one-time RTC sync hook.
+  const bool syncRtcOnConnect;
+
   // Whether we are attempting to auto-connect
   bool autoConnecting = false;
 
@@ -96,7 +102,10 @@ class WifiSelectionActivity final : public Activity {
 
   void startWifiScan();
   void processWifiScanResults();
+  void appendHiddenNetworkEntry();
   void selectNetwork(int index);
+  void promptHiddenSsid();
+  void promptPasswordEntry();
   void setSelectedNetwork(const WifiNetworkInfo& network);
   bool connectUsingSavedCredential(const WifiNetworkInfo& network, bool isAutoConnectAttempt);
   void attemptConnection();
@@ -106,8 +115,11 @@ class WifiSelectionActivity final : public Activity {
   void onComplete(bool connected);
 
  public:
-  explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = false)
-      : Activity("WifiSelection", renderer, mappedInput), allowAutoConnect(autoConnect) {}
+  explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = false,
+                                 bool syncRtcOnConnect = true)
+      : Activity("WifiSelection", renderer, mappedInput),
+        allowAutoConnect(autoConnect),
+        syncRtcOnConnect(syncRtcOnConnect) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

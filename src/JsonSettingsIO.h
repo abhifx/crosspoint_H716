@@ -4,6 +4,7 @@ class CrossPointSettings;
 class CrossPointState;
 class WifiCredentialStore;
 class KOReaderCredentialStore;
+struct KOReaderProfile;
 class RecentBooksStore;
 class FavoritesStore;
 class ReadingStatsStore;
@@ -24,9 +25,13 @@ bool loadState(CrossPointState& s, const char* json);
 bool saveWifi(const WifiCredentialStore& store, const char* path);
 bool loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave = nullptr);
 
-// KOReaderCredentialStore
+// KOReaderCredentialStore -- multi-profile store (authoritative)
 bool saveKOReader(const KOReaderCredentialStore& store, const char* path);
 bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave = nullptr);
+// Legacy single-record mirror of the active profile, kept for cross-firmware
+// compatibility (e.g. stock crosspoint-reader reads this same file/shape).
+bool saveKOReaderLegacyMirror(const KOReaderCredentialStore& store, const char* path);
+bool loadKOReaderLegacyProfile(KOReaderProfile& profile, const char* json);
 
 // RecentBooksStore
 bool saveRecentBooks(const RecentBooksStore& store, const char* path);

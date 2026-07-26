@@ -5,6 +5,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 
+#include <array>
 #include <memory>
 #include <string>
 
@@ -41,16 +42,9 @@ class CrossPointWebServer {
     // Upload write buffer - batches small writes into larger SD card operations
     // 4KB is a good balance: large enough to reduce syscall overhead, small enough
     // to keep individual write times short and avoid watchdog issues
-    // Allocated on heap only during active upload to save ~4KB of BSS/DRAM when idle.
     static constexpr size_t UPLOAD_BUFFER_SIZE = 4096;  // 4KB buffer
-    std::unique_ptr<uint8_t[]> buffer = nullptr;
+    std::array<uint8_t, UPLOAD_BUFFER_SIZE> buffer{};
     size_t bufferPos = 0;
-
-    bool allocateBuffer() {
-      buffer = std::make_unique<uint8_t[]>(UPLOAD_BUFFER_SIZE);
-      return buffer != nullptr;
-    }
-    void freeBuffer() { buffer.reset(); }
   } upload;
 
   CrossPointWebServer();
@@ -110,8 +104,6 @@ class CrossPointWebServer {
 
   // Settings handlers
   void handleSettingsPage() const;
-  void handleAppSettingsPage() const;
-  void handleLogo() const;
   void handleGetSettings() const;
   void handlePostSettings();
 
@@ -136,15 +128,8 @@ class CrossPointWebServer {
     bool magicChecked = false;
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
-    // Heap-allocated only during active font upload to save ~4KB of BSS/DRAM.
-    std::unique_ptr<uint8_t[]> buffer = nullptr;
+    std::array<uint8_t, BUFFER_SIZE> buffer{};
     size_t bufferPos = 0;
-
-    bool allocateBuffer() {
-      buffer = std::make_unique<uint8_t[]>(BUFFER_SIZE);
-      return buffer != nullptr;
-    }
-    void freeBuffer() { buffer.reset(); }
   } fontUpload;
 
   // OPDS server handlers

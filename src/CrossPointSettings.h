@@ -69,6 +69,13 @@ class CrossPointSettings {
     TIME_LEFT_BOOK = 2,
     STATUS_BAR_TIME_LEFT_COUNT
   };
+  // STATUS_BAR_CLOCK_RIGHT = 1 matches the legacy boolean "show clock" value.
+  enum STATUS_BAR_CLOCK {
+    STATUS_BAR_CLOCK_HIDE = 0,
+    STATUS_BAR_CLOCK_RIGHT = 1,
+    STATUS_BAR_CLOCK_LEFT = 2,
+    STATUS_BAR_CLOCK_COUNT
+  };
   enum XTC_STATUS_BAR_MODE {
     XTC_STATUS_BAR_HIDE = 0,
     XTC_STATUS_BAR_BOTTOM = 1,
@@ -204,6 +211,13 @@ class CrossPointSettings {
   // UI Theme
   enum UI_THEME { LYRA = 0, LYRA_CUSTOM = 1, LYRA_CAROUSEL = 2, LYRA_MARCOAND75 = 3, UI_THEME_COUNT };
   enum DATE_FORMAT { DATE_DD_MM_YYYY = 0, DATE_MM_DD_YYYY = 1, DATE_YYYY_MM_DD = 2, DATE_FORMAT_COUNT };
+  enum DISPLAY_HEADER {
+    DISPLAY_HEADER_OFF = 0,
+    DISPLAY_HEADER_DATE_ONLY = 1,
+    DISPLAY_HEADER_TIME_ONLY = 2,
+    DISPLAY_HEADER_BOTH = 3,
+    DISPLAY_HEADER_MODE_COUNT = 4,
+  };
   enum SYNC_DAY_WIFI_CHOICE { SYNC_DAY_WIFI_AUTO = 0, SYNC_DAY_WIFI_MANUAL = 1, SYNC_DAY_WIFI_CHOICE_COUNT };
   enum DAILY_GOAL_TARGET {
     DAILY_GOAL_15_MIN = 0,
@@ -341,6 +355,9 @@ class CrossPointSettings {
   uint8_t statusBarTitle = CHAPTER_TITLE;
   uint8_t statusBarBattery = 1;
   uint8_t statusBarTimeLeft = TIME_LEFT_HIDE;
+  uint8_t statusBarClock = STATUS_BAR_CLOCK_HIDE;
+  uint8_t clockFormat = 0;   // 0=12h, 1=24h
+  uint8_t clockHasBeenSynced = 0;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
@@ -413,7 +430,8 @@ class CrossPointSettings {
   uint8_t darkMode = 0;
   uint8_t antiGhostingExperimental = 0;
   // Home/apps helpers
-  uint8_t displayDay = 1;
+  uint8_t displayDay = DISPLAY_HEADER_TIME_ONLY;  // Default: show time (12h)
+  uint8_t clockSyncSkipNext = 0;  // skip n auto-syncs
   uint8_t autoSyncDay = 1;
   uint8_t homeBookSource = HOME_BOOKS_RECENTS;
   uint8_t syncDayWifiChoice = SYNC_DAY_WIFI_AUTO;
@@ -565,6 +583,16 @@ class CrossPointSettings {
   uint8_t getSyncDayReminderStartThreshold() const;
   int getRefreshFrequency() const;
   bool getForcedReaderRefreshMode(HalDisplay::RefreshMode& mode) const;
+
+  // Clamp displayDay to valid DISPLAY_HEADER range for safety
+  void normalizeDisplayDay() {
+    if (displayDay >= DISPLAY_HEADER_MODE_COUNT) {
+      displayDay = DISPLAY_HEADER_TIME_ONLY;
+    }
+  }
+
+  // True if the DS3231 hardware RTC is present and can drive clock display
+  bool isHardwareRtcAutoDayClockActive() const { return true; }
 };
 
 // Helper macro to access settings

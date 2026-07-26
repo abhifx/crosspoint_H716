@@ -1,6 +1,7 @@
 #include "WifiSelectionActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
@@ -8,11 +9,13 @@
 #include <algorithm>
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "WifiCredentialStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
 #include <esp_mac.h>
@@ -39,6 +42,7 @@ void WifiSelectionActivity::onEnter() {
   // Reset state
   selectedNetworkIndex = 0;
   networks.clear();
+  realNetworkCount = 0;
   state = WifiSelectionState::SCANNING;
   selectedSSID.clear();
   selectedRequiresPassword = false;
@@ -103,6 +107,7 @@ void WifiSelectionActivity::startWifiScan() {
   autoConnecting = false;
   state = WifiSelectionState::SCANNING;
   networks.clear();
+  realNetworkCount = 0;
   requestUpdate();
 
   // Set WiFi mode to station
@@ -124,7 +129,11 @@ void WifiSelectionActivity::processWifiScanResults() {
   }
 
   if (scanResult == WIFI_SCAN_FAILED) {
+    networks.clear();
+    realNetworkCount = 0;
+    appendHiddenNetworkEntry();
     state = WifiSelectionState::NETWORK_LIST;
+    selectedNetworkIndex = 0;
     requestUpdate();
     return;
   }
@@ -175,6 +184,9 @@ void WifiSelectionActivity::processWifiScanResults() {
     return a.rssi > b.rssi;
   });
 
+  realNetworkCount = networks.size();
+  appendHiddenNetworkEntry();
+
   WiFi.scanDelete();
 
   // Auto-connect to the best saved-password network if one is in range and the
@@ -182,7 +194,7 @@ void WifiSelectionActivity::processWifiScanResults() {
   // connected SSID when it is present in scan results; otherwise fall back to
   // the strongest saved network because the list is already sorted with saved
   // networks first and RSSI descending inside each group.
-  if (allowAutoConnect && !networks.empty()) {
+  if (allowAutoConnect && realNetworkCount > 0) {
     const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
     if (!lastSsid.empty()) {
       const auto remembered = std::find_if(networks.begin(), networks.end(), [&lastSsid](const WifiNetworkInfo& network) {
@@ -213,12 +225,26 @@ void WifiSelectionActivity::processWifiScanResults() {
   requestUpdate();
 }
 
+void WifiSelectionActivity::appendHiddenNetworkEntry() {
+  WifiNetworkInfo placeholder;
+  placeholder.rssi = 0;
+  placeholder.isEncrypted = true;
+  placeholder.hasSavedPassword = false;
+  placeholder.isHiddenPlaceholder = true;
+  networks.push_back(std::move(placeholder));
+}
+
 void WifiSelectionActivity::selectNetwork(const int index) {
   if (index < 0 || index >= static_cast<int>(networks.size())) {
     return;
   }
 
   const auto& network = networks[index];
+  if (network.isHiddenPlaceholder) {
+    promptHiddenSsid();
+    return;
+  }
+
   setSelectedNetwork(network);
   usedSavedPassword = false;
   enteredPassword.clear();
@@ -229,25 +255,53 @@ void WifiSelectionActivity::selectNetwork(const int index) {
   }
 
   if (selectedRequiresPassword) {
-    // Show password entry
-    state = WifiSelectionState::PASSWORD_ENTRY;
-    // Don't allow screen updates while changing activity
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ENTER_WIFI_PASSWORD),
-                                                                   "",  // No initial text
-                                                                   64,  // Max password length
-                                                                   InputType::Password),
-                           [this](const ActivityResult& result) {
-                             if (result.isCancelled) {
-                               state = WifiSelectionState::NETWORK_LIST;
-                             } else {
-                               enteredPassword = std::get<KeyboardResult>(result.data).text;
-                               // state will be updated in next loop iteration
-                             }
-                           });
+    promptPasswordEntry();
   } else {
     // Connect directly for open networks
     attemptConnection();
   }
+}
+
+void WifiSelectionActivity::promptPasswordEntry() {
+  state = WifiSelectionState::PASSWORD_ENTRY;
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ENTER_WIFI_PASSWORD),
+                                                                 "",  // No initial text
+                                                                 64,  // Max password length
+                                                                 InputType::Password),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             state = WifiSelectionState::NETWORK_LIST;
+                           } else {
+                             enteredPassword = std::get<KeyboardResult>(result.data).text;
+                           }
+                         });
+}
+
+void WifiSelectionActivity::promptHiddenSsid() {
+  selectedSSID.clear();
+  selectedRequiresPassword = true;
+  selectedChannel = 0;
+  selectedHasBssid = false;
+  std::memset(selectedBssid, 0, sizeof(selectedBssid));
+  usedSavedPassword = false;
+  enteredPassword.clear();
+  autoConnecting = false;
+
+  state = WifiSelectionState::HIDDEN_SSID_ENTRY;
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ENTER_WIFI_SSID),
+                                                                 "",  // No initial text
+                                                                 32,  // IEEE 802.11 SSID limit
+                                                                 InputType::Text),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             state = WifiSelectionState::NETWORK_LIST;
+                             return;
+                           }
+                           selectedSSID = std::get<KeyboardResult>(result.data).text;
+                           if (selectedSSID.empty()) {
+                             state = WifiSelectionState::NETWORK_LIST;
+                           }
+                         });
 }
 
 void WifiSelectionActivity::setSelectedNetwork(const WifiNetworkInfo& network) {
@@ -325,6 +379,17 @@ void WifiSelectionActivity::checkConnectionStatus() {
     connectedIP = ipStr;
     autoConnecting = false;
 
+    // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
+    // drifts ~2 ppm so one sync is enough; users can force a re-sync from
+    // Settings > Customise Status Bar > Sync clock now.
+    if (syncRtcOnConnect && halClock.isAvailable() && !SETTINGS.clockHasBeenSynced) {
+      if (halClock.syncFromNTP()) {
+        SETTINGS.clockHasBeenSynced = 1;
+        SETTINGS.saveToFile();
+        TimeUtils::applySystemClockFromRtc(true);
+      }
+    }
+
     // Save this as the last connected network - SD card operations need lock as
     // we use SPI for both
     {
@@ -380,6 +445,18 @@ void WifiSelectionActivity::loop() {
   // Check connection progress
   if (state == WifiSelectionState::CONNECTING || state == WifiSelectionState::AUTO_CONNECTING) {
     checkConnectionStatus();
+    return;
+  }
+
+  if (state == WifiSelectionState::HIDDEN_SSID_ENTRY) {
+    WifiNetworkInfo hidden;
+    hidden.ssid = selectedSSID;
+    hidden.isEncrypted = true;
+    hidden.hasSavedPassword = WIFI_STORE.hasSavedCredential(selectedSSID);
+    if (connectUsingSavedCredential(hidden, false)) {
+      return;
+    }
+    promptPasswordEntry();
     return;
   }
 
@@ -545,7 +622,7 @@ std::string WifiSelectionActivity::getSignalStrengthIndicator(const int32_t rssi
 void WifiSelectionActivity::render(RenderLock&&) {
   // Don't render if we're in PASSWORD_ENTRY state - we're just transitioning
   // from the keyboard subactivity back to the main activity
-  if (state == WifiSelectionState::PASSWORD_ENTRY) {
+  if (state == WifiSelectionState::HIDDEN_SSID_ENTRY || state == WifiSelectionState::PASSWORD_ENTRY) {
     return;
   }
 
@@ -557,7 +634,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
 
   // Draw header
   char countStr[32];
-  snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), networks.size());
+  snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_WIFI_NETWORKS),
                  countStr);
   GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
@@ -572,6 +649,8 @@ void WifiSelectionActivity::render(RenderLock&&) {
       break;
     case WifiSelectionState::NETWORK_LIST:
       renderNetworkList();
+      break;
+    case WifiSelectionState::HIDDEN_SSID_ENTRY:
       break;
     case WifiSelectionState::CONNECTING:
       renderConnecting();
@@ -609,9 +688,17 @@ void WifiSelectionActivity::renderNetworkList() const {
     int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(networks.size()),
-        selectedNetworkIndex, [this](int index) { return networks[index].ssid; }, nullptr, nullptr,
+        selectedNetworkIndex,
         [this](int index) {
-          auto network = networks[index];
+          const auto& network = networks[index];
+          return network.isHiddenPlaceholder ? std::string(tr(STR_ADD_HIDDEN_NETWORK)) : network.ssid;
+        },
+        nullptr, nullptr,
+        [this](int index) {
+          const auto& network = networks[index];
+          if (network.isHiddenPlaceholder) {
+            return std::string();
+          }
           return std::string(network.hasSavedPassword ? "+ " : "") + (network.isEncrypted ? "* " : "") +
                  getSignalStrengthIndicator(network.rssi);
         });

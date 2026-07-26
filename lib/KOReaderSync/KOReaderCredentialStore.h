@@ -1,11 +1,21 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // Document matching method for KOReader sync
 enum class DocumentMatchMethod : uint8_t {
   FILENAME = 0,  // Match by filename (simpler, works across different file sources)
   BINARY = 1,    // Match by partial MD5 of file content (more accurate, but files must be identical)
+};
+
+// One saved KoReader server credential set.
+struct KOReaderProfile {
+  std::string name;
+  std::string username;
+  std::string password;   // Plaintext in memory; obfuscated with hardware key on disk
+  std::string serverUrl;  // Custom sync server URL (empty = default)
+  DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
 };
 
 class KOReaderCredentialStore;
@@ -15,7 +25,10 @@ bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsR
 }  // namespace JsonSettingsIO
 
 /**
- * Singleton class for storing KOReader sync credentials on the SD card.
+ * Singleton class for storing KOReader sync credential profiles on the SD card.
+ * Holds a list of profiles plus an "active" index; all pre-existing accessors
+ * (getUsername(), getPassword(), etc.) read through to whichever profile is
+ * active, so code written before multi-profile support needs no changes.
  * Passwords are XOR-obfuscated with the device's unique hardware MAC address
  * and base64-encoded before writing to JSON (not cryptographically secure,
  * but prevents casual reading and ties credentials to the specific device).
@@ -23,10 +36,10 @@ bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsR
 class KOReaderCredentialStore {
  private:
   static KOReaderCredentialStore instance;
-  std::string username;
-  std::string password;
-  std::string serverUrl;                                            // Custom sync server URL (empty = default)
-  DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
+  std::vector<KOReaderProfile> profiles;
+  int activeIndex = -1;  // -1 = no profile saved yet
+
+  static constexpr size_t MAX_PROFILES = 8;
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -48,30 +61,49 @@ class KOReaderCredentialStore {
   bool saveToFile() const;
   bool loadFromFile();
 
-  // Credential management
+  // --- Active-profile accessors -- unchanged signatures, existing callers keep working ---
+
+  // Credential management (active profile; creates a first profile on first use if none exists)
   void setCredentials(const std::string& user, const std::string& pass);
-  const std::string& getUsername() const { return username; }
-  const std::string& getPassword() const { return password; }
+  const std::string& getUsername() const;
+  const std::string& getPassword() const;
 
   // Get MD5 hash of password for API authentication
   std::string getMd5Password() const;
 
-  // Check if credentials are set
+  // Check if credentials are set on the active profile
   bool hasCredentials() const;
 
-  // Clear credentials
+  // Clear credentials on the active profile
   void clearCredentials();
 
-  // Server URL management
+  // Server URL management (active profile)
   void setServerUrl(const std::string& url);
-  const std::string& getServerUrl() const { return serverUrl; }
+  const std::string& getServerUrl() const;
 
   // Get base URL for API calls (with http:// normalization if no protocol, falls back to default)
   std::string getBaseUrl() const;
 
-  // Document matching method
+  // Document matching method (active profile)
   void setMatchMethod(DocumentMatchMethod method);
-  DocumentMatchMethod getMatchMethod() const { return matchMethod; }
+  DocumentMatchMethod getMatchMethod() const;
+
+  // --- Multi-profile management ---
+
+  bool addProfile(const KOReaderProfile& profile);
+  bool updateProfile(size_t index, const KOReaderProfile& profile);
+  bool removeProfile(size_t index);
+
+  const std::vector<KOReaderProfile>& getProfiles() const { return profiles; }
+  const KOReaderProfile* getProfile(size_t index) const;
+  size_t getCount() const { return profiles.size(); }
+  bool hasProfiles() const { return !profiles.empty(); }
+  bool canAddProfile() const { return profiles.size() < MAX_PROFILES; }
+
+  // Index of the currently active profile, or -1 if none saved yet.
+  int getActiveIndex() const { return activeIndex; }
+  // Sets the active profile and persists the choice as the new default.
+  bool setActiveIndex(size_t index);
 };
 
 // Helper macro to access credential store

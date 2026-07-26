@@ -2,15 +2,19 @@
 
 #include <ArduinoJson.h>
 #include <FsHelpers.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
+#include <esp_efuse.h>
+#include <esp_efuse_table.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -28,8 +32,6 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/IfFoundPageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
-#include "html/AppSettingsPageHtml.generated.h"
-#include "html/LogoPng.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/IfFoundFile.h"
@@ -216,7 +218,7 @@ int webSettingsCategoryIndex(StrId category) {
 }
 
 enum class WebSettingType : uint8_t { Toggle, Enum, Value, String };
-enum class WebDynamicSetting : uint8_t { None, KoUsername, KoPassword, KoServerUrl, KoMatchMethod, LibraryRootDir, ScreenSaverText, SdFontFamily, ScreenSaverDir, ScreenSaverReaderDir };
+enum class WebDynamicSetting : uint8_t { None, KoUsername, KoPassword, KoServerUrl, KoMatchMethod };
 
 struct WebSettingDef {
   StrId nameId;
@@ -248,8 +250,8 @@ constexpr StrId OPT_SLEEP_FILTER[] = {StrId::STR_NONE_OPT, StrId::STR_FILTER_CON
 constexpr StrId OPT_HIDE_BATTERY[] = {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS};
 constexpr StrId OPT_REFRESH_FREQ[] = {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                                       StrId::STR_PAGES_30};
-constexpr StrId OPT_UI_THEME[] = {StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_CUSTOM, StrId::STR_THEME_LYRA_CAROUSEL,
-                                   StrId::STR_THEME_LYRA_MARCOAND75};
+constexpr StrId OPT_UI_THEME[] = {StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_CUSTOM, StrId::STR_THEME_LYRA_CAROUSEL};
+constexpr StrId OPT_FONT_FAMILY[] = {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS};
 constexpr StrId OPT_FONT_SIZE[] = {StrId::STR_X_SMALL, StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE,
                                    StrId::STR_X_LARGE};
 constexpr StrId OPT_LINE_SPACING[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
@@ -262,21 +264,16 @@ constexpr StrId OPT_TEXT_DARKNESS[] = {StrId::STR_NORMAL, StrId::STR_LEGACY_BW, 
 constexpr StrId OPT_READER_REFRESH[] = {StrId::STR_REFRESH_MODE_AUTO, StrId::STR_REFRESH_MODE_FAST,
                                         StrId::STR_REFRESH_MODE_HALF, StrId::STR_REFRESH_MODE_FULL};
 constexpr StrId OPT_IMAGES[] = {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS};
-constexpr StrId OPT_EPUB_RENDER_MODE[] = {StrId::STR_STATE_DEFAULT, StrId::STR_BALANCED, StrId::STR_LIGHT};
-constexpr StrId OPT_DOTS_SPACING[] = {StrId::STR_DOTS_SPACING_STANDARD, StrId::STR_DOTS_SPACING_LARGE};
 constexpr StrId OPT_SIDE_BUTTONS[] = {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV};
 constexpr StrId OPT_LONG_PRESS_BEHAVIOR[] = {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING};
-constexpr StrId OPT_FRONT_LONG_PRESS_BEHAVIOR[] = {StrId::STR_LONG_PRESS_BEHAVIOR_OFF,
-                                                    StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK,
-                                                    StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING};
+                                             StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION};
 constexpr StrId OPT_SHORT_PWR[] = {StrId::STR_IGNORE, StrId::STR_SLEEP, StrId::STR_PAGE_TURN, StrId::STR_FORCE_REFRESH,
                                    StrId::STR_TOGGLE_STATUS_BAR};
 constexpr StrId OPT_TILT_PAGE_TURN[] = {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED};
 constexpr StrId OPT_SLEEP_TIMEOUT[] = {StrId::STR_MIN_1, StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15,
                                        StrId::STR_MIN_30};
+constexpr StrId OPT_DISPLAY_HEADER[] = {StrId::STR_STATE_OFF, StrId::STR_DISPLAY_DATE_ONLY,
+                                        StrId::STR_DISPLAY_TIME_ONLY, StrId::STR_DISPLAY_DAY_AND_TIME};
 constexpr StrId OPT_AUTO_MANUAL[] = {StrId::STR_REFRESH_MODE_AUTO, StrId::STR_MANUAL};
 constexpr StrId OPT_REMINDER_STARTS[] = {StrId::STR_STATE_OFF, StrId::STR_NUM_10, StrId::STR_NUM_20, StrId::STR_NUM_30,
                                          StrId::STR_NUM_40,    StrId::STR_NUM_50, StrId::STR_NUM_60};
@@ -297,37 +294,8 @@ constexpr StrId OPT_BOOK_CHAPTER_HIDE[] = {StrId::STR_BOOK, StrId::STR_CHAPTER, 
 constexpr StrId OPT_BAR_THICKNESS[] = {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM,
                                        StrId::STR_PROGRESS_BAR_THICK};
 constexpr StrId OPT_XTC_STATUS_BAR[] = {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP};
-
-// Library (App settings) options
-constexpr StrId OPT_LIBRARY_LAYOUT[] = {StrId::STR_LIBRARY_4X4, StrId::STR_LIBRARY_3X3, StrId::STR_LIBRARY_2X2};
-constexpr StrId OPT_LIBRARY_FILTER[] = {StrId::STR_ALL_BOOKS, StrId::STR_FAVOURITES, StrId::STR_LATEST_READ};
-
-// Screensaver (App settings) options
-constexpr StrId OPT_SCREENSAVER_INTERVAL[] = {
-    StrId::STR_SCREENSAVER_INTERVAL_1M, StrId::STR_SCREENSAVER_INTERVAL_5M, StrId::STR_SCREENSAVER_INTERVAL_15M,
-    StrId::STR_SCREENSAVER_INTERVAL_30M, StrId::STR_SCREENSAVER_INTERVAL_1H, StrId::STR_SCREENSAVER_INTERVAL_2H,
-    StrId::STR_SCREENSAVER_INTERVAL_4H, StrId::STR_SCREENSAVER_INTERVAL_8H};
-constexpr StrId OPT_SCREENSAVER_WAKE[] = {
-    StrId::STR_SCREENSAVER_WAKE_ANY,  StrId::STR_SCREENSAVER_WAKE_BACK,    StrId::STR_SCREENSAVER_WAKE_CONFIRM,
-    StrId::STR_SCREENSAVER_WAKE_LEFT, StrId::STR_SCREENSAVER_WAKE_RIGHT,   StrId::STR_SCREENSAVER_WAKE_UP,
-    StrId::STR_SCREENSAVER_WAKE_DOWN, StrId::STR_SCREENSAVER_WAKE_POWER,   StrId::STR_SCREENSAVER_WAKE_PAGE_BACK,
-    StrId::STR_SCREENSAVER_WAKE_PAGE_FORWARD};
-constexpr StrId OPT_SCREENSAVER_FONT_SIZE[] = {StrId::STR_X_SMALL, StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE};
-constexpr StrId OPT_SCREENSAVER_TEXT_POSITION[] = {
-    StrId::STR_SCREENSAVER_TEXT_POS_TOP_LEFT,  StrId::STR_SCREENSAVER_TEXT_POS_TOP_RIGHT,
-    StrId::STR_SCREENSAVER_TEXT_POS_BOTTOM_LEFT, StrId::STR_SCREENSAVER_TEXT_POS_BOTTOM_RIGHT,
-    StrId::STR_SCREENSAVER_TEXT_POS_CENTER, StrId::STR_SCREENSAVER_TEXT_POS_RANDOM};
-constexpr StrId OPT_SCREENSAVER_TEXT_STYLE[] = {
-    StrId::STR_SCREENSAVER_TEXT_WHITE, StrId::STR_SCREENSAVER_TEXT_BLACK, StrId::STR_SCREENSAVER_TEXT_WHITE_OUTLINED,
-    StrId::STR_SCREENSAVER_TEXT_BLACK_OUTLINED};
-constexpr StrId OPT_SCREENSAVER_PANEL_COLOR[] = {StrId::STR_DARK, StrId::STR_LIGHT};
-constexpr StrId OPT_SCREENSAVER_PANEL_OPACITY[] = {StrId::STR_SCREENSAVER_OPACITY_25, StrId::STR_SCREENSAVER_OPACITY_50,
-                                                   StrId::STR_SCREENSAVER_OPACITY_75, StrId::STR_SCREENSAVER_OPACITY_100};
-constexpr StrId OPT_SCREENSAVER_MIN_BATTERY[] = {
-    StrId::STR_SCREENSAVER_BAT_10, StrId::STR_SCREENSAVER_BAT_20, StrId::STR_SCREENSAVER_BAT_30,
-    StrId::STR_SCREENSAVER_BAT_40, StrId::STR_SCREENSAVER_BAT_50, StrId::STR_SCREENSAVER_BAT_60,
-    StrId::STR_SCREENSAVER_BAT_70, StrId::STR_SCREENSAVER_BAT_80, StrId::STR_SCREENSAVER_BAT_90};
-constexpr StrId OPT_SCREENSAVER_ORDER[] = {StrId::STR_RANDOM, StrId::STR_SEQUENTIAL};
+constexpr StrId OPT_STATUS_BAR_CLOCK[] = {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT};
+constexpr StrId OPT_CLOCK_FORMAT[] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
 
 #define WEB_TOGGLE(name, member, key, category)                                                                       \
   {name, category, WebSettingType::Toggle, &CrossPointSettings::member, nullptr, 0, 0, 0, 0, WebDynamicSetting::None, \
@@ -380,7 +348,7 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_TOGGLE(StrId::STR_DARK_MODE, darkMode, "darkMode", StrId::STR_CAT_DISPLAY),
     WEB_TOGGLE(StrId::STR_SUNLIGHT_FADING_FIX, fadingFix, "fadingFix", StrId::STR_CAT_DISPLAY),
 
-    WEB_DYNAMIC_STRING(StrId::STR_FONT_INSTALLED, WebDynamicSetting::SdFontFamily, "sdFontFamily", StrId::STR_CAT_READER),
+    WEB_ENUM(StrId::STR_FONT_FAMILY, fontFamily, OPT_FONT_FAMILY, "fontFamily", StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_FONT_SIZE, fontSize, OPT_FONT_SIZE, "fontSize", StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_LINE_SPACING, lineSpacing, OPT_LINE_SPACING, "lineSpacing", StrId::STR_CAT_READER),
     WEB_VALUE(StrId::STR_SCREEN_MARGIN, screenMargin, 5, 40, 5, "screenMargin", StrId::STR_CAT_READER),
@@ -388,8 +356,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_TOGGLE(StrId::STR_EMBEDDED_STYLE, embeddedStyle, "embeddedStyle", StrId::STR_CAT_READER),
     WEB_TOGGLE(StrId::STR_HYPHENATION, hyphenationEnabled, "hyphenationEnabled", StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_BIONIC_READING, bionicReading, OPT_BIONIC, "bionicReading", StrId::STR_CAT_READER),
-    WEB_TOGGLE(StrId::STR_GUIDE_READING, guideReadingEnabled, "guideReadingEnabled", StrId::STR_CAT_READER),
-    WEB_ENUM(StrId::STR_DOTS_SPACING, dotsSpacing, OPT_DOTS_SPACING, "dotsSpacing", StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_ORIENTATION, orientation, OPT_ORIENTATION, "orientation", StrId::STR_CAT_READER),
     WEB_TOGGLE(StrId::STR_EXTRA_SPACING, extraParagraphSpacing, "extraParagraphSpacing", StrId::STR_CAT_READER),
     WEB_TOGGLE(StrId::STR_FORCE_PARAGRAPH_INDENTS, forceParagraphIndents, "forceParagraphIndents",
@@ -399,7 +365,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_ENUM(StrId::STR_READER_REFRESH_MODE, readerRefreshMode, OPT_READER_REFRESH, "readerRefreshMode",
              StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_IMAGES, imageRendering, OPT_IMAGES, "imageRendering", StrId::STR_CAT_READER),
-    WEB_ENUM(StrId::STR_EPUB_RENDER_MODE, epubRenderMode, OPT_EPUB_RENDER_MODE, "epubRenderMode", StrId::STR_CAT_READER),
 
     WEB_ENUM(StrId::STR_SIDE_BTN_LAYOUT, sideButtonLayout, OPT_SIDE_BUTTONS, "sideButtonLayout",
              StrId::STR_CAT_CONTROLS),
@@ -407,8 +372,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
                StrId::STR_CAT_CONTROLS),
     WEB_ENUM(StrId::STR_LONG_PRESS_BEHAVIOR, longPressButtonBehavior, OPT_LONG_PRESS_BEHAVIOR,
              "longPressButtonBehavior", StrId::STR_CAT_CONTROLS),
-    WEB_ENUM(StrId::STR_FRONT_LONG_PRESS_BEHAVIOR, frontLongPressBehavior, OPT_FRONT_LONG_PRESS_BEHAVIOR,
-             "frontLongPressBehavior", StrId::STR_CAT_CONTROLS),
     WEB_ENUM(StrId::STR_SHORT_PWR_BTN, shortPwrBtn, OPT_SHORT_PWR, "shortPwrBtn", StrId::STR_CAT_CONTROLS),
     WEB_ENUM(StrId::STR_TILT_PAGE_TURN, tiltPageTurn, OPT_TILT_PAGE_TURN, "tiltPageTurn", StrId::STR_CAT_CONTROLS),
 
@@ -416,6 +379,7 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_TOGGLE(StrId::STR_SHOW_HIDDEN_FILES, showHiddenFiles, "showHiddenFiles", StrId::STR_CAT_SYSTEM),
 
     WEB_TOGGLE(StrId::STR_DISPLAY_DAY, displayDay, "displayDay", StrId::STR_APPS),
+    WEB_ENUM(StrId::STR_DISPLAY_DAY_TIME, displayDay, OPT_DISPLAY_HEADER, "displayDay", StrId::STR_APPS),
     WEB_ENUM(StrId::STR_CHOOSE_WIFI, syncDayWifiChoice, OPT_AUTO_MANUAL, "syncDayWifiChoice", StrId::STR_APPS),
     WEB_ENUM(StrId::STR_SYNC_DAY_REMINDER_EVERY, syncDayReminderStarts, OPT_REMINDER_STARTS, "syncDayReminderStarts",
              StrId::STR_APPS),
@@ -429,36 +393,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_TOGGLE(StrId::STR_MOVE_COMPLETED_BOOKS, moveCompletedBooks, "moveCompletedBooks", StrId::STR_APPS),
     WEB_TOGGLE(StrId::STR_ENABLE_ACHIEVEMENTS, achievementsEnabled, "achievementsEnabled", StrId::STR_APPS),
     WEB_TOGGLE(StrId::STR_ACHIEVEMENT_POPUPS, achievementPopups, "achievementPopups", StrId::STR_APPS),
-
-    // Library settings (App tab)
-    WEB_ENUM(StrId::STR_LIBRARY_LAYOUT, libraryLayout, OPT_LIBRARY_LAYOUT, "libraryLayout", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_LIBRARY_FILTER, libraryFilter, OPT_LIBRARY_FILTER, "libraryFilter", StrId::STR_APPS),
-    WEB_DYNAMIC_STRING(StrId::STR_LIBRARY_ROOT_DIR, WebDynamicSetting::LibraryRootDir, "libraryRootDir", StrId::STR_APPS),
-
-    // Screensaver settings (App tab)
-    WEB_ENUM(StrId::STR_SCREENSAVER_INTERVAL, screenSaverInterval, OPT_SCREENSAVER_INTERVAL, "screenSaverInterval",
-             StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_WAKE_BUTTON, screenSaverWakeButton, OPT_SCREENSAVER_WAKE, "screenSaverWakeButton",
-             StrId::STR_APPS),
-    WEB_TOGGLE(StrId::STR_SCREENSAVER_REPLACE_SLEEP, screenSaverReplaceSleep, "screenSaverReplaceSleep", StrId::STR_APPS),
-    WEB_DYNAMIC_STRING(StrId::STR_SCREENSAVER_TEXT, WebDynamicSetting::ScreenSaverText, "screenSaverText", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_FONT_SIZE_OPT, screenSaverFontSize, OPT_SCREENSAVER_FONT_SIZE, "screenSaverFontSize",
-             StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_TEXT_POSITION_OPT, screenSaverTextPosition, OPT_SCREENSAVER_TEXT_POSITION,
-             "screenSaverTextPosition", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_TEXT_STYLE_OPT, screenSaverTextStyle, OPT_SCREENSAVER_TEXT_STYLE,
-             "screenSaverTextStyle", StrId::STR_APPS),
-    WEB_TOGGLE(StrId::STR_SCREENSAVER_SHOW_PANEL, screenSaverShowPanel, "screenSaverShowPanel", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_PANEL_COLOR, screenSaverPanelColor, OPT_SCREENSAVER_PANEL_COLOR,
-             "screenSaverPanelColor", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_PANEL_OPACITY, screenSaverPanelOpacity, OPT_SCREENSAVER_PANEL_OPACITY,
-             "screenSaverPanelOpacity", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_MIN_BATTERY, screenSaverMinBattery, OPT_SCREENSAVER_MIN_BATTERY,
-             "screenSaverMinBattery", StrId::STR_APPS),
-    WEB_DYNAMIC_STRING(StrId::STR_SCREENSAVER_DIRECTORY, WebDynamicSetting::ScreenSaverDir, "screenSaverDir", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_ORDER, screenSaverOrder, OPT_SCREENSAVER_ORDER, "screenSaverOrder", StrId::STR_APPS),
-    WEB_DYNAMIC_STRING(StrId::STR_SCREENSAVER_READER_DIR, WebDynamicSetting::ScreenSaverReaderDir, "screenSaverReaderDir", StrId::STR_APPS),
-    WEB_ENUM(StrId::STR_SCREENSAVER_ORDER, screenSaverReaderOrder, OPT_SCREENSAVER_ORDER, "screenSaverReaderOrder", StrId::STR_APPS),
 
     WEB_ENUM(StrId::STR_BROWSE_FILES, browseFilesShortcut, OPT_SHORTCUT_LOCATION, "browseFilesShortcut",
              StrId::STR_SHORTCUTS_SECTION),
@@ -478,7 +412,7 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
              StrId::STR_SHORTCUTS_SECTION),
     WEB_ENUM(StrId::STR_MENU_RECENT_BOOKS, recentBooksShortcut, OPT_SHORTCUT_LOCATION, "recentBooksShortcut",
              StrId::STR_SHORTCUTS_SECTION),
-    WEB_ENUM(StrId::STR_BOOKMARKS, bookmarksShortcut, OPT_SHORTCUT_LOCATION, "bookmarksShortcut",
+    WEB_ENUM(StrId::STR_HIGHLIGHTS, bookmarksShortcut, OPT_SHORTCUT_LOCATION, "bookmarksShortcut",
              StrId::STR_SHORTCUTS_SECTION),
     WEB_ENUM(StrId::STR_FAVORITES, favoritesShortcut, OPT_SHORTCUT_LOCATION, "favoritesShortcut",
              StrId::STR_SHORTCUTS_SECTION),
@@ -515,6 +449,9 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_TOGGLE(StrId::STR_BATTERY, statusBarBattery, "statusBarBattery", StrId::STR_CUSTOMISE_STATUS_BAR),
     WEB_ENUM(StrId::STR_XTC_STATUS_BAR, xtcStatusBarMode, OPT_XTC_STATUS_BAR, "xtcStatusBarMode",
              StrId::STR_CUSTOMISE_STATUS_BAR),
+    WEB_ENUM(StrId::STR_CLOCK, statusBarClock, OPT_STATUS_BAR_CLOCK, "statusBarClock", StrId::STR_CUSTOMISE_STATUS_BAR),
+    WEB_ENUM(StrId::STR_CLOCK_FORMAT, clockFormat, OPT_CLOCK_FORMAT, "clockFormat", StrId::STR_CUSTOMISE_STATUS_BAR),
+    WEB_TOGGLE(StrId::STR_CLOCK_SYNCED, clockHasBeenSynced, "clockHasBeenSynced", StrId::STR_CUSTOMISE_STATUS_BAR),
 };
 
 #undef WEB_DYNAMIC_STRING
@@ -533,7 +470,24 @@ const WebSettingDef* findWebSetting(const char* key) {
 }
 
 bool isWebSettingVisible(const WebSettingDef& setting) {
-  return setting.nameId != StrId::STR_TILT_PAGE_TURN || halTiltSensor.isAvailable();
+  if (setting.nameId == StrId::STR_TILT_PAGE_TURN && !halTiltSensor.isAvailable()) {
+    return false;
+  }
+  if ((setting.nameId == StrId::STR_CLOCK || setting.nameId == StrId::STR_CLOCK_FORMAT ||
+       setting.nameId == StrId::STR_CLOCK_SYNCED) &&
+      !halClock.isAvailable()) {
+    return false;
+  }
+  if (setting.nameId == StrId::STR_SYNC_DAY_REMINDER_EVERY && SETTINGS.isHardwareRtcAutoDayClockActive()) {
+    return false;
+  }
+  if (setting.nameId == StrId::STR_DISPLAY_DAY && SETTINGS.isHardwareRtcAutoDayClockActive()) {
+    return false;
+  }
+  if (setting.nameId == StrId::STR_DISPLAY_DAY_TIME && !SETTINGS.isHardwareRtcAutoDayClockActive()) {
+    return false;
+  }
+  return true;
 }
 }  // namespace
 
@@ -614,8 +568,6 @@ void CrossPointWebServer::begin() {
 
   // Settings endpoints
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
-  server->on("/app-settings", HTTP_GET, [this] { handleAppSettingsPage(); });
-  server->on("/logo.png", HTTP_GET, [this] { handleLogo(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
 
@@ -736,11 +688,9 @@ void CrossPointWebServer::stop() {
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
 
-  // Free font upload buffer if still allocated (saves ~4KB)
-  fontUpload.freeBuffer();
-  upload.freeBuffer();
-
-  LOG_DBG("WEB", "[MEM] Free heap after buffer cleanup: %d bytes", ESP.getFreeHeap());
+  // Note: Static upload variables (uploadFileName, uploadPath, uploadError) are declared
+  // later in the file and will be cleared when they go out of scope or on next upload
+  LOG_DBG("WEB", "[MEM] Free heap final: %d bytes", ESP.getFreeHeap());
 }
 
 void CrossPointWebServer::handleClient() {
@@ -822,6 +772,15 @@ void CrossPointWebServer::handleJszip() const {
 }
 
 void CrossPointWebServer::handleNotFound() const {
+  // in AP mode, redirect unmatched browser/captive-portal requests to "/" so the OS auto-opens the browser
+  // API requests (/api/*) still return 404 so XHR errors surface correctly
+  // see https://en.wikipedia.org/wiki/Captive_portal#Detection
+  if (apMode && !server->uri().startsWith("/api/")) {
+    server->sendHeader("Location", "/", true);
+    server->send(302, "text/plain", "");
+    return;
+  }
+
   String message = "404 Not Found\n\n";
   message += "URI: " + server->uri() + "\n";
   server->send(404, "text/plain", message);
@@ -848,6 +807,16 @@ void CrossPointWebServer::handleStatus() const {
   doc["streakDays"] = READING_STATS.getCurrentStreakDays();
   doc["achievementsUnlocked"] = unlockedAchievements;
   doc["achievementsTotal"] = totalAchievements;
+
+  char serialNumber[33] = {};
+  bool validSerial = false;
+  if (esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA, serialNumber, 256) == ESP_OK) {
+    validSerial = serialNumber[0] != '\0' && serialNumber[0] != static_cast<char>(0xFF);
+    for (size_t index = 0; validSerial && index < 32 && serialNumber[index] != '\0'; ++index) {
+      validSerial = std::isprint(static_cast<unsigned char>(serialNumber[index])) != 0;
+    }
+  }
+  doc["serial"] = validSerial ? serialNumber : "Not found";
 
   String json;
   serializeJson(doc, json);
@@ -980,13 +949,6 @@ void CrossPointWebServer::handleFontUploadData() {
     case UPLOAD_FILE_START: {
       esp_task_wdt_reset();
       String family = server->arg("family");
-
-      // Allocate font upload buffer on heap (saves ~4KB of DRAM when not uploading)
-      if (!fontUpload.allocateBuffer()) {
-        LOG_ERR("WEB", "Failed to allocate font upload buffer");
-        break;
-      }
-
       fontUpload.file = HalFile();
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
@@ -1047,13 +1009,13 @@ void CrossPointWebServer::handleFontUploadData() {
       while (remaining > 0) {
         const size_t space = FontUploadState::BUFFER_SIZE - fontUpload.bufferPos;
         const size_t chunk = (remaining < space) ? remaining : space;
-        memcpy(fontUpload.buffer.get() + fontUpload.bufferPos, src, chunk);
+        memcpy(fontUpload.buffer.data() + fontUpload.bufferPos, src, chunk);
         fontUpload.bufferPos += chunk;
         src += chunk;
         remaining -= chunk;
 
         if (fontUpload.bufferPos >= FontUploadState::BUFFER_SIZE) {
-          fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
+          fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
           fontUpload.bytesWritten += fontUpload.bufferPos;
           fontUpload.bufferPos = 0;
           esp_task_wdt_reset();
@@ -1064,7 +1026,7 @@ void CrossPointWebServer::handleFontUploadData() {
 
     case UPLOAD_FILE_END: {
       if (fontUpload.valid && fontUpload.bufferPos > 0) {
-        fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
+        fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
         fontUpload.bytesWritten += fontUpload.bufferPos;
         fontUpload.bufferPos = 0;
       }
@@ -1077,7 +1039,6 @@ void CrossPointWebServer::handleFontUploadData() {
       }
 
       LOG_DBG("WEB", "Font upload end: valid=%d, %zu bytes", fontUpload.valid, fontUpload.bytesWritten);
-      fontUpload.freeBuffer();
       break;
     }
 
@@ -1090,7 +1051,6 @@ void CrossPointWebServer::handleFontUploadData() {
       }
       fontUpload.valid = false;
       LOG_DBG("WEB", "Font upload aborted");
-      fontUpload.freeBuffer();
       break;
     }
   }
@@ -1360,7 +1320,7 @@ static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   if (state.bufferPos > 0 && state.file) {
     esp_task_wdt_reset();  // Reset watchdog before potentially slow SD write
     const unsigned long writeStart = millis();
-    const size_t written = state.file.write(state.buffer.get(), state.bufferPos);
+    const size_t written = state.file.write(state.buffer.data(), state.bufferPos);
     totalWriteTime += millis() - writeStart;
     writeCount++;
     esp_task_wdt_reset();  // Reset watchdog after SD write
@@ -1392,9 +1352,6 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
   if (upload.status == UPLOAD_FILE_START) {
     // Reset watchdog - this is the critical 1% crash point
     esp_task_wdt_reset();
-
-    // Allocate upload buffer on heap (saves ~4KB of DRAM when not uploading)
-    state.allocateBuffer();
 
     state.fileName = upload.filename;
     state.size = 0;
@@ -1460,7 +1417,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         const size_t space = UploadState::UPLOAD_BUFFER_SIZE - state.bufferPos;
         const size_t toCopy = (remaining < space) ? remaining : space;
 
-        memcpy(state.buffer.get() + state.bufferPos, data, toCopy);
+        memcpy(state.buffer.data() + state.bufferPos, data, toCopy);
         state.bufferPos += toCopy;
         data += toCopy;
         remaining -= toCopy;
@@ -1510,7 +1467,6 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         filePath += state.fileName;
         clearBookCache(filePath.c_str());
       }
-      state.freeBuffer();
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     state.bufferPos = 0;  // Discard buffered data
@@ -1524,7 +1480,6 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     }
     state.error = "Upload aborted";
     LOG_DBG("WEB", "Upload aborted");
-    state.freeBuffer();
   }
 }
 
@@ -1889,16 +1844,6 @@ void CrossPointWebServer::handleSettingsPage() const {
   LOG_DBG("WEB", "Served settings page");
 }
 
-void CrossPointWebServer::handleAppSettingsPage() const {
-  sendHtmlContent(server.get(), AppSettingsPageHtml, sizeof(AppSettingsPageHtml));
-  LOG_DBG("WEB", "Served app settings page");
-}
-
-void CrossPointWebServer::handleLogo() const {
-  server->sendHeader("Cache-Control", "public, max-age=86400");
-  server->send_P(200, "image/png", LogoPng, LogoPngSize);
-}
-
 void CrossPointWebServer::handleGetSettings() const {
   int requestedCategory = -1;
   if (server->hasArg("category")) {
@@ -1997,21 +1942,6 @@ void CrossPointWebServer::handleGetSettings() const {
             break;
           case WebDynamicSetting::KoServerUrl:
             value = KOREADER_STORE.getServerUrl();
-            break;
-          case WebDynamicSetting::LibraryRootDir:
-            value = SETTINGS.libraryRootDir;
-            break;
-          case WebDynamicSetting::ScreenSaverText:
-            value = SETTINGS.screenSaverText;
-            break;
-          case WebDynamicSetting::ScreenSaverDir:
-            value = SETTINGS.screenSaverDirectory;
-            break;
-          case WebDynamicSetting::ScreenSaverReaderDir:
-            value = SETTINGS.screenSaverReaderDir;
-            break;
-          case WebDynamicSetting::SdFontFamily:
-            value = SETTINGS.sdFontFamilyName;
             break;
           default:
             break;
@@ -2121,31 +2051,6 @@ void CrossPointWebServer::handlePostSettings() {
           case WebDynamicSetting::KoServerUrl:
             KOREADER_STORE.setServerUrl(val);
             saveKOReader = true;
-            break;
-          case WebDynamicSetting::LibraryRootDir:
-            strncpy(SETTINGS.libraryRootDir, val.c_str(), sizeof(SETTINGS.libraryRootDir) - 1);
-            SETTINGS.libraryRootDir[sizeof(SETTINGS.libraryRootDir) - 1] = '\0';
-            saveSettings = true;
-            break;
-          case WebDynamicSetting::ScreenSaverText:
-            strncpy(SETTINGS.screenSaverText, val.c_str(), sizeof(SETTINGS.screenSaverText) - 1);
-            SETTINGS.screenSaverText[sizeof(SETTINGS.screenSaverText) - 1] = '\0';
-            saveSettings = true;
-            break;
-          case WebDynamicSetting::ScreenSaverDir:
-            strncpy(SETTINGS.screenSaverDirectory, val.c_str(), sizeof(SETTINGS.screenSaverDirectory) - 1);
-            SETTINGS.screenSaverDirectory[sizeof(SETTINGS.screenSaverDirectory) - 1] = '\0';
-            saveSettings = true;
-            break;
-          case WebDynamicSetting::ScreenSaverReaderDir:
-            strncpy(SETTINGS.screenSaverReaderDir, val.c_str(), sizeof(SETTINGS.screenSaverReaderDir) - 1);
-            SETTINGS.screenSaverReaderDir[sizeof(SETTINGS.screenSaverReaderDir) - 1] = '\0';
-            saveSettings = true;
-            break;
-          case WebDynamicSetting::SdFontFamily:
-            strncpy(SETTINGS.sdFontFamilyName, val.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
-            SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-            saveSettings = true;
             break;
           default:
             break;

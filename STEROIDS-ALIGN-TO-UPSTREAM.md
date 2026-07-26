@@ -39,6 +39,41 @@ these files during a merge — always keep the local Steroids version:
 | `src/icons/*` (various .h files) | Steroids custom icons |
 | `agent-docs/*` | Steroids documentation |
 | `README.md` (sections marked "Steroids") | Steroids feature documentation |
+| **`src/JsonSettingsIO.cpp`** | **ALL Steroids settings serialization (shortcuts, library, screensaver, clippings, longPress, etc.)** |
+| **`src/JsonSettingsIO.h`** | **Steroids-specific function declarations** |
+| **`src/network/CrossPointWebServer.cpp`** | **App Settings page route, logo endpoint, Steroids routes** |
+| **`src/network/CrossPointWebServer.h`** | **Steroids-specific handler declarations** |
+| **`src/network/html/AppSettingsPage.html`** | **Browser stats/settings editor (deleted by upstream!)** |
+| **`src/SettingsList.cpp`** | **Steroids menu items (library, screensaver, frontLongPress, clippingsShortcut, etc.)** |
+| **`src/activities/ActivityManager.cpp/h`** | **goToLibrary, goToScreensaver, goToClippings methods** |
+
+### Why JsonSettingsIO.cpp is critical
+
+The local Steroids `JsonSettingsIO.cpp` contains serialization for **147+ settings**
+that upstream doesn't have. The upstream version was built for a different feature set
+and will silently drop all Steroids settings when it writes JSON. If you accidentally
+take upstream's `JsonSettingsIO.cpp`:
+- Shortcuts (clippings, library, screensaver) stop saving/loading
+- Screensaver settings (text, font, position, panel color, opacity, interval) stop working
+- Library settings (layout, filter, sort, root dir) stop working
+- Front long press behavior (bookmark/clipping) stops working
+- Guide dots, Bionic Reading, EPUB render modes stop saving
+
+### Why CrossPointWebServer.cpp is critical
+
+The local Steroids `CrossPointWebServer.cpp` has the `/app-settings` route and
+the `handleAppSettingsPage()` method. Upstream deleted the separate App Settings
+page and merged everything into `/settings`. Taking upstream's web server removes:
+- The App Settings browser editor
+- The logo.png endpoint
+- The `AppSettingsPageHtml.generated.h` include
+
+### HTML nav links: App Settings must be added back
+
+Upstream merged App Settings into the main Settings page, so their HTML
+does NOT have an "App Settings" nav link. After any merge where you take
+upstream HTML, you MUST add `<a href="/app-settings">App Settings</a>`
+to all 5 HTML pages in the nav-links section.
 
 ---
 
@@ -329,6 +364,47 @@ echo 1 > artifacts/.release-counter-X-Y-Z.txt
 # Reset dev counter
 echo 0 > artifacts/.dev-counter-X-Y-Z-r1.txt
 ```
+
+---
+
+## KOReaderCredentialStore API Migration
+
+Upstream 1.4.5 changed `KOReaderCredentialStore` from single-profile (direct
+member access: `store.username`, `store.password`) to multi-profile (getter/setter
+API + profiles vector). When you take upstream's `KOReaderCredentialStore.h/cpp`,
+you must also update `JsonSettingsIO.cpp` to use the new API:
+
+1. `saveKOReader` → save as `profiles[]` array (multi-profile format)
+2. `loadKOReader` → load `profiles[]` array, migrate legacy single-profile on first load
+3. Add `saveKOReaderLegacyMirror` → saves single-profile for backwards compat
+4. Add `loadKOReaderLegacyProfile` → loads old single-profile JSON format
+
+All four functions are provided above in the `JsonSettingsIO.cpp` section.
+The upstream `JsonSettingsIO.cpp` contains the reference implementation.
+
+---
+
+## Post-Merge Verification Checklist
+
+After completing a merge, verify these items ON DEVICE (not just build):
+
+| # | Check | Expected result |
+|---|---|---|
+| 1 | Open Settings → Controls → Front Long Press | Should show OFF/Bookmark/Clipping options |
+| 2 | Open Settings → Apps → Clippings Shortcut | Should show location picker |
+| 3 | Open Settings → Apps → Library Shortcut | Should show location picker |
+| 4 | Open Settings → Apps → Screensaver Shortcut | Should show location picker |
+| 5 | Open Apps Hub → Icons (LyraMarcoand75 theme) | All app icons visible with correct order |
+| 6 | Open Web Browser → Settings | Device settings visible |
+| 7 | Open Web Browser → App Settings | App settings visible with Steroids sections |
+| 8 | Open Web Browser → Home | Logo.png visible, About card with GitHub link |
+| 9 | Long press left/right side buttons in reader | Should trigger chapter skip |
+| 10 | Long press front buttons in reader | Should trigger bookmark/clipping (if configured) |
+| 11 | Open Reading Stats | Should show pace info and book stats |
+| 12 | Library cover generation | Should not crash on corrupt EPUBs |
+
+If any of these fail, the merge has overwritten Steroids-specific code.
+Refer to the "Files to NEVER Overwrite" section and restore the local version.
 
 ---
 

@@ -248,6 +248,63 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
   free(opfData);
 
   if (coverImageHref.empty()) {
+    // Strategy 3 (fallback): find first <item> with id or href containing "cover" in <manifest>.
+    // Many EPUBs don't use the standard meta/properties cover markers but still have a
+    // recognizable cover image (e.g., id="cover" or href="Images/cover.jpeg").
+    opfSize = 0;
+    if (zip.getInflatedFileSize(contentOpfPath.c_str(), &opfSize) && opfSize > 0 && opfSize <= 32 * 1024) {
+      opfData = zip.readFileToMemory(contentOpfPath.c_str(), &opfSize);
+      if (opfData) {
+        const char* scanOpf = (const char*)opfData;
+        const char* scanEnd = scanOpf + opfSize;
+        const char* scanPos = scanOpf;
+        while ((scanPos = strstr(scanPos, "<item ")) != nullptr && scanPos < scanEnd) {
+          const char* tagEnd = strchr(scanPos, '>');
+          if (!tagEnd || tagEnd >= scanEnd) { scanPos++; continue; }
+          // Check if id or href contains "cover" (case-insensitive by checking both cases)
+          const char* idAttr = strstr(scanPos, "id=\"");
+          bool isCover = false;
+          if (idAttr && idAttr < tagEnd) {
+            idAttr += 4;
+            const char* idEnd = strchr(idAttr, '"');
+            if (idEnd && idEnd <= tagEnd) {
+              std::string idStr(idAttr, idEnd - idAttr);
+              for (auto& c : idStr) c = tolower(c);
+              if (idStr.find("cover") != std::string::npos) isCover = true;
+            }
+          }
+          if (!isCover) {
+            const char* hrefAttr = strstr(scanPos, "href=\"");
+            if (hrefAttr && hrefAttr < tagEnd) {
+              hrefAttr += 6;
+              const char* hrefEnd = strchr(hrefAttr, '"');
+              if (hrefEnd && hrefEnd <= tagEnd) {
+                std::string hrefStr(hrefAttr, hrefEnd - hrefAttr);
+                for (auto& c : hrefStr) c = tolower(c);
+                if (hrefStr.find("cover") != std::string::npos) isCover = true;
+              }
+            }
+          }
+          if (isCover) {
+            const char* hrefAttr = strstr(scanPos, "href=\"");
+            if (hrefAttr && hrefAttr < tagEnd) {
+              hrefAttr += 6;
+              const char* hrefEnd = strchr(hrefAttr, '"');
+              if (hrefEnd && hrefEnd <= tagEnd) {
+                coverImageHref = FsHelpers::normalisePath(basePath + FsHelpers::decodeUriEscapes(std::string(hrefAttr, hrefEnd - hrefAttr)));
+                LOG_DBG("LIB", "CoverGen: found cover via manifest scan (id/href contains 'cover'): %s", coverImageHref.c_str());
+                break;
+              }
+            }
+          }
+          scanPos = tagEnd + 1;
+        }
+        free(opfData);
+      }
+    }
+  }
+
+  if (coverImageHref.empty()) {
     LOG_DBG("LIB", "CoverGen: no cover image found in OPF for %s", epubPath.c_str());
     return false;
   }

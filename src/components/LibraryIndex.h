@@ -61,6 +61,7 @@ enum class SortMode {
   AUTHOR_DESC = 3,
   RECENT = 4,
   PROGRESS = 5,
+  COLLECTIONS = 6,
 };
 
 // ---- Filter mode ----
@@ -93,6 +94,9 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir = "/
 // RAM: configurable chunk size (4 KB default, see BUILDFLAGS).
 bool buildIndices();
 
+// Build collections index from series.dat (must be called after scan)
+bool buildCollectionsIndex();
+
 // Incremental sync: runs scan() only if library.dat is stale or missing.
 // Falls back to a fast path when nothing changed.
 // RAM: same as scan() + buildIndices().
@@ -108,6 +112,15 @@ bool sync(const char* rootDir = "/");
 // RAM: ~(pageSize * sizeof(BookRef)) + 1 KB I/O buffer.
 int queryPage(BookRef* out, int page, int pageSize, SortMode sortMode,
               const char* searchFilter = nullptr, FilterMode filterMode = FilterMode::ALL);
+
+// Collections: list unique collections
+int queryCollections(BookRef* out, int page, int pageSize);
+
+// Books within a specific collection (by index in idx_collections.bin)
+int queryCollectionBooks(BookRef* out, int page, int pageSize, int collectionIdx);
+
+// Number of unique collections
+int totalCollections();
 
 // Total number of non-tombstone books (fast, from index header).
 int totalBooks();

@@ -29,6 +29,8 @@ constexpr const char* kDatFile  = "/.crosspoint/LIBRARY/library.dat";
 constexpr const char* kScanFile = "/.crosspoint/LIBRARY/scan_state.dat";
 constexpr const char* kIdxTitle  = "/.crosspoint/LIBRARY/idx_title.bin";
 constexpr const char* kIdxAuthor = "/.crosspoint/LIBRARY/idx_author.bin";
+constexpr const char* kIdxCollections = "/.crosspoint/LIBRARY/idx_collections.bin";
+constexpr const char* kSeriesDat = "/.crosspoint/LIBRARY/series.dat";
 constexpr const char* kTmpDir   = "/.crosspoint/LIBRARY/tmp";
 
 constexpr int kProgressInterval = 2;
@@ -58,6 +60,14 @@ struct __attribute__((packed)) IndexRec {
   uint32_t recordOffset;
 };
 static_assert(sizeof(IndexRec) == 28, "IndexRec must be 28 bytes");
+
+// ---- Series record (on-disk, one per book) ----
+struct __attribute__((packed)) SeriesRec {
+  uint32_t bookId;
+  char     seriesName[80];     // collection/series name
+  float    seriesIndex;        // position in series
+};
+static_assert(sizeof(SeriesRec) == 88, "SeriesRec must be 88 bytes");
 
 // ---- Scan state record (on-disk) ----
 struct __attribute__((packed)) ScanRec {
@@ -173,6 +183,26 @@ uint32_t appendRecord(const Record& rec) {
   if (!f.seek(currentSize)) { f.close(); return UINT32_MAX; }
   const uint32_t pos = static_cast<uint32_t>(currentSize / kRecordSize);
   if (f.write(reinterpret_cast<const uint8_t*>(&rec), kRecordSize) != static_cast<int>(kRecordSize)) {
+    f.close(); return UINT32_MAX;
+  }
+  f.close();
+  return pos;
+}
+
+// Append a series record to series.dat (used during scan)
+static uint32_t appendSeriesRec(const SeriesRec& rec) {
+  Storage.mkdir(kLibDir);
+  HalFile f = Storage.open(kSeriesDat, O_WRONLY);
+  if (!f) {
+    HalFile tmp = Storage.open(kSeriesDat, O_CREAT | O_WRONLY);
+    if (tmp) tmp.close();
+    f = Storage.open(kSeriesDat, O_WRONLY);
+  }
+  if (!f) return UINT32_MAX;
+  const size_t currentSize = f.size();
+  if (!f.seek(currentSize)) { f.close(); return UINT32_MAX; }
+  const uint32_t pos = static_cast<uint32_t>(currentSize / sizeof(SeriesRec));
+  if (f.write(reinterpret_cast<const uint8_t*>(&rec), sizeof(SeriesRec)) != static_cast<int>(sizeof(SeriesRec))) {
     f.close(); return UINT32_MAX;
   }
   f.close();
@@ -411,8 +441,21 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     std::strncpy(rec.path, p, sizeof(rec.path) - 1);
     rec.path[sizeof(rec.path)-1] = '\0';
 
-    char title[65] = {}, author[49] = {};
-    extractMetadata(p, title, sizeof(title), author, sizeof(author));
+    char title[65] = {}, author[49] = {}, series[81] = {};
+    float seriesIndex = 0.0f;
+    // For EPUBs, extract series/collection info via the fast ZIP parser.
+    // Other formats (XTC, TXT) don't have series metadata.
+    if (FsHelpers::hasEpubExtension(std::string_view{p})) {
+      std::string epTitle, epAuthor, epSeries;
+      float epSeriesIdx = 0.0f;
+      EpubParser::extractMetadata(p, "/.crosspoint", epTitle, epAuthor, &epSeries, &epSeriesIdx);
+      std::strncpy(title, epTitle.c_str(), sizeof(title)-1); title[sizeof(title)-1] = '\0';
+      std::strncpy(author, epAuthor.c_str(), sizeof(author)-1); author[sizeof(author)-1] = '\0';
+      std::strncpy(series, epSeries.c_str(), sizeof(series)-1); series[sizeof(series)-1] = '\0';
+      seriesIndex = epSeriesIdx;
+    } else {
+      extractMetadata(p, title, sizeof(title), author, sizeof(author));
+    }
     std::strncpy(rec.title, title, sizeof(rec.title)-1); rec.title[sizeof(rec.title)-1] = '\0';
     std::strncpy(rec.author, author, sizeof(rec.author)-1); rec.author[sizeof(rec.author)-1] = '\0';
 
@@ -428,6 +471,17 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     uint32_t pos = appendRecord(rec);
     if (pos == UINT32_MAX) { LOG_ERR("LIB", "Scan: append failed for %s", p); continue; }
     newScan.push_back({ph, mtime, (uint32_t)fsz, rec.id});
+
+    // Write series entry if book has series/collection metadata
+    if (series[0] != '\0') {
+      SeriesRec sr = {};
+      sr.bookId = rec.id;
+      std::strncpy(sr.seriesName, series, sizeof(sr.seriesName)-1);
+      sr.seriesName[sizeof(sr.seriesName)-1] = '\0';
+      sr.seriesIndex = seriesIndex;
+      appendSeriesRec(sr);
+    }
+
     ++added;
   }
 
@@ -610,6 +664,175 @@ bool buildIndices() {
   return true;
 }
 
+// ---- Collections index builder ----
+// Builds idx_collections.bin from series.dat — one entry per unique collection,
+// sorted alphabetically.  The index stores: collection name (key), first record
+// offset in series.dat (where books of this collection start).
+// The series.dat is sorted by collection name during the Build process.
+
+static void recordToBookRef(const Record& rec, BookRef& ref);  // fwd decl
+
+struct __attribute__((packed)) CollectionIndexRec {
+  char     collectionName[80];
+  uint32_t firstSeriesOffset;  // byte offset into series.dat where this collection starts
+  uint32_t bookCount;          // number of books in this collection
+};
+static_assert(sizeof(CollectionIndexRec) == 88, "CollectionIndexRec must be 88 bytes");
+
+bool buildCollectionsIndex() {
+  LOG_DBG("LIB", "BuildCollIdx: start");
+  HalFile sf = Storage.open(kSeriesDat);
+  if (!sf) return false;
+  const int totalSeries = static_cast<int>(sf.size() / sizeof(SeriesRec));
+  if (totalSeries == 0) { sf.close(); return false; }
+  sf.close();
+
+  // Read all series records, sort by collection name + seriesIndex
+  std::vector<SeriesRec> series;
+  series.reserve(totalSeries);
+  {
+    HalFile f = Storage.open(kSeriesDat);
+    SeriesRec sr;
+    while (f.read(reinterpret_cast<uint8_t*>(&sr), sizeof(SeriesRec)) == static_cast<int>(sizeof(SeriesRec))) {
+      series.push_back(sr);
+    }
+    f.close();
+  }
+
+  std::sort(series.begin(), series.end(), [](const SeriesRec& a, const SeriesRec& b) {
+    int c = cmpSortKey(a.seriesName, b.seriesName);
+    if (c != 0) return c < 0;
+    return a.seriesIndex < b.seriesIndex;
+  });
+
+  // Write sorted series.dat
+  {
+    HalFile f = Storage.open(kSeriesDat, O_CREAT | O_WRONLY | O_TRUNC);
+    if (!f) return false;
+    for (const auto& sr : series) {
+      f.write(reinterpret_cast<const uint8_t*>(&sr), sizeof(SeriesRec));
+    }
+    f.close();
+  }
+
+  // Build collections index: collect unique collection names
+  std::vector<CollectionIndexRec> collections;
+  for (size_t i = 0; i < series.size();) {
+    CollectionIndexRec ci;
+    std::strncpy(ci.collectionName, series[i].seriesName, sizeof(ci.collectionName)-1);
+    ci.collectionName[sizeof(ci.collectionName)-1] = '\0';
+    ci.firstSeriesOffset = static_cast<uint32_t>(i * sizeof(SeriesRec));
+    ci.bookCount = 0;
+    size_t j = i;
+    while (j < series.size() && strncmp(series[j].seriesName, ci.collectionName, sizeof(ci.collectionName)) == 0) {
+      ++ci.bookCount;
+      ++j;
+    }
+    collections.push_back(ci);
+    i = j;
+  }
+
+  // Write idx_collections.bin
+  HalFile outF = Storage.open(kIdxCollections, O_CREAT | O_WRONLY | O_TRUNC);
+  if (!outF) return false;
+  for (const auto& ci : collections) {
+    outF.write(reinterpret_cast<const uint8_t*>(&ci), sizeof(CollectionIndexRec));
+  }
+  outF.close();
+
+  LOG_DBG("LIB", "BuildCollIdx: %d collections from %d series entries", collections.size(), totalSeries);
+  return true;
+}
+
+// ---- Collections query ----
+
+int queryCollections(BookRef* out, int page, int pageSize) {
+  HalFile f = Storage.open(kIdxCollections);
+  if (!f) return 0;
+  const int total = static_cast<int>(f.size() / sizeof(CollectionIndexRec));
+  const int start = page * pageSize;
+  if (start >= total) { f.close(); return 0; }
+  f.seek(static_cast<uint32_t>(start) * sizeof(CollectionIndexRec));
+  CollectionIndexRec ci;
+  int count = 0;
+  for (int i = start; i < total && count < pageSize; ++i) {
+    if (f.read(reinterpret_cast<uint8_t*>(&ci), sizeof(CollectionIndexRec)) != static_cast<int>(sizeof(CollectionIndexRec))) break;
+    BookRef& ref = out[count];
+    ref.id = static_cast<uint32_t>(i);  // use index as id for collection picking
+    std::strncpy(ref.title, ci.collectionName, 64); ref.title[64] = '\0';
+    // Show bookCount in author field as "N books"
+    snprintf(ref.author, sizeof(ref.author), "%d books", ci.bookCount);
+    std::strncpy(ref.path, kSeriesDat, 128); ref.path[128] = '\0';
+    ref.isFavorite = false;
+    ref.isOpened = false;
+    ref.isCompleted = false;
+    ++count;
+  }
+  f.close();
+  return count;
+}
+
+int queryCollectionBooks(BookRef* out, int page, int pageSize, int collectionIdx) {
+  HalFile cf = Storage.open(kIdxCollections);
+  if (!cf) return 0;
+  const int totalColls = static_cast<int>(cf.size() / sizeof(CollectionIndexRec));
+  if (collectionIdx < 0 || collectionIdx >= totalColls) { cf.close(); return 0; }
+  cf.seek(static_cast<uint32_t>(collectionIdx) * sizeof(CollectionIndexRec));
+  CollectionIndexRec ci;
+  if (cf.read(reinterpret_cast<uint8_t*>(&ci), sizeof(CollectionIndexRec)) != static_cast<int>(sizeof(CollectionIndexRec))) {
+    cf.close(); return 0;
+  }
+  cf.close();
+
+  // Read series entries for this collection
+  HalFile sf = Storage.open(kSeriesDat);
+  if (!sf) return 0;
+  sf.seek(ci.firstSeriesOffset);
+
+  std::vector<uint32_t> bookIds;
+  SeriesRec sr;
+  for (uint32_t i = 0; i < ci.bookCount; ++i) {
+    if (sf.read(reinterpret_cast<uint8_t*>(&sr), sizeof(SeriesRec)) != static_cast<int>(sizeof(SeriesRec))) break;
+    // Find Record by bookId in library.dat
+    if (sr.bookId > 0) {
+      // Scan library.dat for this bookId (linear, but collections are small)
+      HalFile df = Storage.open(kDatFile);
+      if (df) {
+        Record rec;
+        uint32_t rp = 0;
+        while (df.read(reinterpret_cast<uint8_t*>(&rec), sizeof(Record)) == static_cast<int>(sizeof(Record))) {
+          if (rec.id == sr.bookId && !rec.tombstone()) {
+            bookIds.push_back(rp);
+            break;
+          }
+          ++rp;
+        }
+        df.close();
+      }
+    }
+  }
+  sf.close();
+
+  // Paginate
+  const int start = page * pageSize;
+  const int end = std::min(start + pageSize, static_cast<int>(bookIds.size()));
+  int count = 0;
+  for (int i = start; i < end; ++i) {
+    Record rec;
+    if (!readRecord(bookIds[i], rec)) continue;
+    recordToBookRef(rec, out[count++]);
+  }
+  return count;
+}
+
+int totalCollections() {
+  HalFile f = Storage.open(kIdxCollections);
+  if (!f) return 0;
+  const int count = static_cast<int>(f.size() / sizeof(CollectionIndexRec));
+  f.close();
+  return count;
+}
+
 // =========================================================================
 // Sync
 // =========================================================================
@@ -631,8 +854,19 @@ bool sync(const char* rootDir) {
 
 // =========================================================================
 // Query page
-// RAM: (pageSize * sizeof(BookRef)) + 1 KB I/O buffer for full-text scan
 // =========================================================================
+
+// Populate a BookRef from a Record.
+static void recordToBookRef(const Record& rec, BookRef& ref) {
+  ref.id = rec.id;
+  std::strncpy(ref.title, rec.title, 64); ref.title[64] = '\0';
+  std::strncpy(ref.author, rec.author, 48); ref.author[48] = '\0';
+  std::strncpy(ref.path, rec.path, 128); ref.path[128] = '\0';
+  ref.isFavorite  = FAVORITES.isFavorite(rec.path);
+  const auto* s = READING_STATS.findBook(rec.path);
+  ref.isOpened    = s && s->totalReadingMs > 0;
+  ref.isCompleted = s && s->completed;
+}
 
 // Check if a Record matches the active filter (favourites/recent/etc.)
 static bool matchesFilter(const Record& rec, FilterMode m) {
@@ -656,18 +890,6 @@ static bool matchesFilter(const Record& rec, FilterMode m) {
     }
   }
   return true;
-}
-
-// Populate a BookRef from a Record.
-static void recordToBookRef(const Record& rec, BookRef& ref) {
-  ref.id = rec.id;
-  std::strncpy(ref.title, rec.title, 64); ref.title[64] = '\0';
-  std::strncpy(ref.author, rec.author, 48); ref.author[48] = '\0';
-  std::strncpy(ref.path, rec.path, 128); ref.path[128] = '\0';
-  ref.isFavorite  = FAVORITES.isFavorite(rec.path);
-  const auto* s = READING_STATS.findBook(rec.path);
-  ref.isOpened    = s && s->totalReadingMs > 0;
-  ref.isCompleted = s && s->completed;
 }
 
 // Walk an index file sequentially, collecting records that match filter/search.
@@ -787,6 +1009,10 @@ int queryPage(BookRef* out, int page, int pageSize, SortMode sortMode,
               const char* searchFilter, FilterMode filterMode) {
   if (!out || pageSize <= 0) return 0;
   if (!exists()) return 0;
+
+  if (sortMode == SortMode::COLLECTIONS) {
+    return queryCollections(out, page, pageSize);
+  }
 
   const bool hasSearch = (searchFilter && searchFilter[0] != '\0');
   const bool needsFullScan = hasSearch || sortMode == SortMode::RECENT || sortMode == SortMode::PROGRESS;

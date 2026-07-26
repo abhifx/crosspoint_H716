@@ -48,7 +48,8 @@ bool readFromCache(const std::string& cacheDir, std::string& outTitle, std::stri
 }
 
 // Lightweight direct parsing of container.xml and content.opf
-bool readDirectFromZip(const std::string& epubPath, std::string& outTitle, std::string& outAuthor) {
+bool readDirectFromZip(const std::string& epubPath, std::string& outTitle, std::string& outAuthor,
+                       std::string* outSeries, float* outSeriesIndex) {
   ZipFile zip(epubPath);
 
   size_t containerSize = 0;
@@ -112,17 +113,114 @@ bool readDirectFromZip(const std::string& epubPath, std::string& outTitle, std::
 
   findDcTag("title", outTitle);
   findDcTag("creator", outAuthor);
+
+  // ---- Calibre series extraction ----
+  // <meta name="calibre:series" content="Series Name"/>
+  // <meta name="calibre:series_index" content="1.0"/>
+  if (outSeries || outSeriesIndex) {
+    if (outSeries) outSeries->clear();
+    if (outSeriesIndex) *outSeriesIndex = 0.0f;
+
+    const char* scan = opfStr;
+    const char* contentValue = nullptr;
+    while ((scan = strstr(scan, "<meta")) != nullptr && scan < opfEnd) {
+      const char* tagEnd = strchr(scan, '>');
+      if (!tagEnd) break;
+
+      const char* nameAttr = strstr(scan, "name=\"calibre:series\"");
+      if (nameAttr && nameAttr < tagEnd) {
+        const char* c = strstr(nameAttr, "content=\"");
+        if (c && c < tagEnd) {
+          c += 9;
+          const char* ce = strchr(c, '"');
+          if (ce && ce <= tagEnd && outSeries) {
+            outSeries->assign(c, ce - c);
+            contentValue = ce;
+          }
+        }
+      }
+
+      const char* idxAttr = strstr(scan, "name=\"calibre:series_index\"");
+      if (idxAttr && idxAttr < tagEnd) {
+        const char* c = strstr(idxAttr, "content=\"");
+        if (c && c < tagEnd) {
+          c += 9;
+          const char* ce = strchr(c, '"');
+          if (ce && ce <= tagEnd && outSeriesIndex) {
+            *outSeriesIndex = strtof(c, nullptr);
+          }
+        }
+      }
+
+      // EPUB3 belongs-to-collection (only if no calibre:series found)
+      if (!contentValue && outSeries) {
+        const char* belongs = strstr(scan, "property=\"belongs-to-collection\"");
+        if (belongs && belongs < tagEnd) {
+          const char* idAttr = strstr(scan, "id=\"");
+          if (idAttr && idAttr < tagEnd) {
+            idAttr += 4;
+            const char* idEnd = strchr(idAttr, '"');
+            if (idEnd && idEnd < tagEnd) {
+              std::string colId(idAttr, idEnd - idAttr);
+              // Search for <meta refines="#colId" property="collection-type">series</meta>
+              // and <meta refines="#colId" property="group-position">1</meta>
+              char refinesPat[64];
+              snprintf(refinesPat, sizeof(refinesPat), "refines=\"#%s\"", colId.c_str());
+              const char* refScan = opfStr;
+              while ((refScan = strstr(refScan, refinesPat)) != nullptr && refScan < opfEnd) {
+                const char* refEnd = strchr(refScan, '>');
+                if (!refEnd) break;
+                const char* content = strstr(refScan, "content=\"");
+                if (content && content < refEnd) {
+                  content += 9;
+                  const char* ceContent = strchr(content, '"');
+                  if (ceContent && ceContent < refEnd) {
+                    outSeries->assign(content, ceContent - content);
+                    break;
+                  }
+                }
+                refScan = refEnd + 1;
+              }
+              // Look for group-position refines
+              if (outSeriesIndex) {
+                const char* posScan = opfStr;
+                while ((posScan = strstr(posScan, refinesPat)) != nullptr && posScan < opfEnd) {
+                  const char* posEnd = strchr(posScan, '>');
+                  if (!posEnd) break;
+                  const char* propPos = strstr(posScan, "property=\"group-position\"");
+                  if (propPos && propPos < posEnd) {
+                    const char* posContent = strstr(propPos, "content=\"");
+                    if (posContent && posContent < posEnd) {
+                      posContent += 9;
+                      *outSeriesIndex = strtof(posContent, nullptr);
+                    }
+                    break;
+                  }
+                  posScan = posEnd + 1;
+                }
+              }
+              if (!outSeries->empty()) contentValue = "1";  // mark as found
+            }
+          }
+        }
+      }
+
+      scan = tagEnd + 1;
+    }
+  }
+
   free(opfData);
   return !outTitle.empty() || !outAuthor.empty();
 }
 
 } // namespace
 
-bool extractMetadata(const std::string& epubPath, const std::string& cacheDir, std::string& outTitle, std::string& outAuthor) {
+bool extractMetadata(const std::string& epubPath, const std::string& cacheDir, std::string& outTitle, std::string& outAuthor,
+                     std::string* outSeries, float* outSeriesIndex) {
   outTitle.clear();
   outAuthor.clear();
 
-  if (readDirectFromZip(epubPath, outTitle, outAuthor)) {
+  if (readDirectFromZip(epubPath, outTitle, outAuthor, outSeries, outSeriesIndex)) {
     return !outTitle.empty() || !outAuthor.empty();
   }
 

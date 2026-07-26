@@ -186,6 +186,10 @@ bool readIndexRec(HalFile& f, IndexRec& rec) {
 // Exists
 // =========================================================================
 
+// ---- Close anonymous namespace: all helpers above are internal, all
+//      public API below is exported with external linkage ----
+}  // anonymous namespace
+
 bool exists() {
   HalFile f = Storage.open(kDatFile);
   if (!f) return false;
@@ -826,7 +830,5 @@ bool init() {
   Storage.mkdir(kTmpDir);
   return true;
 }
-
-}  // anonymous namespace
 
 }  // namespace LibraryIndex

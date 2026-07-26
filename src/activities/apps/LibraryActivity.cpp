@@ -770,10 +770,15 @@ void LibraryActivity::loop() {
       vTaskDelay(1);
       const bool genOk = LibraryCache::generateCoverForBook(entries_[idx].path, coverWidth_, coverHeight_);
       const bool slotOk = slot < 64;
-      LOG_DBG("LIB", "Cover: slot=%d gen=%d slotOk=%d free=%u maxA=%u",
-              slot, genOk, slotOk, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      if (genOk && slotOk) {
+      LOG_DBG("LIB", "Cover: slot=%d gen=%d slotOk=%d free=%u maxA=%u path=%s",
+              slot, genOk, slotOk, ESP.getFreeHeap(), ESP.getMaxAllocHeap(), entries_[idx].path.c_str());
+      // Mark slot as attempted (both success and failure) so we never retry
+      // a corrupt/broken file that would crash the ZIP reader on retry.
+      if (slotOk) {
         coverGeneratedMask_ |= (uint64_t{1} << slot);
+      }
+      if (!genOk) {
+        LOG_DBG("LIB", "Cover: slot=%d FAILED (will not retry) path=%s", slot, entries_[idx].path.c_str());
       }
       forceRender_ = true;
       coverGenRenderBatch_++;

@@ -175,7 +175,7 @@ def get_current_release_number(project_dir, base_version):
 def get_dev_release_number(project_dir, base_version):
     release_number, source = get_current_release_number(project_dir, base_version)
     if release_number == 0:
-        return 1, f"{source} (new base line starts at .1)"
+        return 0, f"{source} (new base line starting at .0)"
     return release_number, source
 
 

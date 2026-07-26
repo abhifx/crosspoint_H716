@@ -160,7 +160,13 @@ bool readRecord(uint32_t pos, Record& rec) {
 // Returns UINT32_MAX on error.
 uint32_t appendRecord(const Record& rec) {
   HalFile f = Storage.open(kDatFile);
-  if (!f) { Storage.mkdir(kLibDir); f = Storage.open(kDatFile); }
+  if (!f) {
+    Storage.mkdir(kLibDir);
+    // First-time creation: use O_CREAT to create the file, then reopen for append.
+    HalFile tmp = Storage.open(kDatFile, O_CREAT | O_WRONLY);
+    if (tmp) tmp.close();
+    f = Storage.open(kDatFile);
+  }
   if (!f) return UINT32_MAX;
   const size_t currentSize = f.size();
   if (!f.seek(currentSize)) { f.close(); return UINT32_MAX; }

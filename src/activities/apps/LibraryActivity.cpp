@@ -434,6 +434,16 @@ void LibraryActivity::openFilterPopup() {
   recentItem.selected = (currentFilter_ == CrossPointSettings::LIBRARY_FILTER_LATEST_READ);
   popupOverlay_.items.push_back(recentItem);
 
+  PopupItem unreadItem; unreadItem.label = I18N.get(StrId::STR_UNREAD);
+  unreadItem.icon = Text24Icon; unreadItem.iconW = 24; unreadItem.iconH = 24;
+  unreadItem.selected = (currentFilter_ == CrossPointSettings::LIBRARY_FILTER_UNREAD);
+  popupOverlay_.items.push_back(unreadItem);
+
+  PopupItem completedItem; completedItem.label = I18N.get(StrId::STR_COMPLETED);
+  completedItem.icon = CleanMonitorIcon32; completedItem.iconW = 32; completedItem.iconH = 32;
+  completedItem.selected = (currentFilter_ == CrossPointSettings::LIBRARY_FILTER_COMPLETED);
+  popupOverlay_.items.push_back(completedItem);
+
   PopupItem searchItem; searchItem.label = I18N.get(StrId::STR_SEARCH_LIBRARY);
   searchItem.icon = SearchPlusIcon; searchItem.iconW = 32; searchItem.iconH = 32;
   searchItem.selected = false;
@@ -496,6 +506,16 @@ void LibraryActivity::selectPopupItem() {
       SETTINGS.librarySearchText[0] = '\0';
       SETTINGS.saveToFile();
       applyFilterAndSort();
+    } else if (idx == 5) {
+      currentFilter_ = CrossPointSettings::LIBRARY_FILTER_UNREAD;
+      SETTINGS.libraryFilter = currentFilter_;
+      SETTINGS.saveToFile();
+      rebuildForFilter(currentFilter_);
+    } else if (idx == 6) {
+      currentFilter_ = CrossPointSettings::LIBRARY_FILTER_COMPLETED;
+      SETTINGS.libraryFilter = currentFilter_;
+      SETTINGS.saveToFile();
+      rebuildForFilter(currentFilter_);
     }
   }
   closePopup();

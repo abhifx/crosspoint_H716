@@ -837,6 +837,8 @@ void LibraryActivity::render(RenderLock&&) {
           switch (currentFilter_) {
             case CrossPointSettings::LIBRARY_FILTER_FAVOURITES: cachedInfo_ = tr(STR_FAVOURITES); break;
             case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
+            case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
+            case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
             default: cachedInfo_ = tr(STR_ALL_BOOKS); break;
           }
           const char* sortLabel = nullptr;
@@ -951,6 +953,8 @@ void LibraryActivity::render(RenderLock&&) {
     switch (currentFilter_) {
       case CrossPointSettings::LIBRARY_FILTER_FAVOURITES: cachedInfo_ = tr(STR_FAVOURITES); break;
       case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
+      case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
+      case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
       default: cachedInfo_ = tr(STR_ALL_BOOKS); break;
     }
     const char* sortLabel = nullptr;

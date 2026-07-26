@@ -701,6 +701,7 @@ void LibraryActivity::loop() {
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
         forceRender_ = true;
+        refreshPageCache();
       }
       requestUpdate();
     }
@@ -724,6 +725,7 @@ void LibraryActivity::loop() {
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
         forceRender_ = true;
+        refreshPageCache();
       }
       requestUpdate();
     }
@@ -752,6 +754,7 @@ void LibraryActivity::loop() {
     if (curPage != lastPage_) {
       lastPage_ = curPage;
       forceRender_ = true;
+      refreshPageCache();
     }
     requestUpdate();
   }

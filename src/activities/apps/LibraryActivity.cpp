@@ -274,7 +274,8 @@ void LibraryActivity::scanSd() {
 
   // Fast path: existing library.dat
   if (LibraryIndex::exists()) {
-    totalBooks_ = LibraryIndex::totalBooks();
+    totalBooks_ = LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                               static_cast<LibraryIndex::FilterMode>(currentFilter_));
     totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
     LOG_DBG("LIB", "scanSd: existing index, total=%d", totalBooks_);
     refreshPageCache();
@@ -289,7 +290,8 @@ void LibraryActivity::scanSd() {
 
   LibraryIndex::scan(renderer, popupRect, SETTINGS.libraryRootDir);
   LibraryIndex::buildIndices();
-  totalBooks_ = LibraryIndex::totalBooks();
+  totalBooks_ = LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                             static_cast<LibraryIndex::FilterMode>(currentFilter_));
   totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
   refreshPageCache();
 }

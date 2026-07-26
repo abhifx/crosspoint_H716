@@ -26,13 +26,11 @@
 #include "util/TimeZoneRegistry.h"
 
 namespace {
-constexpr uint8_t FONT_FAMILY_SCHEMA_VERSION = 3;
+constexpr uint8_t FONT_FAMILY_SCHEMA_VERSION = 2;
 constexpr uint8_t FONT_SIZE_SCHEMA_VERSION = 2;
 constexpr uint8_t UI_THEME_SCHEMA_VERSION = 3;
 constexpr uint8_t TEXT_DARKNESS_SCHEMA_VERSION = 2;
 constexpr uint8_t FLASHCARD_STUDY_MODE_SCHEMA_VERSION = 2;
-constexpr uint8_t LEGACY_LEXEND_FONT_FAMILY = 2;
-constexpr char LEXEND_SD_FAMILY_NAME[] = "Lexend";
 
 class HalFileStream : public Stream {
  public:
@@ -274,31 +272,6 @@ void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   }
 }
 
-namespace {
-void migrateDisplayHeaderSettings(CrossPointSettings& s, const JsonDocument& doc, bool* needsResave) {
-  if (doc["displayHeaderTime"].isNull()) {
-    return;
-  }
-
-  const uint8_t headerTime = doc["displayHeaderTime"] | static_cast<uint8_t>(0);
-  if (headerTime > 1) {
-    return;
-  }
-
-  if (headerTime) {
-    if (s.displayDay == CrossPointSettings::DISPLAY_HEADER_OFF) {
-      s.displayDay = CrossPointSettings::DISPLAY_HEADER_TIME_ONLY;
-    } else if (s.displayDay == CrossPointSettings::DISPLAY_HEADER_DATE_ONLY) {
-      s.displayDay = CrossPointSettings::DISPLAY_HEADER_BOTH;
-    }
-  }
-
-  if (needsResave) {
-    *needsResave = true;
-  }
-}
-}  // namespace
-
 bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* needsResave) {
   auto clamp = [](uint8_t val, uint8_t maxVal, uint8_t def) -> uint8_t { return val < maxVal ? val : def; };
   auto loadToggle = [&](const char* key, uint8_t& field) {
@@ -330,6 +303,7 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   loadEnum("sleepScreenCoverMode", s.sleepScreenCoverMode, CrossPointSettings::SLEEP_SCREEN_COVER_MODE_COUNT);
   loadEnum("sleepScreenCoverFilter", s.sleepScreenCoverFilter, CrossPointSettings::SLEEP_SCREEN_COVER_FILTER_COUNT);
   loadToggle("cleanSleepRefresh", s.cleanSleepRefresh);
+  loadToggle("cycleScreensaverOnTap", s.cycleScreensaverOnTap);
   loadEnum("hideBatteryPercentage", s.hideBatteryPercentage, CrossPointSettings::HIDE_BATTERY_PERCENTAGE_COUNT);
   loadEnum("refreshFrequency", s.refreshFrequency, CrossPointSettings::REFRESH_FREQUENCY_COUNT);
   {
@@ -341,24 +315,14 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   loadToggle("darkMode", s.darkMode);
   loadToggle("antiGhostingExperimental", s.antiGhostingExperimental);
 
-  loadString("sdFontFamilyName", s.sdFontFamilyName, sizeof(s.sdFontFamilyName));
   const uint8_t rawFontFamily = doc["fontFamily"] | s.fontFamily;
-  const uint8_t fontFamilySchemaVersion = doc["fontFamilySchemaVersion"] | static_cast<uint8_t>(0);
-  if (fontFamilySchemaVersion < FONT_FAMILY_SCHEMA_VERSION && rawFontFamily == LEGACY_LEXEND_FONT_FAMILY &&
-      s.sdFontFamilyName[0] == '\0') {
-    s.fontFamily = CrossPointSettings::BOOKERLY;
-    strncpy(s.sdFontFamilyName, LEXEND_SD_FAMILY_NAME, sizeof(s.sdFontFamilyName) - 1);
-    s.sdFontFamilyName[sizeof(s.sdFontFamilyName) - 1] = '\0';
-    if (needsResave) *needsResave = true;
-  } else if (rawFontFamily >= static_cast<uint8_t>(CrossPointSettings::FONT_FAMILY_COUNT)) {
+  if (rawFontFamily >= static_cast<uint8_t>(CrossPointSettings::FONT_FAMILY_COUNT)) {
     s.fontFamily = CrossPointSettings::BOOKERLY;
     if (needsResave) *needsResave = true;
   } else {
     s.fontFamily = rawFontFamily;
   }
-  if (fontFamilySchemaVersion < FONT_FAMILY_SCHEMA_VERSION && needsResave) {
-    *needsResave = true;
-  }
+  loadString("sdFontFamilyName", s.sdFontFamilyName, sizeof(s.sdFontFamilyName));
 
   loadEnum("fontSize", s.fontSize, CrossPointSettings::FONT_SIZE_COUNT);
   const uint8_t fontSizeSchemaVersion = doc["fontSizeSchemaVersion"] | static_cast<uint8_t>(0);
@@ -376,6 +340,9 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   loadToggle("embeddedStyle", s.embeddedStyle);
   loadToggle("hyphenationEnabled", s.hyphenationEnabled);
   loadEnum("bionicReading", s.bionicReading, CrossPointSettings::BIONIC_READING_MODE_COUNT);
+  loadToggle("guideReadingEnabled", s.guideReadingEnabled);
+  loadEnum("dotsSpacing", s.dotsSpacing, CrossPointSettings::DOTS_SPACING_COUNT);
+  loadEnum("epubRenderMode", s.epubRenderMode, CrossPointSettings::EPUB_RENDER_MODE_COUNT);
   loadEnum("orientation", s.orientation, CrossPointSettings::ORIENTATION_COUNT);
   loadToggle("extraParagraphSpacing", s.extraParagraphSpacing);
   loadToggle("forceParagraphIndents", s.forceParagraphIndents);
@@ -408,11 +375,11 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   if (!doc["longPressButtonBehavior"].isNull()) {
     loadEnum("longPressButtonBehavior", s.longPressButtonBehavior,
              CrossPointSettings::LONG_PRESS_BUTTON_BEHAVIOR_COUNT);
-  } else if (!doc["longPressChapterSkip"].isNull()) {
+  } else {
     s.longPressButtonBehavior = (doc["longPressChapterSkip"] | true) ? CrossPointSettings::LONG_PRESS_CHAPTER_SKIP
                                                                      : CrossPointSettings::LONG_PRESS_OFF;
-    if (needsResave) *needsResave = true;
   }
+  loadEnum("frontLongPressBehavior", s.frontLongPressBehavior, CrossPointSettings::FRONT_LONG_PRESS_BEHAVIOR_COUNT);
   {
     const uint8_t rawShortPwrBtn = doc["shortPwrBtn"] | s.shortPwrBtn;
     if (rawShortPwrBtn < static_cast<uint8_t>(CrossPointSettings::SHORT_PWRBTN_COUNT)) {
@@ -425,6 +392,33 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   loadEnum("tiltPageTurn", s.tiltPageTurn, CrossPointSettings::TILT_PAGE_TURN_COUNT);
   loadEnum("sleepTimeout", s.sleepTimeout, CrossPointSettings::SLEEP_TIMEOUT_COUNT);
   loadToggle("showHiddenFiles", s.showHiddenFiles);
+  loadEnum("libraryLayout", s.libraryLayout, CrossPointSettings::LIBRARY_LAYOUT_COUNT);
+  loadEnum("libraryFilter", s.libraryFilter, CrossPointSettings::LIBRARY_FILTER_COUNT);
+  loadString("libraryRootDir", s.libraryRootDir, sizeof(s.libraryRootDir));
+  s.libraryLastCleanupDay = doc["libraryLastCleanupDay"] | static_cast<uint8_t>(0);
+  loadEnum("librarySort", s.librarySort, CrossPointSettings::LIBRARY_SORT_COUNT);
+  {
+    const std::string searchText = doc["librarySearchText"] | std::string("");
+    strncpy(s.librarySearchText, searchText.c_str(), sizeof(s.librarySearchText) - 1);
+    s.librarySearchText[sizeof(s.librarySearchText) - 1] = '\0';
+  }
+
+  loadString("screenSaverDirectory", s.screenSaverDirectory, sizeof(s.screenSaverDirectory));
+  loadEnum("screenSaverOrder", s.screenSaverOrder, CrossPointSettings::SCREENSAVER_ORDER_COUNT);
+  loadEnum("screenSaverInterval", s.screenSaverInterval, CrossPointSettings::SCREENSAVER_INTERVAL_COUNT);
+  loadEnum("screenSaverWakeButton", s.screenSaverWakeButton, CrossPointSettings::SCREENSAVER_WAKE_BUTTON_COUNT);
+  loadString("screenSaverReaderDir", s.screenSaverReaderDir, sizeof(s.screenSaverReaderDir));
+  loadEnum("screenSaverReaderOrder", s.screenSaverReaderOrder, CrossPointSettings::SCREENSAVER_ORDER_COUNT);
+
+  loadString("screenSaverText", s.screenSaverText, sizeof(s.screenSaverText));
+  loadEnum("screenSaverFontSize", s.screenSaverFontSize, CrossPointSettings::SCREENSAVER_FONT_SIZE_COUNT);
+  loadEnum("screenSaverTextPosition", s.screenSaverTextPosition, CrossPointSettings::SCREENSAVER_TEXT_POSITION_COUNT);
+  loadEnum("screenSaverTextStyle", s.screenSaverTextStyle, CrossPointSettings::SCREENSAVER_TEXT_STYLE_COUNT);
+  loadToggle("screenSaverShowPanel", s.screenSaverShowPanel);
+  loadEnum("screenSaverPanelColor", s.screenSaverPanelColor, static_cast<uint8_t>(2));
+  loadEnum("screenSaverPanelOpacity", s.screenSaverPanelOpacity, static_cast<uint8_t>(4));
+  loadEnum("screenSaverMinBattery", s.screenSaverMinBattery, static_cast<uint8_t>(9));
+  loadToggle("screenSaverReplaceSleep", s.screenSaverReplaceSleep);
 
   loadString("opdsServerUrl", s.opdsServerUrl, sizeof(s.opdsServerUrl));
   loadString("opdsUsername", s.opdsUsername, sizeof(s.opdsUsername));
@@ -449,10 +443,11 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
            CrossPointSettings::STATUS_BAR_PROGRESS_BAR_THICKNESS_COUNT);
   loadEnum("statusBarTitle", s.statusBarTitle, CrossPointSettings::STATUS_BAR_TITLE_COUNT);
   loadToggle("statusBarBattery", s.statusBarBattery);
-  loadEnum("xtcStatusBarMode", s.xtcStatusBarMode, CrossPointSettings::XTC_STATUS_BAR_MODE_COUNT);
+  loadEnum("statusBarTimeLeft", s.statusBarTimeLeft, CrossPointSettings::STATUS_BAR_TIME_LEFT_COUNT);
   loadEnum("statusBarClock", s.statusBarClock, CrossPointSettings::STATUS_BAR_CLOCK_COUNT);
   loadEnum("clockFormat", s.clockFormat, static_cast<uint8_t>(2));
   loadToggle("clockHasBeenSynced", s.clockHasBeenSynced);
+  loadEnum("xtcStatusBarMode", s.xtcStatusBarMode, CrossPointSettings::XTC_STATUS_BAR_MODE_COUNT);
 
   using S = CrossPointSettings;
   s.frontButtonBack =
@@ -465,7 +460,6 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   s.homeBookSource = clamp(doc["homeBookSource"] | s.homeBookSource, S::HOME_BOOK_SOURCE_COUNT, s.homeBookSource);
   s.displayDay = clamp(doc["displayDay"] | s.displayDay, S::DISPLAY_HEADER_MODE_COUNT, s.displayDay);
-  migrateDisplayHeaderSettings(s, doc, needsResave);
   s.autoSyncDay = clamp(doc["autoSyncDay"] | s.autoSyncDay, static_cast<uint8_t>(2), s.autoSyncDay);
   s.syncDayWifiChoice =
       clamp(doc["syncDayWifiChoice"] | s.syncDayWifiChoice, S::SYNC_DAY_WIFI_CHOICE_COUNT, s.syncDayWifiChoice);
@@ -530,6 +524,8 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
       clamp(doc["readingProfileShortcut"] | s.readingProfileShortcut, shortcutLocationCount, s.readingProfileShortcut);
   s.readingProfileShortcutOrder = clamp(doc["readingProfileShortcutOrder"] | s.readingProfileShortcutOrder,
                                         shortcutOrderCount, s.readingProfileShortcutOrder);
+  s.libraryShortcut = clamp(doc["libraryShortcut"] | s.libraryShortcut, shortcutLocationCount, s.libraryShortcut);
+  s.libraryShortcutOrder = clamp(doc["libraryShortcutOrder"] | s.libraryShortcutOrder, shortcutOrderCount, s.libraryShortcutOrder);
   s.achievementsShortcut =
       clamp(doc["achievementsShortcut"] | s.achievementsShortcut, shortcutLocationCount, s.achievementsShortcut);
   s.achievementsShortcutOrder = clamp(doc["achievementsShortcutOrder"] | s.achievementsShortcutOrder,
@@ -590,6 +586,14 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
                                           static_cast<uint8_t>(2), s.readingHeatmapShortcutVisible);
   s.readingProfileShortcutVisible = clamp(doc["readingProfileShortcutVisible"] | s.readingProfileShortcutVisible,
                                           static_cast<uint8_t>(2), s.readingProfileShortcutVisible);
+  s.libraryShortcutVisible = clamp(doc["libraryShortcutVisible"] | s.libraryShortcutVisible,
+                                   static_cast<uint8_t>(2), s.libraryShortcutVisible);
+  s.screenSaverShortcut = clamp(doc["screenSaverShortcut"] | s.screenSaverShortcut, shortcutLocationCount, s.screenSaverShortcut);
+  s.screenSaverShortcutOrder = clamp(doc["screenSaverShortcutOrder"] | s.screenSaverShortcutOrder, shortcutOrderCount, s.screenSaverShortcutOrder);
+  s.screenSaverShortcutVisible = clamp(doc["screenSaverShortcutVisible"] | s.screenSaverShortcutVisible, static_cast<uint8_t>(2), s.screenSaverShortcutVisible);
+  s.clippingsShortcut = clamp(doc["clippingsShortcut"] | s.clippingsShortcut, shortcutLocationCount, s.clippingsShortcut);
+  s.clippingsShortcutOrder = clamp(doc["clippingsShortcutOrder"] | s.clippingsShortcutOrder, shortcutOrderCount, s.clippingsShortcutOrder);
+  s.clippingsShortcutVisible = clamp(doc["clippingsShortcutVisible"] | s.clippingsShortcutVisible, static_cast<uint8_t>(2), s.clippingsShortcutVisible);
   s.achievementsShortcutVisible = clamp(doc["achievementsShortcutVisible"] | s.achievementsShortcutVisible,
                                         static_cast<uint8_t>(2), s.achievementsShortcutVisible);
   s.ifFoundShortcutVisible = clamp(doc["ifFoundShortcutVisible"] | s.ifFoundShortcutVisible, static_cast<uint8_t>(2),
@@ -618,7 +622,6 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   migrateLegacyStatsShortcut(s, doc, needsResave);
   normalizeShortcutOrderSettings(s);
   CrossPointSettings::validateFrontButtonMapping(s);
-  s.normalizeDisplayDay();
 
   LOG_DBG("CPS", "Settings loaded from file");
   return true;
@@ -751,6 +754,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["sleepScreenCoverMode"] = s.sleepScreenCoverMode;
   doc["sleepScreenCoverFilter"] = s.sleepScreenCoverFilter;
   doc["cleanSleepRefresh"] = s.cleanSleepRefresh;
+  doc["cycleScreensaverOnTap"] = s.cycleScreensaverOnTap;
   doc["hideBatteryPercentage"] = s.hideBatteryPercentage;
   doc["refreshFrequency"] = s.refreshFrequency;
   doc["uiTheme"] = s.uiTheme;
@@ -772,6 +776,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["embeddedStyle"] = s.embeddedStyle;
   doc["hyphenationEnabled"] = s.hyphenationEnabled;
   doc["bionicReading"] = s.bionicReading;
+  doc["guideReadingEnabled"] = s.guideReadingEnabled;
+  doc["dotsSpacing"] = s.dotsSpacing;
+  doc["epubRenderMode"] = s.epubRenderMode;
   doc["orientation"] = s.orientation;
   doc["extraParagraphSpacing"] = s.extraParagraphSpacing;
   doc["forceParagraphIndents"] = s.forceParagraphIndents;
@@ -785,11 +792,60 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonFollowOrientation"] = s.frontButtonFollowOrientation;
   doc["longPressButtonBehavior"] = s.longPressButtonBehavior;
   doc["longPressChapterSkip"] = s.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP;
+  doc["frontLongPressBehavior"] = s.frontLongPressBehavior;
   doc["shortPwrBtn"] = s.shortPwrBtn;
   doc["tiltPageTurn"] = s.tiltPageTurn;
 
   doc["sleepTimeout"] = s.sleepTimeout;
   doc["showHiddenFiles"] = s.showHiddenFiles;
+  doc["libraryLayout"] = s.libraryLayout;
+  doc["libraryFilter"] = s.libraryFilter;
+  {
+    const std::string rootDir(s.libraryRootDir);
+    if (!rootDir.empty() && rootDir != "/") {
+      doc["libraryRootDir"] = rootDir;
+    }
+  }
+  doc["libraryLastCleanupDay"] = s.libraryLastCleanupDay;
+  doc["librarySort"] = s.librarySort;
+  {
+    const std::string searchText(s.librarySearchText);
+    if (!searchText.empty()) {
+      doc["librarySearchText"] = searchText;
+    }
+  }
+
+  {
+    const std::string ssDir(s.screenSaverDirectory);
+    if (!ssDir.empty()) {
+      doc["screenSaverDirectory"] = ssDir;
+    }
+  }
+  doc["screenSaverOrder"] = s.screenSaverOrder;
+  doc["screenSaverInterval"] = s.screenSaverInterval;
+  doc["screenSaverWakeButton"] = s.screenSaverWakeButton;
+
+  {
+    const std::string ssText(s.screenSaverText);
+    if (!ssText.empty()) {
+      doc["screenSaverText"] = ssText;
+    }
+  }
+  doc["screenSaverFontSize"] = s.screenSaverFontSize;
+  doc["screenSaverTextPosition"] = s.screenSaverTextPosition;
+  doc["screenSaverTextStyle"] = s.screenSaverTextStyle;
+  doc["screenSaverShowPanel"] = s.screenSaverShowPanel;
+  doc["screenSaverPanelColor"] = s.screenSaverPanelColor;
+  doc["screenSaverPanelOpacity"] = s.screenSaverPanelOpacity;
+  doc["screenSaverMinBattery"] = s.screenSaverMinBattery;
+  doc["screenSaverReplaceSleep"] = s.screenSaverReplaceSleep;
+  {
+    const std::string ssReaderDir(s.screenSaverReaderDir);
+    if (!ssReaderDir.empty()) {
+      doc["screenSaverReaderDir"] = ssReaderDir;
+    }
+  }
+  doc["screenSaverReaderOrder"] = s.screenSaverReaderOrder;
 
   doc["displayDay"] = s.displayDay;
   doc["syncDayWifiChoice"] = s.syncDayWifiChoice;
@@ -818,10 +874,11 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["statusBarProgressBarThickness"] = s.statusBarProgressBarThickness;
   doc["statusBarTitle"] = s.statusBarTitle;
   doc["statusBarBattery"] = s.statusBarBattery;
-  doc["xtcStatusBarMode"] = s.xtcStatusBarMode;
+  doc["statusBarTimeLeft"] = s.statusBarTimeLeft;
   doc["statusBarClock"] = s.statusBarClock;
   doc["clockFormat"] = s.clockFormat;
   doc["clockHasBeenSynced"] = s.clockHasBeenSynced;
+  doc["xtcStatusBarMode"] = s.xtcStatusBarMode;
 
   // Front button remap - managed by RemapFrontButtons sub-activity, not in SettingsList.
   doc["frontButtonBack"] = s.frontButtonBack;
@@ -846,6 +903,8 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readingHeatmapShortcutOrder"] = s.readingHeatmapShortcutOrder;
   doc["readingProfileShortcut"] = s.readingProfileShortcut;
   doc["readingProfileShortcutOrder"] = s.readingProfileShortcutOrder;
+  doc["libraryShortcut"] = s.libraryShortcut;
+  doc["libraryShortcutOrder"] = s.libraryShortcutOrder;
   doc["achievementsShortcut"] = s.achievementsShortcut;
   doc["achievementsShortcutOrder"] = s.achievementsShortcutOrder;
   doc["ifFoundShortcut"] = s.ifFoundShortcut;
@@ -876,6 +935,13 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readingStatsShortcutVisible"] = s.readingStatsShortcutVisible;
   doc["readingHeatmapShortcutVisible"] = s.readingHeatmapShortcutVisible;
   doc["readingProfileShortcutVisible"] = s.readingProfileShortcutVisible;
+  doc["libraryShortcutVisible"] = s.libraryShortcutVisible;
+  doc["screenSaverShortcut"] = s.screenSaverShortcut;
+  doc["screenSaverShortcutOrder"] = s.screenSaverShortcutOrder;
+  doc["screenSaverShortcutVisible"] = s.screenSaverShortcutVisible;
+  doc["clippingsShortcut"] = s.clippingsShortcut;
+  doc["clippingsShortcutOrder"] = s.clippingsShortcutOrder;
+  doc["clippingsShortcutVisible"] = s.clippingsShortcutVisible;
   doc["achievementsShortcutVisible"] = s.achievementsShortcutVisible;
   doc["ifFoundShortcutVisible"] = s.ifFoundShortcutVisible;
   doc["readMeShortcutVisible"] = s.readMeShortcutVisible;
@@ -985,7 +1051,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   s.displayDay = clamp(doc["displayDay"] | s.displayDay, S::DISPLAY_HEADER_MODE_COUNT, s.displayDay);
-  migrateDisplayHeaderSettings(s, doc, needsResave);
   s.autoSyncDay = clamp(doc["autoSyncDay"] | s.autoSyncDay, static_cast<uint8_t>(2), s.autoSyncDay);
   s.syncDayWifiChoice =
       clamp(doc["syncDayWifiChoice"] | s.syncDayWifiChoice, S::SYNC_DAY_WIFI_CHOICE_COUNT, s.syncDayWifiChoice);
@@ -1130,6 +1195,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       clamp(doc["sleepShortcutVisible"] | s.sleepShortcutVisible, static_cast<uint8_t>(2), s.sleepShortcutVisible);
   s.opdsBrowserShortcutVisible = clamp(doc["opdsBrowserShortcutVisible"] | s.opdsBrowserShortcutVisible,
                                        static_cast<uint8_t>(2), s.opdsBrowserShortcutVisible);
+  s.clippingsShortcut = clamp(doc["clippingsShortcut"] | s.clippingsShortcut, shortcutLocationCount, s.clippingsShortcut);
+  s.clippingsShortcutOrder = clamp(doc["clippingsShortcutOrder"] | s.clippingsShortcutOrder, shortcutOrderCount, s.clippingsShortcutOrder);
+  s.clippingsShortcutVisible = clamp(doc["clippingsShortcutVisible"] | s.clippingsShortcutVisible, static_cast<uint8_t>(2), s.clippingsShortcutVisible);
 
   normalizeShortcutOrderSettings(s);
   CrossPointSettings::validateFrontButtonMapping(s);
@@ -1155,6 +1223,15 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   }
   doc["activeIndex"] = store.activeIndex;
 
+  return saveJsonDocumentToFile("KRS", path, doc);
+}
+
+bool JsonSettingsIO::saveKOReaderLegacyMirror(const KOReaderCredentialStore& store, const char* path) {
+  JsonDocument doc;
+  doc["username"] = store.getUsername();
+  doc["password_obf"] = obfuscation::obfuscateToBase64(store.getPassword());
+  doc["serverUrl"] = store.getServerUrl();
+  doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   return saveJsonDocumentToFile("KRS", path, doc);
 }
 
@@ -1189,45 +1266,28 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
       store.profiles.push_back(std::move(profile));
     }
     const int active = doc["activeIndex"] | 0;
-    store.activeIndex = (active >= 0 && static_cast<size_t>(active) < store.profiles.size())
-                            ? active
-                            : (store.profiles.empty() ? -1 : 0);
-  } else {
-    // Legacy single-record format written before multi-profile support -- wrap it
-    // into a single "Profile 1" and flag for resave so the file upgrades on disk.
+    store.setActiveIndex(active);
+    LOG_DBG("KRS", "Loaded %u KOReader profiles (active=%d)", store.profiles.size(), store.getActiveIndex());
+  } else if (store.profiles.empty()) {
+    // Single legacy profile — migrate into the new multi-profile store.
     KOReaderProfile profile;
-    profile.name = "Profile 1";
+    profile.name = "Default";
     profile.username = doc["username"] | std::string("");
-    bool ok = false;
-    profile.password = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
-    if (!ok || profile.password.empty()) {
+    bool ok2 = false;
+    profile.password = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok2);
+    if (!ok2 || profile.password.empty()) {
       profile.password = doc["password"] | std::string("");
+      if (!profile.password.empty() && needsResave) *needsResave = true;
     }
     profile.serverUrl = doc["serverUrl"] | std::string("");
     uint8_t method = doc["matchMethod"] | (uint8_t)0;
     profile.matchMethod = static_cast<DocumentMatchMethod>(method);
-
-    store.profiles.clear();
     store.profiles.push_back(std::move(profile));
-    store.activeIndex = 0;
     if (needsResave) *needsResave = true;
+    LOG_DBG("KRS", "Migrated single legacy KOReader profile into multi-profile store");
   }
 
-  LOG_DBG("KRS", "Loaded %zu KOReader profile(s), active index %d", store.profiles.size(), store.activeIndex);
   return true;
-}
-
-// Legacy single-record mirror (koreader.json's original shape). Kept in sync with
-// whichever profile is active so other firmware sharing the same SD card (e.g. stock
-// crosspoint-reader, which only ever understood one KOReader account) keeps working
-// unchanged -- it never sees the multi-profile store and has no reason to.
-bool JsonSettingsIO::saveKOReaderLegacyMirror(const KOReaderCredentialStore& store, const char* path) {
-  JsonDocument doc;
-  doc["username"] = store.getUsername();
-  doc["password_obf"] = obfuscation::obfuscateToBase64(store.getPassword());
-  doc["serverUrl"] = store.getServerUrl();
-  doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
-  return saveJsonDocumentToFile("KRS", path, doc);
 }
 
 bool JsonSettingsIO::loadKOReaderLegacyProfile(KOReaderProfile& profile, const char* json) {
@@ -1448,6 +1508,10 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
     obj["lastProgressPercent"] = book.lastProgressPercent;
     obj["chapterProgressPercent"] = book.chapterProgressPercent;
     obj["completed"] = book.completed;
+    if (book.avgSecondsPerForwardPage > 0) {
+      obj["avgSecondsPerForwardPage"] = book.avgSecondsPerForwardPage;
+      obj["paceSampleCount"] = book.paceSampleCount;
+    }
 
     JsonArray bookDays = obj["readingDays"].to<JsonArray>();
     for (const auto& day : book.readingDays) {
@@ -1546,6 +1610,8 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     book.lastProgressPercent = obj["lastProgressPercent"] | static_cast<uint8_t>(0);
     book.chapterProgressPercent = obj["chapterProgressPercent"] | static_cast<uint8_t>(0);
     book.completed = obj["completed"] | false;
+    book.avgSecondsPerForwardPage = obj["avgSecondsPerForwardPage"] | static_cast<uint16_t>(0);
+    book.paceSampleCount = obj["paceSampleCount"] | static_cast<uint16_t>(0);
     if (formatVersion >= 2) {
       appendReadingDays(book.readingDays, obj["readingDays"].as<JsonArray>());
     }

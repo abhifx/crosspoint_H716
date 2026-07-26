@@ -391,9 +391,8 @@ void LibraryActivity::openSortPopup() {
     {StrId::STR_SORT_TITLE_DESC, SortDescIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_TITLE_DESC},
     {StrId::STR_SORT_AUTHOR_ASC, SortAscIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC},
     {StrId::STR_SORT_AUTHOR_DESC, SortDescIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC},
-    {StrId::STR_SORT_PROGRESS, TimeFastIcon, 32, 32, CrossPointSettings::LIBRARY_SORT_PROGRESS},
   };
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 4; ++i) {
     PopupItem item;
     item.label = I18N.get(sorts[i].id);
     item.icon = sorts[i].icon;
@@ -472,9 +471,8 @@ void LibraryActivity::selectPopupItem() {
     CrossPointSettings::LIBRARY_SORT sorts[] = {
       CrossPointSettings::LIBRARY_SORT_TITLE_ASC, CrossPointSettings::LIBRARY_SORT_TITLE_DESC,
       CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC, CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC,
-      CrossPointSettings::LIBRARY_SORT_PROGRESS,
     };
-    if (idx < 5) {
+    if (idx < 4) {
       currentSort_ = sorts[idx];
       SETTINGS.librarySort = currentSort_;
       SETTINGS.saveToFile();
@@ -847,7 +845,6 @@ void LibraryActivity::render(RenderLock&&) {
             case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
             case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
             case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
-            case CrossPointSettings::LIBRARY_SORT_PROGRESS:   sortLabel = tr(STR_SORT_PROGRESS); break;
             default: break;
           }
           if (sortLabel && sortLabel[0]) { cachedInfo_ += " / "; cachedInfo_ += sortLabel; }

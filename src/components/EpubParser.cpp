@@ -137,10 +137,16 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
   ZipFile zip(epubPath);
 
   size_t containerSize = 0;
-  if (!zip.getInflatedFileSize("META-INF/container.xml", &containerSize) || containerSize == 0 || containerSize > 8192) return false;
+  if (!zip.getInflatedFileSize("META-INF/container.xml", &containerSize) || containerSize == 0 || containerSize > 8192) {
+    LOG_DBG("LIB", "CoverGen: no container.xml in %s", epubPath.c_str());
+    return false;
+  }
 
   uint8_t* containerData = zip.readFileToMemory("META-INF/container.xml", &containerSize);
-  if (!containerData) return false;
+  if (!containerData) {
+    LOG_DBG("LIB", "CoverGen: failed read container.xml from %s", epubPath.c_str());
+    return false;
+  }
 
   std::string contentOpfPath;
   const char* fpAttr = strstr((const char*)containerData, "full-path=\"");
@@ -241,7 +247,10 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
   }
   free(opfData);
 
-  if (coverImageHref.empty()) return false;
+  if (coverImageHref.empty()) {
+    LOG_DBG("LIB", "CoverGen: no cover image found in OPF for %s", epubPath.c_str());
+    return false;
+  }
 
   unsigned long long hash = static_cast<unsigned long long>(std::hash<std::string>{}(epubPath));
   char cacheDir[64];
@@ -250,9 +259,15 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
   std::string coverTempPath;
   if (FsHelpers::hasJpgExtension(coverImageHref)) coverTempPath = std::string(cacheDir) + "/.cover.jpg";
   else if (FsHelpers::hasPngExtension(coverImageHref)) coverTempPath = std::string(cacheDir) + "/.cover.png";
-  else return false;
+  else {
+    LOG_DBG("LIB", "CoverGen: cover image not JPG/PNG: %s", coverImageHref.c_str());
+    return false;
+  }
 
-  if (!Storage.exists(cacheDir) && !Storage.mkdir(cacheDir)) return false;
+  if (!Storage.exists(cacheDir) && !Storage.mkdir(cacheDir)) {
+    LOG_DBG("LIB", "CoverGen: failed mkdir %s", cacheDir);
+    return false;
+  }
 
   FsFile coverFile;
   if (!Storage.openFileForWrite("BSC", coverTempPath, coverFile)) return false;
@@ -291,7 +306,10 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
 
     if (success) {
       coverJpg.close(); Storage.remove(coverTempPath.c_str()); Storage.remove(thumbPath.c_str());
-      if (Storage.rename(thumbTmpPath.c_str(), thumbPath.c_str())) return true;
+      if (Storage.rename(thumbTmpPath.c_str(), thumbPath.c_str())) {
+        LOG_DBG("LIB", "CoverGen: OK JPEG %s -> %s", epubPath.c_str(), thumbPath.c_str());
+        return true;
+      }
       Storage.remove(thumbTmpPath.c_str());
       return false;
     }
@@ -322,7 +340,8 @@ bool generateCover(const std::string& epubPath, int coverW, int coverH) {
     
     bool success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverPng, thumbBmp, coverW, coverH);
     coverPng.close(); thumbBmp.close(); Storage.remove(coverTempPath.c_str());
-    if (!success) Storage.remove(thumbPath.c_str());
+    if (!success) { Storage.remove(thumbPath.c_str()); }
+    else { LOG_DBG("LIB", "CoverGen: OK PNG %s -> %s", epubPath.c_str(), thumbPath.c_str()); }
     return success;
   }
   return false;

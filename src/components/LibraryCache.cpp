@@ -221,10 +221,16 @@ std::string thumbPathFor(const std::string& path, int coverW, int coverH) {
 // ============================================================================
 bool generateCoverForBook(const std::string& path, int coverW, int coverH) {
   yield(); esp_task_wdt_reset();
-    if (ESP.getMaxAllocHeap() < 40 * 1024 || ESP.getFreeHeap() < 32 * 1024) return false;
+    if (ESP.getMaxAllocHeap() < 40 * 1024 || ESP.getFreeHeap() < 32 * 1024) {
+      LOG_DBG("LIB", "Cover: SKIP low heap maxA=%u free=%u path=%s", ESP.getMaxAllocHeap(), ESP.getFreeHeap(), path.c_str());
+      return false;
+    }
 
   if (FsHelpers::hasEpubExtension(path)) {
-    if (ESP.getMaxAllocHeap() < 28 * 1024 || ESP.getFreeHeap() < 24 * 1024) return false;
+    if (ESP.getMaxAllocHeap() < 28 * 1024 || ESP.getFreeHeap() < 24 * 1024) {
+      LOG_DBG("LIB", "Cover: SKIP EPUB low heap maxA=%u free=%u path=%s", ESP.getMaxAllocHeap(), ESP.getFreeHeap(), path.c_str());
+      return false;
+    }
     
     // Fast ZIP-only cover extraction — no expat, no book.bin, no cache write.
     // Covers are generated directly from the EPUB ZIP by:
@@ -233,17 +239,22 @@ bool generateCoverForBook(const std::string& path, int coverW, int coverH) {
     //   3. Extracting the cover image (JPEG/PNG) from ZIP and converting to 1-bit BMP thumbnail
     // This avoids the heavy Epub::load() parser which creates book.bin,
     // parses TOC/CSS, and fragments heap with expat buffers.
-    return EpubParser::generateCover(path, coverW, coverH);
+    const bool ok = EpubParser::generateCover(path, coverW, coverH);
+    if (!ok) LOG_DBG("LIB", "Cover: EPUB ZIP gen FAILED path=%s", path.c_str());
+    return ok;
   }
   
   if (FsHelpers::hasXtcExtension(path)) {
-    if (ESP.getFreeHeap() < 20000) return false;
-    
+    if (ESP.getFreeHeap() < 20000) {
+      LOG_DBG("LIB", "Cover: SKIP XTC low heap free=%u path=%s", ESP.getFreeHeap(), path.c_str());
+      return false;
+    }
+
     // Lambda per tentativo di generazione con validazione
     auto tryXtc = [&]() -> bool {
       Xtc xtc(path, "/.crosspoint");
-      if (!xtc.load()) return false;
-      if (!xtc.generateThumbBmp(coverW, coverH)) return false;
+      if (!xtc.load()) { LOG_DBG("LIB", "Cover: XTC load FAILED path=%s", path.c_str()); return false; }
+      if (!xtc.generateThumbBmp(coverW, coverH)) { LOG_DBG("LIB", "Cover: XTC gen FAILED path=%s", path.c_str()); return false; }
       
       const std::string xtcThumbPath = xtc.getThumbBmpPath();
       FsFile file;

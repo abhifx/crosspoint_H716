@@ -213,7 +213,7 @@ void LibraryActivity::applyLayoutFromSettings() {
 
 void LibraryActivity::onEnter() {
   Activity::onEnter();
-  HOMEPAGE_LOG("LIB", "onEnter: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("LIB", "onEnter: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   applyLayoutFromSettings();
   selectorIndex_ = 0;
@@ -717,6 +717,8 @@ void LibraryActivity::loop() {
       }
       COVER_LOG("LIB", "Cover: pass#%d DONE stillMissing=%d (free=%u)",
                 coverPassCount_ + 1, stillMissing, ESP.getFreeHeap());
+      LOG_DBG("LIB", "Covers: pass#%d DONE stillMissing=%d free=%u maxA=%u",
+              coverPassCount_ + 1, stillMissing, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       if (!stillMissing || ++coverPassCount_ >= kMaxCoverPasses) {
         COVER_LOG("LIB", "Cover: pass#%d COMPLETE (stillMissing=%d budgetExceeded=%d)",
                   coverPassCount_, stillMissing, coverPassCount_ >= kMaxCoverPasses);
@@ -750,8 +752,8 @@ void LibraryActivity::loop() {
       COVER_LOG("LIB", "Cover: slot=%d idx=%d gen... path=%s free=%u maxA=%u",
                 slot, idx, entries_[idx].path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
-      // Force CPU to normal frequency during cover generation (EPUB parsing +
-      // JPEG/PNG decoding is extremely slow at 40 MHz low-power mode).
+      // Force CPU to normal frequency during cover generation (JPEG/PNG
+      // decoding is extremely slow at 40 MHz low-power mode).
       HalPowerManager::Lock powerLock;
 
       // Free render buffers and font caches so the cover decoder gets more
@@ -1396,33 +1398,41 @@ void LibraryActivity::drawTileContent(int i, int pageStart, int x, int y) const 
 
 void LibraryActivity::deleteLibraryCovers(const std::string& bookPath) {
   std::string thumbPath = LibraryCache::thumbPathFor(bookPath, coverWidth_, coverHeight_);
+  LOG_DBG("LIB", "DelCovers: single path=%s thumb=%s exists=%d", bookPath.c_str(), thumbPath.c_str(),
+          !thumbPath.empty() && Storage.exists(thumbPath.c_str()));
   if (!thumbPath.empty() && Storage.exists(thumbPath.c_str())) {
     Storage.remove(thumbPath.c_str());
+    LOG_DBG("LIB", "DelCovers: removed %s", thumbPath.c_str());
   }
 }
 
 void LibraryActivity::deletePageCovers() {
   int ps = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
   int pe = std::min(ps + gridsPerPage_, static_cast<int>(entries_.size()));
+  LOG_DBG("LIB", "DelCovers: page range [%d..%d) total=%zu sel=%d grids=%d", ps, pe, entries_.size(), selectorIndex_, gridsPerPage_);
   for (int i = ps; i < pe; ++i) {
     std::string thumbPath = LibraryCache::thumbPathFor(entries_[i].path, coverWidth_, coverHeight_);
     if (!thumbPath.empty() && Storage.exists(thumbPath.c_str())) {
       Storage.remove(thumbPath.c_str());
+      LOG_DBG("LIB", "DelCovers: removed [%d] %s -> %s", i, entries_[i].path.c_str(), thumbPath.c_str());
     }
   }
 }
 
 void LibraryActivity::deleteAllLibraryCovers() {
+  LOG_DBG("LIB", "DelCovers: ALL entries=%zu unfiltered=%zu", entries_.size(), unfilteredEntries_.size());
   for (auto& e : entries_) {
     std::string thumbPath = LibraryCache::thumbPathFor(e.path, coverWidth_, coverHeight_);
     if (!thumbPath.empty() && Storage.exists(thumbPath.c_str())) {
       Storage.remove(thumbPath.c_str());
+      LOG_DBG("LIB", "DelCovers: removed entries %s", e.path.c_str());
     }
   }
   for (auto& e : unfilteredEntries_) {
     std::string thumbPath = LibraryCache::thumbPathFor(e.path, coverWidth_, coverHeight_);
     if (!thumbPath.empty() && Storage.exists(thumbPath.c_str())) {
       Storage.remove(thumbPath.c_str());
+      LOG_DBG("LIB", "DelCovers: removed unfiltered %s", e.path.c_str());
     }
   }
 }

@@ -16,6 +16,7 @@
 #include "EpubParser.h"
 #include "FavoritesStore.h"
 #include "ReadingStatsStore.h"
+#include "RecentBooksStore.h"
 
 namespace LibraryIndex {
 
@@ -639,8 +640,11 @@ static bool matchesFilter(const Record& rec, FilterMode m) {
     case FilterMode::ALL: return true;
     case FilterMode::FAVOURITES: return FAVORITES.isFavorite(rec.path);
     case FilterMode::LATEST_READ: {
-      const auto* s = READING_STATS.findBook(rec.path);
-      return s && s->lastReadAt > 0;
+      const auto& recent = RECENT_BOOKS.getBooks();
+      for (const auto& rb : recent) {
+        if (rb.path == rec.path || (!rb.bookId.empty() && rb.bookId == rec.path)) return true;
+      }
+      return false;
     }
     case FilterMode::UNREAD: {
       const auto* s = READING_STATS.findBook(rec.path);

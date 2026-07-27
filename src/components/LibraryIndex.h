@@ -123,6 +123,9 @@ int queryCollectionBooks(BookRef* out, int page, int pageSize, int collectionIdx
 // Number of unique collections
 int totalCollections();
 
+// Number of books in a specific collection
+int collectionBookCount(int collectionIdx);
+
 // Total number of non-tombstone books (fast, from index header).
 int totalBooks();
 

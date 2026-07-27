@@ -886,6 +886,20 @@ int totalCollections() {
   return count;
 }
 
+int collectionBookCount(int collectionIdx) {
+  HalFile cf = Storage.open(kIdxCollections);
+  if (!cf) return 0;
+  const int totalColls = static_cast<int>(cf.size() / sizeof(CollectionIndexRec));
+  if (collectionIdx < 0 || collectionIdx >= totalColls) { cf.close(); return 0; }
+  cf.seek(static_cast<uint32_t>(collectionIdx) * sizeof(CollectionIndexRec));
+  CollectionIndexRec ci;
+  if (cf.read(reinterpret_cast<uint8_t*>(&ci), sizeof(CollectionIndexRec)) != static_cast<int>(sizeof(CollectionIndexRec))) {
+    cf.close(); return 0;
+  }
+  cf.close();
+  return static_cast<int>(ci.bookCount);
+}
+
 // =========================================================================
 // Sync
 // =========================================================================

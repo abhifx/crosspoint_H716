@@ -333,8 +333,7 @@ void LibraryActivity::refreshPageCache() {
   } else if (collectionsMode_ && currentCollectionIdx_ >= 0) {
     // Browsing books within a collection
     slotCount = LibraryIndex::queryCollectionBooks(pageCache_, curPage, gridsPerPage_, currentCollectionIdx_);
-    // Update total to match the collection books count
-    totalBooks_ = slotCount + (curPage * gridsPerPage_);  // rough estimate
+    totalBooks_ = LibraryIndex::collectionBookCount(currentCollectionIdx_);
     totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
   } else {
     // Normal book browsing

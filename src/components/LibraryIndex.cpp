@@ -84,10 +84,13 @@ static_assert(sizeof(ScanRec) == 16, "ScanRec must be 16 bytes");
 // =========================================================================
 
 void emitProgress(GfxRenderer& r, const Rect& popup, int done, int total) {
-  const int denom = total > 0 ? total : 1;
-  int pct = (done * 100) / denom;
-  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
-  UITheme::getInstance().getTheme().fillPopupProgress(r, popup, pct);
+  (void)r; (void)popup; (void)done; (void)total;
+  // Progress bar is only shown during cold scan (rendered by caller).
+  // Incremental scan passes an empty popup and uses emitProgressIdle.
+}
+
+void emitProgressIdle(GfxRenderer&, const Rect&, int, int) {
+  // No-op for incremental scan — avoids displayBuffer calls.
 }
 
 // Normalise string for sort key: lowercase, strip accents/diacritics, truncate to 20.
@@ -324,7 +327,7 @@ namespace {
 // the directory entry (no extra Storage.open() needed).
 using FileVisitor = std::function<void(const char* path, size_t fileSize)>;
 
-static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
+static void walkDirs(const char* rootDir, const FileVisitor& onFile, bool yieldBetweenDirs = true) {
   std::string root = rootDir ? rootDir : "";
   if (root.empty()) root = "/";
   if (root[0] != '/') root.insert(0, "/");
@@ -338,7 +341,7 @@ static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
   while (!worklist.empty()) {
     std::string folder = std::move(worklist.back()); worklist.pop_back();
     uint8_t fd = depth.back(); depth.pop_back();
-    if ((++dirCount & 0x7) == 0) { yield(); esp_task_wdt_reset(); }
+    if (yieldBetweenDirs && (++dirCount & 0x7) == 0) { yield(); esp_task_wdt_reset(); }
     HalFile rootFile = Storage.open(folder.c_str());
     if (!rootFile || !rootFile.isDirectory()) { if (rootFile) rootFile.close(); continue; }
     rootFile.rewindDirectory();
@@ -406,15 +409,19 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
             [](const ScanEntry& a, const ScanEntry& b) { return a.hash < b.hash; });
   LOG_DBG("LIB", "Scan: loaded %u previous scan entries", prevScan.size());
 
-  // ---- Phase 2: single streaming pass — process each file as discovered.
-  // No counting pass needed, no std::vector<std::string> of paths.
-  int total = 0, processed = 0;
-  {
-    // Count first for progress bar (lightweight, no path storage)
-    walkDirs(rootDir, [&total](const char*, size_t) { ++total; });
+  // ---- Phase 2: single streaming pass
+  int total = 0;
+
+  // Choose progress emitter: show popup only for cold scan (non-empty popup)
+  // Incremental scan from LibraryActivity passes an empty Rect{}.
+  const bool incremental = (popupRect.x == 0 && popupRect.y == 0);
+  auto doEmit = incremental ? emitProgressIdle : emitProgress;
+  
+  if (!incremental) {
+    walkDirs(rootDir, [&total](const char*, size_t) { ++total; }, false);
+    LOG_DBG("LIB", "Scan: %d candidate files found", total);
+    emitProgress(renderer, popupRect, 0, total);
   }
-  LOG_DBG("LIB", "Scan: %d candidate files found", total);
-  emitProgress(renderer, popupRect, 0, total);
 
   std::vector<ScanRec> newScan; newScan.reserve(total);
 
@@ -448,7 +455,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
 
   auto processFile = [&](const char* p, size_t fsz) {
     yield(); esp_task_wdt_reset();
-    if (pi % kProgressInterval == 0) emitProgress(renderer, popupRect, pi, total);
+    if (pi % kProgressInterval == 0) doEmit(renderer, popupRect, pi, total);
     ++pi;
 
     // File size from directory entry — no extra Storage.open() needed
@@ -527,7 +534,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
     ++added;
   };
 
-  walkDirs(rootDir, processFile);
+  walkDirs(rootDir, processFile, !incremental);  // only yield when showing progress
 
   // ---- Phase 4: mark removed files (present in old scan but not new) ----
   for (auto& old : prevScan) {

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 #include "components/UITheme.h"
 #include "EpubParser.h"
@@ -297,14 +298,33 @@ bool extractMetadata(const char* path, char* title, size_t titleCap, char* autho
 // =========================================================================
 // Scan — full SD walk + metadata + library.dat + scan_state.dat
 // =========================================================================
-
+//
+// RAM note (post-optimization): the previous implementation collected every
+// candidate book path into a std::vector<std::string> before processing.
+// That vector alone cost ~110-150 B/book (vector slot + heap string) and
+// lived in RAM for the *entire* duration of the scan, on top of the
+// prevScan/newScan ScanRec vectors (16 B/book each). For large libraries
+// this was by far the dominant RAM cost of scan().
+//
+// The version below eliminates that vector entirely. The directory walk
+// (enumerateBooks) now takes a callback and invokes it once per discovered
+// book file, so no path list is ever materialized in RAM. To still show
+// an accurate progress bar we do a cheap first pass that only *counts*
+// matching files (no strings stored, negligible RAM), then a second pass
+// that streams each path straight into the existing per-file processing
+// logic. Net effect: the only vectors alive during scan are prevScan and
+// newScan (16 B/book each = 32 B/book total), a ~4-5x RAM reduction for
+// large libraries versus the previous approach.
 // =========================================================================
-// Scan — full SD walk + metadata + library.dat + scan_state.dat
-// RAM: ~6 KB (2 scan_state records + 2 metadata buffers + path buffer)
-// =========================================================================
 
-// DFS walk collecting book paths (same logic as old enumerateBooks).
-static void enumerateBooks(std::vector<std::string>& outPaths, const char* rootDir) {
+namespace {
+
+// Directory walker used for both the counting pass and the processing pass.
+// `onFile` is invoked once per matching book path; it must not retain the
+// pointer beyond the call (the buffer is reused for every file).
+using FileVisitor = std::function<void(const char* path)>;
+
+static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
   std::string root = rootDir ? rootDir : "";
   if (root.empty()) root = "/";
   if (root[0] != '/') root.insert(0, "/");
@@ -340,8 +360,9 @@ static void enumerateBooks(std::vector<std::string>& outPaths, const char* rootD
       const std::string_view fn{name};
       if (FsHelpers::hasEpubExtension(fn) || FsHelpers::hasXtcExtension(fn) ||
           FsHelpers::hasTxtExtension(fn) || FsHelpers::hasMarkdownExtension(fn)) {
-        if (std::strcmp(name,"if_found.txt")!=0 && std::strcmp(name,"crash_report.txt")!=0)
-          outPaths.push_back(std::move(child));
+        if (std::strcmp(name, "if_found.txt") != 0 && std::strcmp(name, "crash_report.txt") != 0) {
+          onFile(child.c_str());
+        }
       }
     }
     rootFile.close();
@@ -352,6 +373,8 @@ static uint32_t hashPath(const char* p) {
   uint32_t h = 5381; while (*p) { h = ((h << 5) + h) + static_cast<unsigned char>(*p); ++p; }
   return h;
 }
+
+}  // namespace
 
 bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
   LOG_DBG("LIB", "Scan: start root=%s", rootDir ? rootDir : "/");
@@ -379,45 +402,52 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     return nullptr;
   };
 
-  // ---- Phase 2: enumerate files ----
-  std::vector<std::string> paths; paths.reserve(256);
-  enumerateBooks(paths, rootDir);
-  const int total = static_cast<int>(paths.size());
+  // ---- Phase 2a: cheap counting pass (no paths stored, negligible RAM) ----
+  int total = 0;
+  walkDirs(rootDir, [&total](const char*) { ++total; });
   emitProgress(renderer, popupRect, 0, total);
   LOG_DBG("LIB", "Scan: %d candidate files found", total);
 
-  // ---- Phase 3: process each file ----
+  // ---- Phase 2b/3: streaming pass — process each file as it's discovered.
+  // No std::vector<std::string> of all paths is ever materialized.
   std::vector<ScanRec> newScan; newScan.reserve(total);
 
   // Open library.dat for append (create fresh if no existing scan)
-  HalFile datFile = Storage.open(kDatFile);
-  if (!datFile || prevScan.empty()) {
-    if (datFile) datFile.close();
-    HalFile tmp = Storage.open(kDatFile, O_CREAT | O_WRONLY | O_TRUNC);
-    if (tmp) tmp.close();
-    datFile = Storage.open(kDatFile);
+  {
+    HalFile datFile = Storage.open(kDatFile);
+    if (!datFile || prevScan.empty()) {
+      if (datFile) datFile.close();
+      HalFile tmp = Storage.open(kDatFile, O_CREAT | O_WRONLY | O_TRUNC);
+      if (tmp) tmp.close();
+      datFile = Storage.open(kDatFile);
+    }
+    if (!datFile) { LOG_ERR("LIB", "Scan: cannot open library.dat"); return false; }
+    datFile.close();
   }
-  if (!datFile) { LOG_ERR("LIB", "Scan: cannot open library.dat"); return false; }
 
   uint32_t nextId = 1;
   // Find max id from existing records
   {
-    const size_t existing = datFile.size() / kRecordSize;
-    Record last; if (existing > 0 && readRecord(static_cast<uint32_t>(existing - 1), last)) {
-      nextId = last.id + 1;
+    HalFile datFile = Storage.open(kDatFile);
+    if (datFile) {
+      const size_t existing = datFile.size() / kRecordSize;
+      datFile.close();
+      Record last; if (existing > 0 && readRecord(static_cast<uint32_t>(existing - 1), last)) {
+        nextId = last.id + 1;
+      }
     }
   }
-  datFile.close();
 
-  int added = 0, skipped = 0, removed = 0;
-  for (int pi = 0; pi < total; ++pi) {
-    const char* p = paths[pi].c_str();
+  int added = 0, skipped = 0, removed = 0, pi = 0;
+
+  auto processFile = [&](const char* p) {
     yield(); esp_task_wdt_reset();
     if (pi % kProgressInterval == 0) emitProgress(renderer, popupRect, pi, total);
+    ++pi;
 
     // Get file stat
     HalFile st = Storage.open(p);
-    if (!st) { ++skipped; continue; }
+    if (!st) { ++skipped; return; }
     const size_t fsz = st.size();
     // mtime: use file size as proxy (ESP32 VFS doesn't expose mtime reliably via Arduino)
     const uint32_t mtime = (uint32_t)fsz;
@@ -430,7 +460,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
       // Unchanged — keep existing record
       newScan.push_back({ph, mtime, (uint32_t)fsz, prev->id});
       ++skipped;
-      continue;
+      return;
     }
 
     // New or changed — extract metadata and append
@@ -469,7 +499,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     }
 
     uint32_t pos = appendRecord(rec);
-    if (pos == UINT32_MAX) { LOG_ERR("LIB", "Scan: append failed for %s", p); continue; }
+    if (pos == UINT32_MAX) { LOG_ERR("LIB", "Scan: append failed for %s", p); return; }
     newScan.push_back({ph, mtime, (uint32_t)fsz, rec.id});
 
     // Write series entry if book has series/collection metadata
@@ -483,7 +513,9 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     }
 
     ++added;
-  }
+  };
+
+  walkDirs(rootDir, processFile);
 
   // ---- Phase 4: mark removed files (present in old scan but not new) ----
   for (auto& old : prevScan) {

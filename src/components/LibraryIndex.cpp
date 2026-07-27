@@ -1,6 +1,7 @@
 #include "LibraryIndex.h"
 
 #include <FsHelpers.h>
+#include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <HomepageDebugLog.h>
@@ -84,9 +85,11 @@ static_assert(sizeof(ScanRec) == 16, "ScanRec must be 16 bytes");
 // =========================================================================
 
 void emitProgress(GfxRenderer& r, const Rect& popup, int done, int total) {
-  (void)r; (void)popup; (void)done; (void)total;
-  // Progress bar is only shown during cold scan (rendered by caller).
-  // Incremental scan passes an empty popup and uses emitProgressIdle.
+  const int denom = total > 0 ? total : 1;
+  int pct = (done * 100) / denom;
+  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+  UITheme::getInstance().getTheme().fillPopupProgress(r, popup, pct);
+  r.displayBuffer();  // flush to e-ink for cold scan progress
 }
 
 void emitProgressIdle(GfxRenderer&, const Rect&, int, int) {

@@ -320,6 +320,9 @@ void LibraryActivity::refreshPageCache() {
   } else if (collectionsMode_ && currentCollectionIdx_ >= 0) {
     // Browsing books within a collection
     slotCount = LibraryIndex::queryCollectionBooks(pageCache_, curPage, gridsPerPage_, currentCollectionIdx_);
+    // Update total to match the collection books count
+    totalBooks_ = slotCount + (curPage * gridsPerPage_);  // rough estimate
+    totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
   } else {
     // Normal book browsing
     slotCount = LibraryIndex::queryPage(
@@ -891,7 +894,7 @@ void LibraryActivity::render(RenderLock&&) {
       // 3. Update cached text strings if selection/filter/sort/search changed.
       const bool infoKeyChanged = cachedRenderSelector_ != selectorIndex_ || cachedRenderPage_ != curPageRaw ||
                                   cachedInfoFilter_ != currentFilter_ || cachedInfoSort_ != currentSort_ ||
-                                  cachedInfoSearch_ != currentSearchText_;
+                                  cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_;
       if (infoKeyChanged) {
           cachedInfo_.clear();
           switch (currentFilter_) {
@@ -1012,7 +1015,7 @@ void LibraryActivity::render(RenderLock&&) {
   const bool infoKeyChanged =
       cachedRenderSelector_ != selectorIndex_ || cachedRenderPage_ != curPageRaw ||
       cachedInfoFilter_ != currentFilter_ || cachedInfoSort_ != currentSort_ ||
-      cachedInfoSearch_ != currentSearchText_;
+      cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_;
   if (infoKeyChanged) {
     cachedInfo_.clear();
     switch (currentFilter_) {

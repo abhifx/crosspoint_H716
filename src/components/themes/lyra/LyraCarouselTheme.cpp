@@ -231,6 +231,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return FileTransferIcon;
       case UIIcon::Calibre:
         return CalibreIcon;
+      case UIIcon::File:
+        return ClipIcon32;
       default:
         return nullptr;
     }

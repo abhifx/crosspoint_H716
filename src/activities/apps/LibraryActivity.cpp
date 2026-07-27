@@ -663,8 +663,11 @@ void LibraryActivity::loop() {
       coverGenSlot_ = 0;
       coverGenDone_ = 0;
       coverGenTotal_ = 0;
-      // No forceRender_ here — covers were already shown progressively
-      // during generation, and the last cover update triggered a requestUpdate().
+      // Force a full render at finish to ensure:
+      // - All generated covers appear on screen
+      // - The progress text "X/Y Loading..." disappears
+      // - Power-save wake renders don't leave stale frames
+      forceRender_ = true;
       requestUpdate();
     }
     return;  // block input while generating covers

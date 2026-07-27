@@ -606,7 +606,16 @@ void LibraryActivity::loop() {
       for (int i = 0; i < gridsPerPage_ && (pageStart + i) < total; ++i) {
         if (pageCache_[i].id == 0) continue;
         std::string thumbPath = LibraryIndex::thumbPathFor(std::string(pageCache_[i].path), coverWidth_, coverHeight_);
-        if (!Storage.exists(thumbPath.c_str())) ++coverGenTotal_;
+        if (!Storage.exists(thumbPath.c_str())) {
+          ++coverGenTotal_;
+        } else {
+          // Validate existing cover: ensure the BMP is actually readable
+          if (!isBookCoverReady(pageCache_[i].path)) {
+            // Corrupt — delete and regenerate
+            Storage.remove(thumbPath.c_str());
+            ++coverGenTotal_;
+          }
+        }
       }
       if (coverGenTotal_ == 0) {
         coverGenActive_ = false;
@@ -1211,7 +1220,7 @@ void LibraryActivity::render(RenderLock&&) {
       char covBuf[48];
       snprintf(covBuf, sizeof(covBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
       const int covW = renderer.getTextWidth(SMALL_FONT_ID, covBuf, EpdFontFamily::REGULAR);
-      const int covY = selTitleY + lh * 2 + 4;
+      const int covY = selTitleY + lh * 2 - 4;  // moved up 8px to avoid grid overlap
       renderer.drawText(SMALL_FONT_ID, (pageWidth - covW) / 2, covY, covBuf, true, EpdFontFamily::BOLD);
     }
   }

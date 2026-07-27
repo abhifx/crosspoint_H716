@@ -993,8 +993,7 @@ void EpubReaderActivity::renderBookmarkHighlight(std::shared_ptr<Page> page, int
         ++globalIdx;
       }
     }
-    // v4 bookmark not on this page — continue to check v3 bookmarks below
-    break;  // only one v4 entry per page to check (first match wins)
+    // v4 bookmark not on this page — continue to check next bookmark
   }
 
   // v3 (old) bookmark: text-match the snippet (3+ words, skip leading quotes).

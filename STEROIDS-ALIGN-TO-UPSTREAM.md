@@ -46,6 +46,17 @@ these files during a merge — always keep the local Steroids version:
 | **`src/network/html/AppSettingsPage.html`** | **Browser stats/settings editor (deleted by upstream!)** |
 | **`src/SettingsList.cpp`** | **Steroids menu items (library, screensaver, frontLongPress, clippingsShortcut, etc.)** |
 | **`src/activities/ActivityManager.cpp/h`** | **goToLibrary, goToScreensaver, goToClippings methods** |
+| **`src/ReadingStatsStore.h`** | **Steroids pace-tracking fields (avgSecondsPerForwardPage, paceSampleCount)** |
+| **`src/ReadingStatsStore.cpp`** | **Steroids pace-tracking implementation (recordForwardPageRead, mark-as-unread)** |
+| **`src/ReadingStatsActivity.cpp/h`** | **selectedBookPath constructor param (pre-select book in stats)** |
+
+### Why ReadingStatsStore is critical
+
+Upstream 1.5.0 removed `avgSecondsPerForwardPage`, `paceSampleCount`, and
+`recordForwardPageRead()` from ReadingStatsStore. Steroids preserves these
+for reading pace estimation and "time left" status bar. If upstream
+ReadingStatsStore.h is taken, `JsonSettingsIO.cpp` fails to compile because
+it references these fields in import/export functions.
 
 ### Why JsonSettingsIO.cpp is critical
 
@@ -438,4 +449,4 @@ Refer to the "Files to NEVER Overwrite" section and restore the local version.
 
 ---
 
-*Last updated: 2026-07-26 — based on 1.3.0 → 1.4.5 merge*
+*Last updated: 2026-07-27 — based on 1.3.0 → 1.5.0.2 merge*

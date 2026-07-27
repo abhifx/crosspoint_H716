@@ -35,7 +35,7 @@ constexpr const char* kIdxCollections = "/.crosspoint/LIBRARY/idx_collections.bi
 constexpr const char* kSeriesDat = "/.crosspoint/LIBRARY/series.dat";
 constexpr const char* kTmpDir   = "/.crosspoint/LIBRARY/tmp";
 
-constexpr int kProgressInterval = 10;
+int kProgressInterval = 10;
 
 // ---- Fixed-length record sizes ----
 constexpr size_t kRecordSize    = sizeof(Record);        // 256
@@ -424,7 +424,11 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
     walkDirs(rootDir, [&total](const char*, size_t) { ++total; }, false);
     LOG_DBG("LIB", "Scan: %d candidate files found", total);
     emitProgress(renderer, popupRect, 0, total);
+    // Dynamic progress interval: ~10 refreshes total regardless of library size
+    if (total > 10) kProgressInterval = std::max(1, total / 10);
   }
+
+  struct ScanState { int interval; } state = { kProgressInterval };
 
   std::vector<ScanRec> newScan; newScan.reserve(total);
 
@@ -458,7 +462,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
 
   auto processFile = [&](const char* p, size_t fsz) {
     yield(); esp_task_wdt_reset();
-    if (pi % kProgressInterval == 0) doEmit(renderer, popupRect, pi, total);
+    if (pi % state.interval == 0) doEmit(renderer, popupRect, pi, total);
     ++pi;
 
     // File size from directory entry — no extra Storage.open() needed

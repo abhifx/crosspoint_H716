@@ -621,10 +621,11 @@ void LibraryActivity::loop() {
         coverGenActive_ = false;
         return;
       }
-      // First frame: let the grid render without blocking
+      // First frame: let the grid render without blocking; cover gen starts
+      // on the next frame. Don't force another full render here — the grid
+      // is already visible from the initial page render.
       LOG_DBG("LIB", "CovGen: start %d missing covers on page", coverGenTotal_);
-      coverGenSlot_ = -1;  // signal that we've counted, start processing on next frame
-      forceRender_ = true;
+      coverGenSlot_ = -1;
       requestUpdate();
       return;
     }
@@ -644,12 +645,10 @@ void LibraryActivity::loop() {
         // Generate cover using Epub/Xtc parser
         if (generatePageCover(pageCache_[slot].path)) {
           ++coverGenDone_;
-          // Re-render the page so the new cover appears immediately.
-          // Only force full render on the FIRST cover update to avoid
-          // recalculating the entire grid every frame.
-          if (coverGenDone_ == 1) {
-            forceRender_ = true;
-          }
+          // Re-render so the new cover appears. Force full render only on
+          // the first successful cover; subsequent updates use the existing
+          // partial render optimisation.
+          if (coverGenDone_ == 1) forceRender_ = true;
           requestUpdate();
         }
       }
@@ -662,7 +661,8 @@ void LibraryActivity::loop() {
       coverGenSlot_ = 0;
       coverGenDone_ = 0;
       coverGenTotal_ = 0;
-      forceRender_ = true;
+      // No forceRender_ here — covers were already shown progressively
+      // during generation, and the last cover update triggered a requestUpdate().
       requestUpdate();
     }
     return;  // block input while generating covers

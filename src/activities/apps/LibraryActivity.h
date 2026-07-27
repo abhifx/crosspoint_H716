@@ -32,6 +32,9 @@ class LibraryActivity final : public Activity {
   CrossPointSettings::LIBRARY_FILTER cachedInfoFilter_ = CrossPointSettings::LIBRARY_FILTER_ALL;
   CrossPointSettings::LIBRARY_SORT cachedInfoSort_ = CrossPointSettings::LIBRARY_SORT_TITLE_ASC;
   std::string cachedInfoSearch_;
+  mutable bool cachedCollectionsMode_ = false;
+  mutable int  cachedCollectionIdx_ = -2;
+  mutable std::string cachedCollectionName_;
   std::vector<std::vector<std::string>> pageTitleCache_;
   int pageTitleCacheKey_ = -1;
 

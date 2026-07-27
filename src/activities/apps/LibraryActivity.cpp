@@ -257,6 +257,9 @@ void LibraryActivity::freeBackgroundMemory() {
   cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
   cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
   cachedInfoSearch_.clear();
+  cachedCollectionsMode_ = false;
+  cachedCollectionIdx_ = -2;
+  cachedCollectionName_.clear();
 }
 
 
@@ -378,6 +381,9 @@ void LibraryActivity::applyFilterAndSort() {
   cachedInfoFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(-1);
   cachedInfoSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(-1);
   cachedInfoSearch_.clear();
+  cachedCollectionsMode_ = false;
+  cachedCollectionIdx_ = -2;
+  cachedCollectionName_.clear();
   refreshPageCache();
 }
 
@@ -894,7 +900,9 @@ void LibraryActivity::render(RenderLock&&) {
       // 3. Update cached text strings if selection/filter/sort/search changed.
       const bool infoKeyChanged = cachedRenderSelector_ != selectorIndex_ || cachedRenderPage_ != curPageRaw ||
                                   cachedInfoFilter_ != currentFilter_ || cachedInfoSort_ != currentSort_ ||
-                                  cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_;
+                                  cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_ ||
+                                  cachedCollectionsMode_ != collectionsMode_ || cachedCollectionIdx_ != currentCollectionIdx_ ||
+                                  cachedCollectionName_ != currentCollectionName_;
       if (infoKeyChanged) {
           cachedInfo_.clear();
           switch (currentFilter_) {
@@ -946,6 +954,9 @@ void LibraryActivity::render(RenderLock&&) {
           cachedInfoSearch_ = currentSearchText_;
           cachedRenderSelector_ = selectorIndex_;
           cachedRenderPage_ = curPageRaw;
+          cachedCollectionsMode_ = collectionsMode_;
+          cachedCollectionIdx_ = currentCollectionIdx_;
+          cachedCollectionName_ = currentCollectionName_;
       }
 
       // 4. Draw new border (black).
@@ -1067,6 +1078,9 @@ void LibraryActivity::render(RenderLock&&) {
     cachedInfoSearch_ = currentSearchText_;
     cachedRenderSelector_ = selectorIndex_;
     cachedRenderPage_ = curPageRaw;
+    cachedCollectionsMode_ = collectionsMode_;
+    cachedCollectionIdx_ = currentCollectionIdx_;
+    cachedCollectionName_ = currentCollectionName_;
   }
 
   // Info line (filter/sort/search)

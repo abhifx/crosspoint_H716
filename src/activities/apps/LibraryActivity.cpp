@@ -101,10 +101,11 @@ void drawRibbonBadge(GfxRenderer& r, int cx, int cy, int cw, int ch,
     r.drawLine(symCx - 1, symCy + 4, symCx + 6, symCy - 4, 2, false);
   } else if (favorite) {
     constexpr int kHeartNativeSz = 32;
-    if (leg >= kHeartNativeSz) {
-      int hx = symCx - kHeartNativeSz / 2;
-      int hy = symCy - kHeartNativeSz / 2;
-      r.drawIconInverted(::HeartIcon, hx, hy, kHeartNativeSz, kHeartNativeSz);
+    const int heartSz = kHeartNativeSz * 2 / 3;  // 21 px — 2/3 of 32
+    if (leg >= heartSz) {
+      int hx = symCx - heartSz / 2;
+      int hy = symCy - heartSz / 2;
+      r.drawIconInverted(::HeartIcon, hx, hy, heartSz, heartSz);
     }
   } else if (opened) {
     const int dotR = std::max(1, symSz / 4);

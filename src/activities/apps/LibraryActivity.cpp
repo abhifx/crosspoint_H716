@@ -647,10 +647,10 @@ void LibraryActivity::loop() {
         // Generate cover using Epub/Xtc parser
         if (generatePageCover(pageCache_[slot].path)) {
           ++coverGenDone_;
-          // Re-render so the new cover appears. Force full render only on
-          // the first successful cover; subsequent updates use the existing
-          // partial render optimisation.
-          if (coverGenDone_ == 1) forceRender_ = true;
+          // Force full render after EVERY generated cover so the new BMP
+          // appears on screen immediately. Without forceRender the render
+          // early-out would skip the update (same page, same selector).
+          forceRender_ = true;
           requestUpdate();
         }
       }

@@ -17,7 +17,9 @@ namespace EpubParser {
  * @param outAuthor Output string for the book author.
  * @return true if metadata was successfully extracted.
  */
-bool extractMetadata(const std::string& epubPath, const std::string& cacheDir, std::string& outTitle, std::string& outAuthor);
+bool extractMetadata(const std::string& epubPath, const std::string& cacheDir,
+                     std::string& outTitle, std::string& outAuthor,
+                     std::string* outSeries = nullptr, float* outSeriesIndex = nullptr);
 
 /**
  * @brief Extracts and generates a 1-bit BMP cover thumbnail from an EPUB.

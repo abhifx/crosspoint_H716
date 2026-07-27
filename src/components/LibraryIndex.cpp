@@ -747,16 +747,28 @@ bool buildCollectionsIndex() {
   if (totalSeries == 0) { sf.close(); return false; }
   sf.close();
 
-  // Read all series records, sort by collection name + seriesIndex
+  // Read all series records, validate against library.dat (skip tombstoned books)
   std::vector<SeriesRec> series;
   series.reserve(totalSeries);
   {
     HalFile f = Storage.open(kSeriesDat);
+    HalFile datF = Storage.open(kDatFile);
     SeriesRec sr;
     while (f.read(reinterpret_cast<uint8_t*>(&sr), sizeof(SeriesRec)) == static_cast<int>(sizeof(SeriesRec))) {
+      // Verify the book still exists and isn't tombstoned
+      if (datF) {
+        Record rec;
+        bool found = false;
+        datF.seek(0);
+        while (datF.read(reinterpret_cast<uint8_t*>(&rec), sizeof(Record)) == static_cast<int>(sizeof(Record))) {
+          if (rec.id == sr.bookId && !rec.tombstone()) { found = true; break; }
+        }
+        if (!found) continue;  // skip deleted/tombstoned books
+      }
       series.push_back(sr);
     }
     f.close();
+    if (datF) datF.close();
   }
 
   std::sort(series.begin(), series.end(), [](const SeriesRec& a, const SeriesRec& b) {
@@ -1154,6 +1166,14 @@ void invalidate() {
   Storage.remove(kIdxAuthor);
   Storage.remove(kIdxCollections);
   Storage.remove(kSeriesDat);
+  // Clean temp merge-sort chunks
+  for (int i = 0; i < 9999; ++i) {
+    char tmpPath[96];
+    snprintf(tmpPath, sizeof(tmpPath), "%s/chunk_%04d.tmp", kTmpDir, i);
+    if (!Storage.exists(tmpPath)) break;
+    Storage.remove(tmpPath);
+  }
+  LOG_DBG("LIB", "invalidate: all library files deleted");
 }
 
 bool init() {

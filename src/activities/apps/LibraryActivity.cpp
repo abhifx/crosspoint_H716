@@ -286,6 +286,10 @@ void LibraryActivity::scanSd() {
     int added = 0, removed = 0;
     LibraryIndex::scan(renderer, {}, SETTINGS.libraryRootDir, &added, &removed);
     if (added > 0 || removed > 0) {
+      // Show a one-shot popup while rebuilding indices — no progress bar updates
+      renderer.clearScreen();
+      GUI.drawPopup(renderer, tr(STR_UPDATING_LIBRARY));
+      renderer.displayBuffer();
       LibraryIndex::buildIndices();
       LibraryIndex::buildCollectionsIndex();
     }

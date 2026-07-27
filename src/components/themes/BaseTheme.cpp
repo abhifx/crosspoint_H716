@@ -930,7 +930,11 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
     const int leftContentWidth = timeLeftEndX - metrics.statusBarHorizontalMargin - orientedMarginLeft;
     int titleMarginLeft = leftContentWidth + 15;
+    // Reserve space for progress text AND clock on the right
     int titleMarginRight = progressTextWidth + 30;
+    if (clockOnRight && clockTextWidth > 0) {
+      titleMarginRight += clockTextWidth + 10;
+    }
 
     // Ensure the left margin is never smaller than the battery+time-left area
     // plus a safety gap, even when the centering logic tries to shrink it.

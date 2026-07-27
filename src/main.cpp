@@ -4,6 +4,7 @@
 #include <FontDecompressor.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -514,6 +515,7 @@ void setup() {
 
   gpio.begin();
   powerManager.begin();
+  halClock.begin();
   halTiltSensor.begin();
 
   // Disable Arduino core's NVS auto-persist of Wi-Fi credentials. WifiSelectionActivity

@@ -130,8 +130,17 @@ const std::vector<SettingInfo>& getSettingsList() {
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
 
-        // --- Apps ---
-        SettingInfo::Toggle(StrId::STR_DISPLAY_DAY, &CrossPointSettings::displayDay, "displayDay", StrId::STR_APPS),
+         // --- Apps ---
+         SettingInfo::Toggle(StrId::STR_DISPLAY_DAY, &CrossPointSettings::displayDay, "displayDay", StrId::STR_APPS),
+         // Clock entries (status bar uses the shared Sync Day timezone preset).
+         SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock,
+                           {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT}, "statusBarClock",
+                           StrId::STR_CUSTOMISE_STATUS_BAR),
+         SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
+                           {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
+                           StrId::STR_APPS),
+         SettingInfo::Toggle(StrId::STR_CLOCK_SYNCED, &CrossPointSettings::clockHasBeenSynced, "clockHasBeenSynced",
+                             StrId::STR_APPS),
         SettingInfo::Enum(StrId::STR_CHOOSE_WIFI, &CrossPointSettings::syncDayWifiChoice,
                           {StrId::STR_REFRESH_MODE_AUTO, StrId::STR_MANUAL}, "syncDayWifiChoice", StrId::STR_APPS),
         SettingInfo::Enum(StrId::STR_SYNC_DAY_REMINDER_EVERY, &CrossPointSettings::syncDayReminderStarts,
@@ -311,9 +320,12 @@ const std::vector<SettingInfo>& getSettingsList() {
                           StrId::STR_CUSTOMISE_STATUS_BAR),
         SettingInfo::Toggle(StrId::STR_BATTERY, &CrossPointSettings::statusBarBattery, "statusBarBattery",
                             StrId::STR_CUSTOMISE_STATUS_BAR),
-        SettingInfo::Enum(StrId::STR_TIME_LEFT, &CrossPointSettings::statusBarTimeLeft,
-                          {StrId::STR_HIDE, StrId::STR_CHAPTER, StrId::STR_BOOK}, "statusBarTimeLeft",
-                          StrId::STR_CUSTOMISE_STATUS_BAR),
+         SettingInfo::Enum(StrId::STR_TIME_LEFT, &CrossPointSettings::statusBarTimeLeft,
+                           {StrId::STR_HIDE, StrId::STR_CHAPTER, StrId::STR_BOOK}, "statusBarTimeLeft",
+                           StrId::STR_CUSTOMISE_STATUS_BAR),
+         SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock,
+                           {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT}, "statusBarClock",
+                           StrId::STR_CUSTOMISE_STATUS_BAR),
     };
 
     if (!halTiltSensor.isAvailable()) {

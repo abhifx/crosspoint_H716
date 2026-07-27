@@ -268,16 +268,20 @@ void LibraryActivity::scanSd() {
   currentFilter_ = static_cast<CrossPointSettings::LIBRARY_FILTER>(SETTINGS.libraryFilter);
   currentSort_ = static_cast<CrossPointSettings::LIBRARY_SORT>(SETTINGS.librarySort);
   currentSearchText_ = SETTINGS.librarySearchText;
+  collectionsMode_ = (currentSort_ == CrossPointSettings::LIBRARY_SORT_COLLECTIONS);
+  if (collectionsMode_) currentCollectionIdx_ = -1;
 
   // Init LibraryIndex if needed
   LibraryIndex::init();
 
   // Fast path: existing library.dat
   if (LibraryIndex::exists()) {
-    totalBooks_ = LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
-                                               static_cast<LibraryIndex::FilterMode>(currentFilter_));
+    totalBooks_ = collectionsMode_
+        ? LibraryIndex::totalCollections()
+        : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                       static_cast<LibraryIndex::FilterMode>(currentFilter_));
     totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
-    LOG_DBG("LIB", "scanSd: existing index, total=%d", totalBooks_);
+    LOG_DBG("LIB", "scanSd: existing index, total=%d collMode=%d", totalBooks_, collectionsMode_);
     refreshPageCache();
     return;
   }
@@ -291,8 +295,10 @@ void LibraryActivity::scanSd() {
   LibraryIndex::scan(renderer, popupRect, SETTINGS.libraryRootDir);
   LibraryIndex::buildIndices();
   LibraryIndex::buildCollectionsIndex();
-  totalBooks_ = LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
-                                             static_cast<LibraryIndex::FilterMode>(currentFilter_));
+  totalBooks_ = collectionsMode_
+      ? LibraryIndex::totalCollections()
+      : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                     static_cast<LibraryIndex::FilterMode>(currentFilter_));
   totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
   refreshPageCache();
 }
@@ -307,23 +313,39 @@ void LibraryActivity::rebuildForFilter(CrossPointSettings::LIBRARY_FILTER filter
 
 void LibraryActivity::refreshPageCache() {
   int curPage = selectorIndex_ / gridsPerPage_;
-  int slotCount = LibraryIndex::queryPage(
-      pageCache_, curPage, gridsPerPage_,
-      static_cast<LibraryIndex::SortMode>(currentSort_),
-      currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
-      static_cast<LibraryIndex::FilterMode>(currentFilter_));
-  // If the page had fewer items than requested, update totalBooks_
-  if (slotCount == 0 && curPage > 0) {
-    // Went past end — go to last page
-    totalBooks_ = LibraryIndex::totalBooks();
-    totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
-    int lastPage = std::max(0, totalPages_ - 1);
-    selectorIndex_ = lastPage * gridsPerPage_;
+  int slotCount;
+  if (collectionsMode_ && currentCollectionIdx_ < 0) {
+    // Browsing list of collections
+    slotCount = LibraryIndex::queryCollections(pageCache_, curPage, gridsPerPage_);
+  } else if (collectionsMode_ && currentCollectionIdx_ >= 0) {
+    // Browsing books within a collection
+    slotCount = LibraryIndex::queryCollectionBooks(pageCache_, curPage, gridsPerPage_, currentCollectionIdx_);
+  } else {
+    // Normal book browsing
     slotCount = LibraryIndex::queryPage(
-        pageCache_, lastPage, gridsPerPage_,
+        pageCache_, curPage, gridsPerPage_,
         static_cast<LibraryIndex::SortMode>(currentSort_),
         currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
         static_cast<LibraryIndex::FilterMode>(currentFilter_));
+  }
+  // If the page had fewer items than requested, update totalBooks_
+  if (slotCount == 0 && curPage > 0) {
+    totalBooks_ = (collectionsMode_ && currentCollectionIdx_ < 0)
+        ? LibraryIndex::totalCollections()
+        : LibraryIndex::totalBooks();
+    totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
+    int lastPage = std::max(0, totalPages_ - 1);
+    selectorIndex_ = lastPage * gridsPerPage_;
+    if (collectionsMode_ && currentCollectionIdx_ < 0)
+      slotCount = LibraryIndex::queryCollections(pageCache_, lastPage, gridsPerPage_);
+    else if (collectionsMode_ && currentCollectionIdx_ >= 0)
+      slotCount = LibraryIndex::queryCollectionBooks(pageCache_, lastPage, gridsPerPage_, currentCollectionIdx_);
+    else
+      slotCount = LibraryIndex::queryPage(
+          pageCache_, lastPage, gridsPerPage_,
+          static_cast<LibraryIndex::SortMode>(currentSort_),
+          currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+          static_cast<LibraryIndex::FilterMode>(currentFilter_));
   }
   // Zero out remaining slots
   for (int i = slotCount; i < gridsPerPage_; ++i) {
@@ -336,8 +358,14 @@ void LibraryActivity::refreshPageCache() {
 }
 
 void LibraryActivity::applyFilterAndSort() {
-  totalBooks_ = LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
-                                            static_cast<LibraryIndex::FilterMode>(currentFilter_));
+  collectionsMode_ = (currentSort_ == CrossPointSettings::LIBRARY_SORT_COLLECTIONS);
+  if (collectionsMode_) {
+    currentCollectionIdx_ = -1;
+  }
+  totalBooks_ = collectionsMode_
+      ? LibraryIndex::totalCollections()
+      : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                     static_cast<LibraryIndex::FilterMode>(currentFilter_));
   totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
   selectorIndex_ = 0;
   pageTitleCacheKey_ = -1;
@@ -626,10 +654,15 @@ void LibraryActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (total > 0 && selectorIndex_ < total) {
       const unsigned long held = mappedInput.getHeldTime();
+      // Long press: context menu (skip for collections list items)
       if (held >= 800) {
         const int idx = selectorIndex_;
         const int slot = idx % gridsPerPage_;
         const std::string path(pageCache_[slot].path);
+        if (!collectionsMode_ || currentCollectionIdx_ < 0) {
+          // Skip context menu for collection items; short-press opens the collection
+          if (collectionsMode_) return;
+        }
         const std::string title = pageCache_[slot].title[0] ? pageCache_[slot].title : filenameWithoutExtension(path);
         const bool isEpub = FsHelpers::hasEpubExtension(std::string_view{path.c_str()});
         const bool isFav = FAVORITES.isFavorite(path);
@@ -674,6 +707,17 @@ void LibraryActivity::loop() {
             });
         return;
       }
+      // Short press: open book or enter collection
+      if (collectionsMode_ && currentCollectionIdx_ < 0) {
+        // Enter the selected collection
+        int slot = selectorIndex_ % gridsPerPage_;
+        currentCollectionIdx_ = static_cast<int>(pageCache_[slot].id);
+        selectorIndex_ = 0;
+        refreshPageCache();
+        forceRender_ = true;
+        requestUpdate();
+        return;
+      }
       onSelectBook(std::string(pageCache_[selectorIndex_ % gridsPerPage_].path));
       return;
     }
@@ -681,6 +725,17 @@ void LibraryActivity::loop() {
 
   // ---- Back button --------------------------------------------------------
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    // In collections mode: go back to collections list from a specific collection
+    if (collectionsMode_ && currentCollectionIdx_ >= 0) {
+      currentCollectionIdx_ = -1;
+      totalBooks_ = LibraryIndex::totalCollections();
+      totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
+      selectorIndex_ = 0;
+      refreshPageCache();
+      forceRender_ = true;
+      requestUpdate();
+      return;
+    }
     if (upHeld_ || downHeld_) {
       upHeld_ = false; downHeld_ = false;
       upLongTriggered_ = false; downLongTriggered_ = false;

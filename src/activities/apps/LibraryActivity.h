@@ -48,6 +48,10 @@ class LibraryActivity final : public Activity {
   std::string currentSearchText_;
   uint8_t lastLayoutSetting_ = CrossPointSettings::LIBRARY_LAYOUT_4X4;
 
+  // Collections mode
+  bool collectionsMode_ = false;         // true when browsing collections
+  int  currentCollectionIdx_ = -1;       // selected collection index (-1 = list of collections)
+
   enum class PopupMode { None, Sort, Filter };
   PopupMode popupMode_ = PopupMode::None;
   LibraryPopupOverlay popupOverlay_;

@@ -1104,14 +1104,6 @@ void LibraryActivity::render(RenderLock&&) {
     snprintf(hdrBuf, sizeof(hdrBuf), "%d/%d (%d)", curPage, totalPages, total);
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 6, hdrBuf, true,
                       EpdFontFamily::REGULAR);
-    // Cover generation progress in header
-    if (coverGenActive_ && coverGenTotal_ > 0) {
-      char covBuf[48];
-      snprintf(covBuf, sizeof(covBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
-      int covW = renderer.getTextWidth(SMALL_FONT_ID, covBuf, EpdFontFamily::REGULAR);
-      renderer.drawText(SMALL_FONT_ID, pageWidth - metrics.contentSidePadding - covW, metrics.topPadding + 6,
-                        covBuf, true, EpdFontFamily::BOLD);
-    }
   }
 
   // Rebuild cached header/title strings only when inputs change.
@@ -1212,6 +1204,15 @@ void LibraryActivity::render(RenderLock&&) {
       const int authorW = renderer.getTextWidth(UI_10_FONT_ID, author.c_str(), EpdFontFamily::REGULAR);
       const int authorX = (pageWidth - authorW) / 2;
       renderer.drawText(UI_10_FONT_ID, authorX, authorY, author.c_str(), true, EpdFontFamily::REGULAR);
+    }
+
+    // Cover generation progress text centered below author
+    if (coverGenActive_ && coverGenTotal_ > 0) {
+      char covBuf[48];
+      snprintf(covBuf, sizeof(covBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
+      const int covW = renderer.getTextWidth(SMALL_FONT_ID, covBuf, EpdFontFamily::REGULAR);
+      const int covY = selTitleY + lh * 2 + 4;
+      renderer.drawText(SMALL_FONT_ID, (pageWidth - covW) / 2, covY, covBuf, true, EpdFontFamily::BOLD);
     }
   }
 

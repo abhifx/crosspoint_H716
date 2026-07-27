@@ -366,8 +366,10 @@ void LibraryActivity::refreshPageCache() {
   pageTitleCacheKey_ = -1;
   cachedTotalBooks_ = totalBooks_;
   forceRender_ = true;
-  // Start cover generation for missing covers on the new page
-  if (!collectionsMode_) {
+  // Start cover generation for missing covers on the new page.
+  // Works in normal mode AND inside a collection (where books have covers).
+  // Skipped only when viewing the collections list.
+  if (!collectionsMode_ || currentCollectionIdx_ >= 0) {
     coverGenActive_ = true;
     coverGenSlot_ = 0;
     coverGenDone_ = 0;

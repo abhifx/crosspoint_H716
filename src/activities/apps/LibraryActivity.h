@@ -51,6 +51,7 @@ class LibraryActivity final : public Activity {
   // Collections mode
   bool collectionsMode_ = false;         // true when browsing collections
   int  currentCollectionIdx_ = -1;       // selected collection index (-1 = list of collections)
+  std::string currentCollectionName_;    // name of currently opened collection
 
   enum class PopupMode { None, Sort, Filter };
   PopupMode popupMode_ = PopupMode::None;

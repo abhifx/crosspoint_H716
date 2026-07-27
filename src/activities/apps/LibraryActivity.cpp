@@ -712,6 +712,7 @@ void LibraryActivity::loop() {
         // Enter the selected collection
         int slot = selectorIndex_ % gridsPerPage_;
         currentCollectionIdx_ = static_cast<int>(pageCache_[slot].id);
+        currentCollectionName_ = pageCache_[slot].title;
         selectorIndex_ = 0;
         refreshPageCache();
         forceRender_ = true;
@@ -728,6 +729,7 @@ void LibraryActivity::loop() {
     // In collections mode: go back to collections list from a specific collection
     if (collectionsMode_ && currentCollectionIdx_ >= 0) {
       currentCollectionIdx_ = -1;
+      currentCollectionName_.clear();
       totalBooks_ = LibraryIndex::totalCollections();
       totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
       selectorIndex_ = 0;
@@ -899,6 +901,10 @@ void LibraryActivity::render(RenderLock&&) {
             case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
             default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
           }
+          if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
+            cachedInfo_ += " / ";
+            cachedInfo_ += currentCollectionName_;
+          }
           const char* sortLabel = nullptr;
           switch (currentSort_) {
             case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
@@ -1016,6 +1022,10 @@ void LibraryActivity::render(RenderLock&&) {
       case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
       default: cachedInfo_ = tr(STR_ALL_BOOKS); break;
     }
+    if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
+      cachedInfo_ += " / ";
+      cachedInfo_ += currentCollectionName_;
+    }
     const char* sortLabel = nullptr;
     switch (currentSort_) {
       case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
@@ -1128,6 +1138,8 @@ void LibraryActivity::render(RenderLock&&) {
 
     for (int i = 0; i < pageCount; ++i) {
       const int idx = pageStart + i;
+      // Skip empty slots (zeroed out after collections query leaves fewer items)
+      if (pageCache_[i].id == 0 && pageCache_[i].path[0] == '\0') continue;
       const int col = i % gridColumns_;
       const int row = i / gridColumns_;
       const int x = x0 + col * (coverWidth_ + gap);

@@ -120,10 +120,12 @@ bool Xtc::generateCoverBmp() const {
   }
 
   if (!loaded || !parser) {
+    LOG_DBG("XTC", "generateCoverBmp: FAIL not loaded or no parser");
     return false;
   }
 
   if (parser->getPageCount() == 0) {
+    LOG_DBG("XTC", "generateCoverBmp: FAIL page count is 0");
     return false;
   }
 
@@ -133,9 +135,11 @@ bool Xtc::generateCoverBmp() const {
   // Get first page info for cover
   xtc::PageInfo pageInfo;
   if (!parser->getPageInfo(0, pageInfo)) {
+    LOG_DBG("XTC", "generateCoverBmp: FAIL getPageInfo(0) returned false");
     return false;
   }
   if (pageInfo.width == 0 || pageInfo.height == 0) {
+    LOG_DBG("XTC", "generateCoverBmp: FAIL pageInfo width/height is 0");
     return false;
   }
 
@@ -144,6 +148,7 @@ bool Xtc::generateCoverBmp() const {
   // Create BMP file
   FsFile coverBmp;
   if (!Storage.openFileForWrite("XTC", getCoverBmpPath(), coverBmp)) {
+    LOG_DBG("XTC", "generateCoverBmp: FAIL openFileForWrite %s", getCoverBmpPath().c_str());
     return false;
   }
 

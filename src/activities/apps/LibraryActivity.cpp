@@ -372,7 +372,6 @@ void LibraryActivity::refreshPageCache() {
     coverGenSlot_ = 0;
     coverGenDone_ = 0;
     coverGenTotal_ = 0;
-    coverGenShowPopup_ = false;
   }
 }
 
@@ -597,12 +596,12 @@ void LibraryActivity::beginTextSearch() {
 // ============================================================================
 
 void LibraryActivity::loop() {
-  // ---- Cover generation: one slot per frame with progress popup -----------
+  // ---- Cover generation: one slot per frame, after grid is rendered -------
   if (coverGenActive_) {
     const int total = totalBooks_;
     const int pageStart = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
     
-    // Count how many slots are missing covers on this page
+    // First frame: count missing covers, let grid render first
     if (coverGenSlot_ == 0 && coverGenTotal_ == 0) {
       for (int i = 0; i < gridsPerPage_ && (pageStart + i) < total; ++i) {
         if (pageCache_[i].id == 0) continue;
@@ -610,55 +609,46 @@ void LibraryActivity::loop() {
         if (!Storage.exists(thumbPath.c_str())) ++coverGenTotal_;
       }
       if (coverGenTotal_ == 0) {
-        // All covers already exist — nothing to do
         coverGenActive_ = false;
-        coverGenShowPopup_ = false;
-        forceRender_ = true;
-        requestUpdate();
         return;
       }
+      // First frame: let the grid render without blocking
+      LOG_DBG("LIB", "CovGen: start %d missing covers on page", coverGenTotal_);
+      coverGenSlot_ = -1;  // signal that we've counted, start processing on next frame
+      forceRender_ = true;
+      requestUpdate();
+      return;
     }
 
-    // Process one slot per frame
+    // Second frame onward: process one slot
+    if (coverGenSlot_ == -1) coverGenSlot_ = 0;  // first processing frame
+    
     int slot = coverGenSlot_;
     if (slot < gridsPerPage_ && (pageStart + slot) < total && pageCache_[slot].id != 0) {
       std::string thumbPath = LibraryIndex::thumbPathFor(std::string(pageCache_[slot].path), coverWidth_, coverHeight_);
       if (!Storage.exists(thumbPath.c_str())) {
         yield(); esp_task_wdt_reset();
-        LOG_DBG("LIB", "CovGen: slot=%d/%d path=%s heap=%u maxA=%u",
+        LOG_DBG("LIB", "CovGen: %d/%d %s heap=%u maxA=%u",
                 coverGenDone_ + 1, coverGenTotal_, pageCache_[slot].path,
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-
-        // Show progress popup on first slot
-        if (!coverGenShowPopup_) {
-          renderer.clearScreen();
-          coverGenPopupRect_ = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-          coverGenShowPopup_ = true;
-        }
-
-        char progressBuf[32];
-        snprintf(progressBuf, sizeof(progressBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
-        renderer.drawText(SMALL_FONT_ID, 10, coverGenPopupRect_.y - 30, progressBuf, true, EpdFontFamily::REGULAR);
-
-        GUI.fillPopupProgress(renderer, coverGenPopupRect_, (coverGenDone_ * 100) / coverGenTotal_);
-        renderer.displayBuffer();
 
         // Generate cover using Epub/Xtc parser
         if (generatePageCover(pageCache_[slot].path)) {
           ++coverGenDone_;
+          // Re-render the page so the new cover appears immediately
+          forceRender_ = true;
+          requestUpdate();
         }
       }
     }
 
     ++coverGenSlot_;
     if (coverGenSlot_ >= gridsPerPage_ || (pageStart + coverGenSlot_) >= total) {
-      // All slots processed — finish
       LOG_DBG("LIB", "CovGen: done %d/%d covers generated", coverGenDone_, coverGenTotal_);
       coverGenActive_ = false;
       coverGenSlot_ = 0;
       coverGenDone_ = 0;
       coverGenTotal_ = 0;
-      coverGenShowPopup_ = false;
       forceRender_ = true;
       requestUpdate();
     }
@@ -1114,6 +1104,14 @@ void LibraryActivity::render(RenderLock&&) {
     snprintf(hdrBuf, sizeof(hdrBuf), "%d/%d (%d)", curPage, totalPages, total);
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 6, hdrBuf, true,
                       EpdFontFamily::REGULAR);
+    // Cover generation progress in header
+    if (coverGenActive_ && coverGenTotal_ > 0) {
+      char covBuf[48];
+      snprintf(covBuf, sizeof(covBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
+      int covW = renderer.getTextWidth(SMALL_FONT_ID, covBuf, EpdFontFamily::REGULAR);
+      renderer.drawText(SMALL_FONT_ID, pageWidth - metrics.contentSidePadding - covW, metrics.topPadding + 6,
+                        covBuf, true, EpdFontFamily::BOLD);
+    }
   }
 
   // Rebuild cached header/title strings only when inputs change.

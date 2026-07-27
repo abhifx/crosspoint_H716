@@ -61,8 +61,6 @@ class LibraryActivity final : public Activity {
   int  coverGenSlot_ = 0;               // current slot being processed (0..gridsPerPage_-1)
   int  coverGenDone_ = 0;               // number of covers successfully generated
   int  coverGenTotal_ = 0;              // total missing covers on this page
-  bool coverGenShowPopup_ = false;       // popup is visible
-  Rect coverGenPopupRect_;
 
   enum class PopupMode { None, Sort, Filter };
   PopupMode popupMode_ = PopupMode::None;

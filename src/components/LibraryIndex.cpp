@@ -319,10 +319,10 @@ bool extractMetadata(const char* path, char* title, size_t titleCap, char* autho
 
 namespace {
 
-// Directory walker used for both the counting pass and the processing pass.
-// `onFile` is invoked once per matching book path; it must not retain the
-// pointer beyond the call (the buffer is reused for every file).
-using FileVisitor = std::function<void(const char* path)>;
+// Directory walker used for scan passes.
+// `onFile` is invoked once per matching book path with the file size from
+// the directory entry (no extra Storage.open() needed).
+using FileVisitor = std::function<void(const char* path, size_t fileSize)>;
 
 static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
   std::string root = rootDir ? rootDir : "";
@@ -345,7 +345,9 @@ static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
     char name[500];
     for (HalFile file = rootFile.openNextFile(); file; file = rootFile.openNextFile()) {
       file.getName(name, sizeof(name));
-      bool isDir = file.isDirectory(); file.close();
+      bool isDir = file.isDirectory();
+      size_t fsz = file.size();  // capture before close
+      file.close();
       if (name[0] == '.') continue;
       std::string lower = name; for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       if (lower == "system volume information" || lower == "my clippings.txt" || lower == "my lookups.txt") continue;
@@ -361,7 +363,7 @@ static void walkDirs(const char* rootDir, const FileVisitor& onFile) {
       if (FsHelpers::hasEpubExtension(fn) || FsHelpers::hasXtcExtension(fn) ||
           FsHelpers::hasTxtExtension(fn) || FsHelpers::hasMarkdownExtension(fn)) {
         if (std::strcmp(name, "if_found.txt") != 0 && std::strcmp(name, "crash_report.txt") != 0) {
-          onFile(child.c_str());
+          onFile(child.c_str(), fsz);
         }
       }
     }
@@ -409,7 +411,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
   int total = 0, processed = 0;
   {
     // Count first for progress bar (lightweight, no path storage)
-    walkDirs(rootDir, [&total](const char*) { ++total; });
+    walkDirs(rootDir, [&total](const char*, size_t) { ++total; });
   }
   LOG_DBG("LIB", "Scan: %d candidate files found", total);
   emitProgress(renderer, popupRect, 0, total);
@@ -444,18 +446,15 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
 
   int added = 0, skipped = 0, removed = 0, pi = 0;
 
-  auto processFile = [&](const char* p) {
+  auto processFile = [&](const char* p, size_t fsz) {
     yield(); esp_task_wdt_reset();
     if (pi % kProgressInterval == 0) emitProgress(renderer, popupRect, pi, total);
     ++pi;
 
-    // Get file stat
-    HalFile st = Storage.open(p);
-    if (!st) { ++skipped; return; }
-    const size_t fsz = st.size();
+    // File size from directory entry — no extra Storage.open() needed
+    if (fsz == 0) { ++skipped; return; }
     // mtime: use file size as proxy (ESP32 VFS doesn't expose mtime reliably via Arduino)
     const uint32_t mtime = (uint32_t)fsz;
-    st.close();
 
     const uint32_t ph = hashPath(p);
     // Binary search in sorted prevScan for O(log n) lookup (zero extra RAM)

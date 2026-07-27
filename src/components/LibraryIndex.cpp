@@ -1078,6 +1078,8 @@ void invalidate() {
   Storage.remove(kScanFile);
   Storage.remove(kIdxTitle);
   Storage.remove(kIdxAuthor);
+  Storage.remove(kIdxCollections);
+  Storage.remove(kSeriesDat);
 }
 
 bool init() {

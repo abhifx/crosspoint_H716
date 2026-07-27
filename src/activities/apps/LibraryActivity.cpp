@@ -1026,7 +1026,9 @@ void LibraryActivity::render(RenderLock&&) {
   const bool infoKeyChanged =
       cachedRenderSelector_ != selectorIndex_ || cachedRenderPage_ != curPageRaw ||
       cachedInfoFilter_ != currentFilter_ || cachedInfoSort_ != currentSort_ ||
-      cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_;
+      cachedInfoSearch_ != currentSearchText_ || cachedTotalBooks_ != totalBooks_ ||
+      cachedCollectionsMode_ != collectionsMode_ || cachedCollectionIdx_ != currentCollectionIdx_ ||
+      cachedCollectionName_ != currentCollectionName_;
   if (infoKeyChanged) {
     cachedInfo_.clear();
     switch (currentFilter_) {
@@ -1034,7 +1036,7 @@ void LibraryActivity::render(RenderLock&&) {
       case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
       case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
       case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
-      default: cachedInfo_ = tr(STR_ALL_BOOKS); break;
+      default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
     }
     if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
       cachedInfo_ += " / ";
@@ -1046,7 +1048,7 @@ void LibraryActivity::render(RenderLock&&) {
       case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
       case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
       case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
-      case CrossPointSettings::LIBRARY_SORT_PROGRESS:   sortLabel = tr(STR_SORT_PROGRESS); break;
+      case CrossPointSettings::LIBRARY_SORT_COLLECTIONS: sortLabel = tr(STR_SORT_COLLECTIONS); break;
       default: break;
     }
     if (sortLabel && sortLabel[0]) { cachedInfo_ += " / "; cachedInfo_ += sortLabel; }

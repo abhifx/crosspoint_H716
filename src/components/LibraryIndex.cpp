@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <unordered_map>
 
 #include "components/UITheme.h"
 #include "EpubParser.h"
@@ -376,7 +377,8 @@ static uint32_t hashPath(const char* p) {
 
 }  // namespace
 
-bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
+bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
+          int* outAdded, int* outRemoved) {
   LOG_DBG("LIB", "Scan: start root=%s", rootDir ? rootDir : "/");
   Storage.mkdir("/.crosspoint"); Storage.mkdir(kLibDir); Storage.mkdir(kTmpDir);
 
@@ -396,20 +398,21 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
   }
   LOG_DBG("LIB", "Scan: loaded %u previous scan entries", prevScan.size());
 
-  // Build hash→index map
-  auto findPrev = [&prevScan](uint32_t h) -> const ScanEntry* {
-    for (auto& e : prevScan) if (e.hash == h) return &e;
-    return nullptr;
-  };
+  // Build hash→index map for O(1) lookup
+  std::unordered_map<uint32_t, const ScanEntry*> prevMap;
+  for (auto& e : prevScan) prevMap[e.hash] = &e;
+  LOG_DBG("LIB", "Scan: loaded %u previous scan entries", prevScan.size());
 
-  // ---- Phase 2a: cheap counting pass (no paths stored, negligible RAM) ----
-  int total = 0;
-  walkDirs(rootDir, [&total](const char*) { ++total; });
-  emitProgress(renderer, popupRect, 0, total);
+  // ---- Phase 2: single streaming pass — process each file as discovered.
+  // No counting pass needed, no std::vector<std::string> of paths.
+  int total = 0, processed = 0;
+  {
+    // Count first for progress bar (lightweight, no path storage)
+    walkDirs(rootDir, [&total](const char*) { ++total; });
+  }
   LOG_DBG("LIB", "Scan: %d candidate files found", total);
+  emitProgress(renderer, popupRect, 0, total);
 
-  // ---- Phase 2b/3: streaming pass — process each file as it's discovered.
-  // No std::vector<std::string> of all paths is ever materialized.
   std::vector<ScanRec> newScan; newScan.reserve(total);
 
   // Open library.dat for append (create fresh if no existing scan)
@@ -454,7 +457,8 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
     st.close();
 
     const uint32_t ph = hashPath(p);
-    const ScanEntry* prev = findPrev(ph);
+    auto it = prevMap.find(ph);
+    const ScanEntry* prev = (it != prevMap.end()) ? it->second : nullptr;
 
     if (prev && prev->mtime == mtime && prev->size == (uint32_t)fsz) {
       // Unchanged — keep existing record
@@ -547,6 +551,8 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir) {
   }
 
   emitProgress(renderer, popupRect, total, total);
+  if (outAdded) *outAdded = added;
+  if (outRemoved) *outRemoved = removed;
   HOMEPAGE_LOG("LIB", "Scan: added=%d skipped=%d removed=%d total=%d", added, skipped, removed, added+skipped);
   LOG_DBG("LIB", "Scan: done added=%d skipped=%d removed=%d newScan=%u", added, skipped, removed, newScan.size());
   return true;

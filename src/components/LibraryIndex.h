@@ -85,9 +85,10 @@ bool init();
 bool exists();
 
 // Full SD scan + metadata extraction. Writes library.dat and scan_state.dat.
-// Shows progress via popupRect on GfxRenderer.
-// RAM: ~6 KB (2 scan_state records + 2 metadata buffers).
-bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir = "/");
+// Shows progress via popupRect on GfxRenderer (pass zero-size Rect to skip).
+// Returns true on success.  Populates outAdded/outRemoved (can be nullptr).
+bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir = "/",
+          int* outAdded = nullptr, int* outRemoved = nullptr);
 
 // External merge-sort: rebuilds idx_title.bin and idx_author.bin from
 // library.dat. Must be called after scan() when records changed.

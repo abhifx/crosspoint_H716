@@ -283,12 +283,12 @@ void LibraryActivity::scanSd() {
 
   // Fast path: existing library.dat — but always scan for new/removed books
   if (LibraryIndex::exists()) {
-    // Incremental scan detects added, removed, and modified files via
-    // scan_state.dat comparison, without rebuilding indices when nothing changed.
-    // This runs on EVERY library entry to stay in sync with SD card changes.
-    LibraryIndex::scan(renderer, {}, SETTINGS.libraryRootDir);
-    LibraryIndex::buildIndices();
-    LibraryIndex::buildCollectionsIndex();
+    int added = 0, removed = 0;
+    LibraryIndex::scan(renderer, {}, SETTINGS.libraryRootDir, &added, &removed);
+    if (added > 0 || removed > 0) {
+      LibraryIndex::buildIndices();
+      LibraryIndex::buildCollectionsIndex();
+    }
     totalBooks_ = collectionsMode_
         ? LibraryIndex::totalCollections()
         : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),

@@ -1,6 +1,7 @@
 #include "BaseTheme.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -15,6 +16,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 // Internal constants
 namespace {
@@ -894,6 +896,28 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     }
     renderer.drawText(SMALL_FONT_ID, timeLeftX, textY, timeLeftLabel);
     timeLeftEndX = timeLeftX + timeLeftWidth;
+  }
+
+  // Draw Clock (X3 only — DS3231 RTC)
+  int clockTextWidth = 0;
+  const bool clockOnLeft =
+      SETTINGS.statusBarClock == CrossPointSettings::STATUS_BAR_CLOCK_LEFT && halClock.isAvailable();
+  const bool clockOnRight =
+      SETTINGS.statusBarClock == CrossPointSettings::STATUS_BAR_CLOCK_RIGHT && halClock.isAvailable();
+  if (clockOnLeft || clockOnRight) {
+    char timeBuf[9];
+    if (TimeUtils::formatStatusBarClockTime(timeBuf, sizeof(timeBuf), SETTINGS.clockFormat == 1)) {
+      clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
+      int clockX;
+      if (clockOnLeft) {
+        clockX = timeLeftEndX + (timeLeftWidth > 0 ? 6 : 0);
+      } else {
+        clockX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight -
+                 progressTextWidth - (progressTextWidth > 0 ? 10 : 0) - clockTextWidth;
+      }
+      renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
+      if (clockOnLeft) timeLeftEndX = clockX + clockTextWidth;
+    }
   }
 
   // Draw Title

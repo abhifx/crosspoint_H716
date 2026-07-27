@@ -35,7 +35,7 @@ constexpr const char* kIdxCollections = "/.crosspoint/LIBRARY/idx_collections.bi
 constexpr const char* kSeriesDat = "/.crosspoint/LIBRARY/series.dat";
 constexpr const char* kTmpDir   = "/.crosspoint/LIBRARY/tmp";
 
-constexpr int kProgressInterval = 2;
+constexpr int kProgressInterval = 10;
 
 // ---- Fixed-length record sizes ----
 constexpr size_t kRecordSize    = sizeof(Record);        // 256

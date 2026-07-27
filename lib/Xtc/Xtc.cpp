@@ -405,8 +405,9 @@ bool Xtc::generateThumbBmpToPath(int width, int height, const std::string& thumb
   const size_t bmpDataOffset = coverFile.position();
 
   // Buffer to hold all source rows needed for one destination row.
-  // Worst case: scale factor 0.45 means ~2.2 src rows per dst row. Allocate for 4 rows.
-  const size_t maxSrcRowsPerDstRow = 4;
+  // Worst case: 100×150 thumb from 480×800 source → scale 0.208 → ~4.8 src
+  // rows per dst row.  Allocate for 8 rows to be safe at any grid size.
+  const size_t maxSrcRowsPerDstRow = 8;
   const size_t srcLinesBufSize = maxSrcRowsPerDstRow * srcRowBytes;
   uint8_t* srcLinesBuf = static_cast<uint8_t*>(malloc(srcLinesBufSize));
   if (!srcLinesBuf) {

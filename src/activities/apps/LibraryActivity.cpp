@@ -917,13 +917,16 @@ void LibraryActivity::render(RenderLock&&) {
             cachedInfo_ += currentCollectionName_;
           }
           const char* sortLabel = nullptr;
-          switch (currentSort_) {
-            case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
-            case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
-            case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
-            case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
-            case CrossPointSettings::LIBRARY_SORT_COLLECTIONS: sortLabel = tr(STR_SORT_COLLECTIONS); break;
-            default: break;
+          // Don't show sort label when in collections mode — the info line
+          // already says "Collections" or "Collections / Name".
+          if (!collectionsMode_) {
+            switch (currentSort_) {
+              case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
+              case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
+              case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
+              case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
+              default: break;
+            }
           }
           if (sortLabel && sortLabel[0]) { cachedInfo_ += " / "; cachedInfo_ += sortLabel; }
           if (!currentSearchText_.empty()) {
@@ -1043,13 +1046,14 @@ void LibraryActivity::render(RenderLock&&) {
       cachedInfo_ += currentCollectionName_;
     }
     const char* sortLabel = nullptr;
-    switch (currentSort_) {
-      case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
-      case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
-      case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
-      case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
-      case CrossPointSettings::LIBRARY_SORT_COLLECTIONS: sortLabel = tr(STR_SORT_COLLECTIONS); break;
-      default: break;
+    if (!collectionsMode_) {
+      switch (currentSort_) {
+        case CrossPointSettings::LIBRARY_SORT_TITLE_ASC:  sortLabel = tr(STR_SORT_TITLE_ASC); break;
+        case CrossPointSettings::LIBRARY_SORT_TITLE_DESC: sortLabel = tr(STR_SORT_TITLE_DESC); break;
+        case CrossPointSettings::LIBRARY_SORT_AUTHOR_ASC: sortLabel = tr(STR_SORT_AUTHOR_ASC); break;
+        case CrossPointSettings::LIBRARY_SORT_AUTHOR_DESC: sortLabel = tr(STR_SORT_AUTHOR_DESC); break;
+        default: break;
+      }
     }
     if (sortLabel && sortLabel[0]) { cachedInfo_ += " / "; cachedInfo_ += sortLabel; }
     if (!currentSearchText_.empty()) {

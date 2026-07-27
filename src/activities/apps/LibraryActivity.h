@@ -56,6 +56,14 @@ class LibraryActivity final : public Activity {
   int  currentCollectionIdx_ = -1;       // selected collection index (-1 = list of collections)
   std::string currentCollectionName_;    // name of currently opened collection
 
+  // Cover generation (one per frame, like HomeActivity carousel)
+  bool coverGenActive_ = false;          // cover generation loop is running
+  int  coverGenSlot_ = 0;               // current slot being processed (0..gridsPerPage_-1)
+  int  coverGenDone_ = 0;               // number of covers successfully generated
+  int  coverGenTotal_ = 0;              // total missing covers on this page
+  bool coverGenShowPopup_ = false;       // popup is visible
+  Rect coverGenPopupRect_;
+
   enum class PopupMode { None, Sort, Filter };
   PopupMode popupMode_ = PopupMode::None;
   LibraryPopupOverlay popupOverlay_;
@@ -78,6 +86,7 @@ class LibraryActivity final : public Activity {
   void deletePageCovers();
   void deleteAllLibraryCovers();
   void reloadPageCovers();
+  bool generatePageCover(const std::string& path);
   void rebuildForFilter(CrossPointSettings::LIBRARY_FILTER filter);
 
   void openSortPopup();

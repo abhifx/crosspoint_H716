@@ -4,6 +4,7 @@
 #include <esp_task_wdt.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -24,6 +25,9 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "components/LibraryCache.h"
+#include "components/LibraryIndex.h"
+#include <Epub.h>
+#include <Xtc.h>
 #include "components/icons/bookshelf.h"
 #include "components/icons/cleanmonitor.h"
 #include "components/icons/cover.h"
@@ -362,6 +366,14 @@ void LibraryActivity::refreshPageCache() {
   pageTitleCacheKey_ = -1;
   cachedTotalBooks_ = totalBooks_;
   forceRender_ = true;
+  // Start cover generation for missing covers on the new page
+  if (!collectionsMode_) {
+    coverGenActive_ = true;
+    coverGenSlot_ = 0;
+    coverGenDone_ = 0;
+    coverGenTotal_ = 0;
+    coverGenShowPopup_ = false;
+  }
 }
 
 void LibraryActivity::applyFilterAndSort() {
@@ -585,6 +597,74 @@ void LibraryActivity::beginTextSearch() {
 // ============================================================================
 
 void LibraryActivity::loop() {
+  // ---- Cover generation: one slot per frame with progress popup -----------
+  if (coverGenActive_) {
+    const int total = totalBooks_;
+    const int pageStart = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
+    
+    // Count how many slots are missing covers on this page
+    if (coverGenSlot_ == 0 && coverGenTotal_ == 0) {
+      for (int i = 0; i < gridsPerPage_ && (pageStart + i) < total; ++i) {
+        if (pageCache_[i].id == 0) continue;
+        std::string thumbPath = LibraryIndex::thumbPathFor(std::string(pageCache_[i].path), coverWidth_, coverHeight_);
+        if (!Storage.exists(thumbPath.c_str())) ++coverGenTotal_;
+      }
+      if (coverGenTotal_ == 0) {
+        // All covers already exist — nothing to do
+        coverGenActive_ = false;
+        coverGenShowPopup_ = false;
+        forceRender_ = true;
+        requestUpdate();
+        return;
+      }
+    }
+
+    // Process one slot per frame
+    int slot = coverGenSlot_;
+    if (slot < gridsPerPage_ && (pageStart + slot) < total && pageCache_[slot].id != 0) {
+      std::string thumbPath = LibraryIndex::thumbPathFor(std::string(pageCache_[slot].path), coverWidth_, coverHeight_);
+      if (!Storage.exists(thumbPath.c_str())) {
+        yield(); esp_task_wdt_reset();
+        LOG_DBG("LIB", "CovGen: slot=%d/%d path=%s heap=%u maxA=%u",
+                coverGenDone_ + 1, coverGenTotal_, pageCache_[slot].path,
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
+        // Show progress popup on first slot
+        if (!coverGenShowPopup_) {
+          renderer.clearScreen();
+          coverGenPopupRect_ = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+          coverGenShowPopup_ = true;
+        }
+
+        char progressBuf[32];
+        snprintf(progressBuf, sizeof(progressBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
+        renderer.drawText(SMALL_FONT_ID, 10, coverGenPopupRect_.y - 30, progressBuf, true, EpdFontFamily::REGULAR);
+
+        GUI.fillPopupProgress(renderer, coverGenPopupRect_, (coverGenDone_ * 100) / coverGenTotal_);
+        renderer.displayBuffer();
+
+        // Generate cover using Epub/Xtc parser
+        if (generatePageCover(pageCache_[slot].path)) {
+          ++coverGenDone_;
+        }
+      }
+    }
+
+    ++coverGenSlot_;
+    if (coverGenSlot_ >= gridsPerPage_ || (pageStart + coverGenSlot_) >= total) {
+      // All slots processed — finish
+      LOG_DBG("LIB", "CovGen: done %d/%d covers generated", coverGenDone_, coverGenTotal_);
+      coverGenActive_ = false;
+      coverGenSlot_ = 0;
+      coverGenDone_ = 0;
+      coverGenTotal_ = 0;
+      coverGenShowPopup_ = false;
+      forceRender_ = true;
+      requestUpdate();
+    }
+    return;  // block input while generating covers
+  }
+
   // ---- Popup input handling -----------------------------------------------
   if (popupMode_ != PopupMode::None) {
     if (popupSpawnButton_ >= 0 &&
@@ -1325,4 +1405,57 @@ void LibraryActivity::deleteAllLibraryCovers() {
     }
     ++pg;
   }
+}
+
+bool LibraryActivity::generatePageCover(const std::string& path) {
+  // Generates a cover thumbnail using the full Epub/Xtc parser (like HomeActivity).
+  // Returns true if a valid BMP was created at the expected thumb path.
+  if (path.empty()) return false;
+
+  const std::string thumbPath = LibraryIndex::thumbPathFor(path, coverWidth_, coverHeight_);
+  if (thumbPath.empty()) return false;
+
+  // Ensure the cache directory exists
+  unsigned long long hash = std::hash<std::string>{}(path);
+  char cacheDir[64];
+  if (FsHelpers::hasEpubExtension(path)) {
+    snprintf(cacheDir, sizeof(cacheDir), "/.crosspoint/epub_%llu", hash);
+  } else if (FsHelpers::hasXtcExtension(path)) {
+    snprintf(cacheDir, sizeof(cacheDir), "/.crosspoint/xtc_%llu", hash);
+  } else {
+    return false;  // TXT/MD not supported for cover generation
+  }
+  if (!Storage.exists(cacheDir)) Storage.mkdir(cacheDir);
+
+  if (FsHelpers::hasEpubExtension(path)) {
+    if (ESP.getMaxAllocHeap() < 32 * 1024) {
+      LOG_DBG("LIB", "CovGen: EPUB SKIP low heap maxA=%u", ESP.getMaxAllocHeap());
+      return false;
+    }
+    Epub epub(path, "/.crosspoint");
+    if (!epub.load(true, true)) {
+      LOG_DBG("LIB", "CovGen: EPUB load FAIL %s", path.c_str());
+      return false;
+    }
+    if (ESP.getMaxAllocHeap() < 28 * 1024) {
+      LOG_DBG("LIB", "CovGen: EPUB SKIP post-load low heap maxA=%u", ESP.getMaxAllocHeap());
+      return false;
+    }
+    const bool ok = epub.generateThumbBmp(coverWidth_, coverHeight_);
+    LOG_DBG("LIB", "CovGen: EPUB thumb gen=%d path=%s heap=%u maxA=%u",
+            ok ? 1 : 0, path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    return ok;
+  }
+
+  if (FsHelpers::hasXtcExtension(path)) {
+    if (ESP.getFreeHeap() < 20000) return false;
+    Xtc xtc(path, "/.crosspoint");
+    if (!xtc.load()) return false;
+    const bool ok = xtc.generateThumbBmp(coverWidth_, coverHeight_);
+    LOG_DBG("LIB", "CovGen: XTC thumb gen=%d path=%s heap=%u maxA=%u",
+            ok ? 1 : 0, path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    return ok;
+  }
+
+  return false;
 }

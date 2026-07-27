@@ -281,8 +281,14 @@ void LibraryActivity::scanSd() {
   // Init LibraryIndex if needed
   LibraryIndex::init();
 
-  // Fast path: existing library.dat
+  // Fast path: existing library.dat — but always scan for new/removed books
   if (LibraryIndex::exists()) {
+    // Incremental scan detects added, removed, and modified files via
+    // scan_state.dat comparison, without rebuilding indices when nothing changed.
+    // This runs on EVERY library entry to stay in sync with SD card changes.
+    LibraryIndex::scan(renderer, {}, SETTINGS.libraryRootDir);
+    LibraryIndex::buildIndices();
+    LibraryIndex::buildCollectionsIndex();
     totalBooks_ = collectionsMode_
         ? LibraryIndex::totalCollections()
         : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
@@ -890,6 +896,7 @@ void LibraryActivity::loop() {
       }
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
+        lastPage_ = curPage;
         forceRender_ = true;
         refreshPageCache();
       }
@@ -915,6 +922,7 @@ void LibraryActivity::loop() {
       }
       int curPage = selectorIndex_ / gridsPerPage_;
       if (curPage != lastPage_) {
+        lastPage_ = curPage;
         forceRender_ = true;
         refreshPageCache();
       }

@@ -351,6 +351,7 @@ void LibraryActivity::refreshPageCache() {
   for (int i = slotCount; i < gridsPerPage_; ++i) {
     pageCache_[i].id = 0;
     pageCache_[i].title[0] = '\0';
+    pageCache_[i].path[0] = '\0';
   }
   pageTitleCacheKey_ = -1;
   cachedTotalBooks_ = totalBooks_;
@@ -659,9 +660,8 @@ void LibraryActivity::loop() {
         const int idx = selectorIndex_;
         const int slot = idx % gridsPerPage_;
         const std::string path(pageCache_[slot].path);
-        if (!collectionsMode_ || currentCollectionIdx_ < 0) {
-          // Skip context menu for collection items; short-press opens the collection
-          if (collectionsMode_) return;
+        if (collectionsMode_ && currentCollectionIdx_ < 0) {
+          return;  // no context menu on collections list items
         }
         const std::string title = pageCache_[slot].title[0] ? pageCache_[slot].title : filenameWithoutExtension(path);
         const bool isEpub = FsHelpers::hasEpubExtension(std::string_view{path.c_str()});
@@ -897,7 +897,7 @@ void LibraryActivity::render(RenderLock&&) {
             case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
             case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
             case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
-            default: cachedInfo_ = tr(STR_ALL_BOOKS); break;
+            default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
           }
           const char* sortLabel = nullptr;
           switch (currentSort_) {

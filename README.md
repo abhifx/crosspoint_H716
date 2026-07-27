@@ -28,37 +28,37 @@ On top of that, Steroids adds a substantial set of original features developed a
 
 ---
 
-### 📚 Full E-Book Library
+### 📚 Full E-Book Library v2
 
-A complete library browser with grid-based navigation, replaceable covers, and smart content discovery — the biggest addition to this fork.
+A complete library browser with grid-based navigation, on-demand cover generation, collections/series support, and content discovery — rewritten for scalability.
 
 - **Configurable grid layout** — 2×2, 3×3, 4×4 adjustable from Settings
-- **Per-page thumbnail generation** — covers are rendered at exact cell size in discrete pages, with compact `covers N/M` counter
-- **Binary metadata cache** (`LibraryCache`) — fast library re-open by caching parsed metadata on SD, with per-book invalidation on cover deletion
+- **Scalable index** — fixed-record binary database (`library.dat`) with external merge-sort indices; constant ~11 KB RAM regardless of library size; supports 3000+ books
+- **Collections/Series** — extracts Calibre `calibre:series` / `calibre:series_index` and EPUB3 `belongs-to-collection` metadata; browse by collection name with per-collection paginated book grid
+- **On-demand cover generation** — per-page EPUB/XTC cover rendering with progress indicator, matching Home screen quality; 4×4 XTC buffer fix for small thumbnails
 - **Format support** — EPUB, XTC, TXT, and Markdown files
-- **Max books raised** — library supports up to 1000 entries (was 300)
-- **Accent-insensitive sorting** — titles sort naturally regardless of diacritics
-- **Content filters** — toggle between **All Books**, **Favourites**, and **Latest Read** with a live header indicator showing the active filter
-- **Sort/Filter popups** — restyled as 80%-wide white rounded panels with bold header, separator, icon rows, and scroll indicators; long-press Up/Down opens them instantly
-- **Cover placeholders** — books with missing or unreadable covers show a styled placeholder instead of a blank cell
-- **Incremental startup sync** — on-the-fly SD card walk on boot detects new/removed books without a full rescan
+- **Accent-insensitive sorting** — titles and authors sort naturally regardless of diacritics
+- **Content filters** — **All Books**, **Favourites**, **Latest Read**, **Unread**, **Completed** with live header indicator; **full-text search** with accent-folded substring matching
+- **Ribbon badges** — favourite (♥ 24×24), completed (✓), recently opened (●) on every tile
+- **Sort/Filter popups** — restyled 80%-wide white rounded panels with bold header, separator, icon rows, and scroll indicators; long-press Up/Down opens them instantly
+- **Incremental startup sync** — scan_state.dat comparison with zero e-ink refreshes; instant open when nothing changed; dynamic progress bar (~10 updates during full scan)
 - **Configurable library root** — choose which SD directory to scan (default: root), editable on-device via STRING setting
 - **Cover management** — delete individual cover thumbnails, all covers on the current page, or wipe the entire cover cache; covers regenerate automatically
-- **Library maintenance** in `Settings > Apps > Library`: **Rebuild Library** (clear cache + full rescan) and **Clear Corrupt Covers** (remove 0-byte thumbnails)
+- **Library maintenance** in `Settings → Apps → Library`: **Rebuild Library** (clear cache + full rescan)
 - **Per-book title display** — currently highlighted book's title shown below the filter/sort bar
 - **Incremental grid redraw** — tile selection within a page uses lighter redraw (only previous/current tiles + title line) instead of full grid repaint
+- **First↔last page navigation** — wrap-around properly refreshes page cache and selector stays on valid positions
 
 #### Library Performance & Robustness
 
-- **EPUB cover generation overhaul** — relaxed heap guard (32 KB contiguous), empty cover detection (0-byte JPEGs no longer cause infinite retry), adaptive JPEG subsampling (halves MCU grid width until it fits), metadata pre-extraction (skips full ZIP re-parse)
-- **XTC thumbnail 150× speedup** — streaming row-buffered downscaling replaces ~165,000 individual SD seeks with ~1,080 batched row reads (from ~30s to under 1s)
-- **Batch e-ink rendering** — multiple covers drawn before a single display refresh (tunable batch size), reducing render cycles from ~17 to as few as 5 on a 4×4 grid
-- **Indexing depth limit** — directory walker capped at 8 levels, preventing crashes on malformed SD cards with deeply nested folders
-- **Per-format memory guards** — EPUB requires 40 KB free + 30 KB contiguous, XTC needs 20 KB, TXT/Markdown need 16 KB; insufficient memory skips the book gracefully instead of crashing
-- **File validation before parsing** — checks path validity, file existence, and non-zero size; corrupt/stale cache entries rejected early
-- **Watchdog safety** — `yield()` and hardware WDT resets during SD walking, cover generation, and sorting prevent task watchdog timeouts on large libraries
+- **Constant RAM footprint** — ~11 KB fixed (page cache + sort buffer + I/O), freeing ~40 KB vs old vector-based approach
+- **Streaming scan** — file sizes from directory entries, no per-file `Storage.open()`; binary search replacement for hash map (zero extra RAM)
+- **EPUB cover generation** — relaxed heap guard (32 KB contiguous); JPEG/PNG decode with adaptive subsampling
+- **XTC thumbnail downscaling** — streaming row-buffered with configurable source rows per destination row (8 max, up from 4 for 4×4 grid compatibility)
+- **Per-format memory guards** — EPUB requires 40 KB free + 30 KB contiguous, XTC needs 20 KB, TXT/Markdown need 16 KB; insufficient memory skips the book gracefully
+- **Indexing depth limit** — directory walker capped at 8 levels
+- **Watchdog safety** — `yield()` and hardware WDT resets during SD walking, cover generation, and sorting
 - **Sort performance** — title/author keys pre-normalized (accent-stripped, lowercased) once per book instead of on every comparison
-- **Lexend font optional** — `-DOMIT_LEXEND` build flag removes Lexend from compilation, reducing firmware size
 
 ### 📖 Book Context Menu & Metadata Viewer
 

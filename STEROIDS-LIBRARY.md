@@ -130,6 +130,19 @@ only the old selection border (drawn in white) and new selection border
 (drawn in black) are updated, plus the title/author text. No `clearScreen()`
 or full grid redraw is needed. This provides sub-second navigation on e-ink.
 
+### Scan Performance (Incremental)
+
+On every library entry, `LibraryIndex::scan()` runs an incremental check:
+- **No e-ink refreshes** — `emitProgressIdle` is a no-op during incremental scan
+- **No yields** — `walkDirs(yieldBetweenDirs=false)` prevents unrelated Activity renders
+- **No counting pass** — skipped entirely when no progress bar is shown
+- **O(log n) lookup** — `prevScan` is sorted once, then `std::lower_bound` binary search
+- **No per-file I/O** — file sizes from `openNextFile().size()` directory entries
+- **Index rebuild skipped** — `buildIndices()` only runs when `added > 0 || removed > 0`
+
+Cold scan (first index creation) still shows the "Indexing..." progress bar with
+dynamic update interval (~10 refreshes total regardless of library size).
+
 ---
 
 ## Cover Generation
@@ -143,10 +156,9 @@ used by the Home screen carousel.
 2. **Cover gen loop starts** on the next frame (one slot per frame)
 3. Progress text `"1/9 Loading..."` appears centered below the book author
 4. Each missing cover triggers `Epub::load(true,true)` + `generateThumbBmp(w,h)`
-5. After the first successful cover, a full render shows the new cover
-6. Subsequent covers appear via incremental display updates
-7. When all slots are processed, progress text disappears
-8. Navigation is blocked during cover generation
+5. **Every successful cover** triggers a full render so covers appear progressively
+6. When all slots are processed, a final full render clears the progress text
+7. Navigation is blocked during cover generation
 
 ### Cover Generation Triggers
 
@@ -173,7 +185,7 @@ Collections are extracted from EPUB metadata during scanning:
 
 1. **Sort → Collections**: shows the list of unique collections (e.g., "Harry Potter — 7 books")
 2. **Enter a collection**: shows the grid of books in that collection, sorted by series index
-3. **Navigation**: same as normal library mode within the collection
+3. **Navigation**: same as normal library mode within the collection; pagination uses `collectionBookCount()` for exact book count from `idx_collections.bin`
 4. **Back**: returns to collections list; second Back exits library
 
 ### Header Labels

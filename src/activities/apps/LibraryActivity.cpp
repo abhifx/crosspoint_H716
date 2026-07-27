@@ -100,12 +100,11 @@ void drawRibbonBadge(GfxRenderer& r, int cx, int cy, int cw, int ch,
     r.drawLine(symCx - 5, symCy,     symCx - 1, symCy + 4, 2, false);
     r.drawLine(symCx - 1, symCy + 4, symCx + 6, symCy - 4, 2, false);
   } else if (favorite) {
-    constexpr int kHeartNativeSz = 32;
-    const int heartSz = kHeartNativeSz * 2 / 3;  // 21 px — 2/3 of 32
-    if (leg >= heartSz) {
-      int hx = symCx - heartSz / 2;
-      int hy = symCy - heartSz / 2;
-      r.drawIconInverted(::HeartIcon, hx, hy, heartSz, heartSz);
+    constexpr int kHeartSz = 24;
+    if (leg >= kHeartSz) {
+      int hx = symCx - kHeartSz / 2;
+      int hy = symCy - kHeartSz / 2;
+      r.drawIconInverted(::Heart24Icon, hx, hy, kHeartSz, kHeartSz);
     }
   } else if (opened) {
     const int dotR = std::max(1, symSz / 4);
@@ -786,7 +785,18 @@ void LibraryActivity::loop() {
         int prev = ps - gridsPerPage_;
         if (prev < 0) prev = ((total + gridsPerPage_ - 1) / gridsPerPage_ - 1) * gridsPerPage_;
         int prevItems = std::min(gridsPerPage_, total - prev);
-        selectorIndex_ = prev + prevItems - 1;
+        // Align to the last row: find the last occupied row and go to its first column.
+        int lastRowStart = prevItems - 1;
+        // Clamp to same column if possible, otherwise last column of last row.
+        int col = selectorIndex_ % gridColumns_;
+        if (col < prevItems % gridColumns_ || prevItems % gridColumns_ == 0) {
+          selectorIndex_ = prev + lastRowStart - (lastRowStart % gridColumns_) + col;
+        } else {
+          selectorIndex_ = prev + lastRowStart;
+        }
+        // Ensure selector never goes out of bounds
+        if (selectorIndex_ >= total) selectorIndex_ = total - 1;
+        if (selectorIndex_ < prev) selectorIndex_ = prev;
       } else {
         selectorIndex_ -= gridColumns_;
       }
@@ -804,7 +814,8 @@ void LibraryActivity::loop() {
     if (downHeld_ && !downLongTriggered_) {
       int ps = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
       int pageItems = std::min(gridsPerPage_, total - ps);
-      int rows = pageItems / gridColumns_;
+      // Ceiling division: 5 items / 4 cols = 2 rows (not 1)
+      int rows = (pageItems + gridColumns_ - 1) / gridColumns_;
       int r = (selectorIndex_ - ps) / gridColumns_;
       int nr = selectorIndex_ + gridColumns_;
       if (r >= rows - 1 || nr >= total || nr >= ps + pageItems) {

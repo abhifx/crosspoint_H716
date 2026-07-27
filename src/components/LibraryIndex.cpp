@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
-#include <unordered_map>
 
 #include "components/UITheme.h"
 #include "EpubParser.h"
@@ -399,8 +398,10 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
   LOG_DBG("LIB", "Scan: loaded %u previous scan entries", prevScan.size());
 
   // Build hash→index map for O(1) lookup
-  std::unordered_map<uint32_t, const ScanEntry*> prevMap;
-  for (auto& e : prevScan) prevMap[e.hash] = &e;
+  // Sort prevScan by hash for O(log n) binary search — zero extra RAM,
+  // avoids ~96 KB std::unordered_map overhead at 3000 books.
+  std::sort(prevScan.begin(), prevScan.end(),
+            [](const ScanEntry& a, const ScanEntry& b) { return a.hash < b.hash; });
   LOG_DBG("LIB", "Scan: loaded %u previous scan entries", prevScan.size());
 
   // ---- Phase 2: single streaming pass — process each file as discovered.
@@ -457,8 +458,16 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
     st.close();
 
     const uint32_t ph = hashPath(p);
-    auto it = prevMap.find(ph);
-    const ScanEntry* prev = (it != prevMap.end()) ? it->second : nullptr;
+    // Binary search in sorted prevScan for O(log n) lookup (zero extra RAM)
+    const ScanEntry* prev = nullptr;
+    {
+      auto lo = prevScan.begin();
+      auto hi = prevScan.end();
+      ScanEntry key{ph, 0, 0, 0};
+      auto it = std::lower_bound(lo, hi, key,
+                                 [](const ScanEntry& a, const ScanEntry& b) { return a.hash < b.hash; });
+      if (it != hi && it->hash == ph) prev = &(*it);
+    }
 
     if (prev && prev->mtime == mtime && prev->size == (uint32_t)fsz) {
       // Unchanged — keep existing record

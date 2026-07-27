@@ -913,8 +913,7 @@ void LibraryActivity::render(RenderLock&&) {
             default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
           }
           if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
-            cachedInfo_ += " / ";
-            cachedInfo_ += currentCollectionName_;
+            cachedInfo_ = currentCollectionName_;
           }
           const char* sortLabel = nullptr;
           // Don't show sort label when in collections mode — the info line
@@ -1042,8 +1041,7 @@ void LibraryActivity::render(RenderLock&&) {
       default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
     }
     if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
-      cachedInfo_ += " / ";
-      cachedInfo_ += currentCollectionName_;
+      cachedInfo_ = currentCollectionName_;
     }
     const char* sortLabel = nullptr;
     if (!collectionsMode_) {

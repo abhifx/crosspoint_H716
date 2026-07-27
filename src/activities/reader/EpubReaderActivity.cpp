@@ -565,6 +565,10 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Capture held time BEFORE detectPageTurn — wasPressed/wasReleased
+  // consumers may reset the internal hold timer on release.
+  const unsigned long capturedHeldTime = mappedInput.getHeldTime();
+
   auto [prevTriggered, nextTriggered, fromTilt, fromFrontButton] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     return;
@@ -591,7 +595,7 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  const bool longPress = !fromTilt && mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS;
+  const bool longPress = !fromTilt && capturedHeldTime > ReaderUtils::SKIP_HOLD_MS;
   // Front buttons use a separate behavior setting (Bookmarks/Clippings only, no Chapter Skip or Orientation)
   const bool frontLongPress = !fromTilt && fromFrontButton && longPress;
 

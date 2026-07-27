@@ -62,6 +62,13 @@ int roundDiv(const int numerator, const int denominator) {
   return (numerator + denominator / 2) / denominator;
 }
 
+int roundedPercent(const uint64_t value, const uint64_t total) {
+  if (total == 0) {
+    return 0;
+  }
+  return static_cast<int>((value * 100ULL + total / 2ULL) / total);
+}
+
 int clampPercent(const int value) { return std::clamp(value, 0, 100); }
 
 std::string formatFraction(const int value, const int total) { return std::to_string(value) + "/" + std::to_string(total); }
@@ -351,7 +358,7 @@ ReadingProfileSummary buildReadingProfileSummary() {
   }
 
   if (weeklyTotalReadingMs > 0) {
-    summary.bestDaySharePercent = roundDiv(static_cast<int>(maxDayReadingMs * 100ULL), static_cast<int>(weeklyTotalReadingMs));
+    summary.bestDaySharePercent = roundedPercent(maxDayReadingMs, weeklyTotalReadingMs);
   }
 
   std::vector<ReadingSessionLogEntry> recentSessions;

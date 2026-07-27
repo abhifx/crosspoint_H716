@@ -106,7 +106,7 @@ int getHeatLevel(const uint64_t readingMs) {
 
   const uint64_t totalMinutes = readingMs / 60000ULL;
   if (totalMinutes < 15ULL) {
-    return 0;
+    return 1;
   }
   if (totalMinutes < 30ULL) {
     return 1;
@@ -286,7 +286,7 @@ void drawLegend(GfxRenderer& renderer, const Rect& rect) {
     const char* label;
   };
   static constexpr LegendLevel LEVELS[] = {
-      {1, "15m+"}, {2, "30m+"}, {3, "60m+"}, {4, "120m+"}, {5, "240m+"}};
+      {1, ">0"}, {2, "30m+"}, {3, "60m+"}, {4, "120m+"}, {5, "240m+"}};
   constexpr int LEVEL_COUNT = sizeof(LEVELS) / sizeof(LEVELS[0]);
 
   const int itemWidth = rect.width / LEVEL_COUNT;

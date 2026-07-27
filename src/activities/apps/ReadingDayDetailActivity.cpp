@@ -96,8 +96,7 @@ void ReadingDayDetailActivity::render(RenderLock&&) {
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int cardWidth = (pageWidth - sidePadding * 2 - SUMMARY_GAP) / 2;
   const std::string dateLabel = ReadingStatsAnalytics::formatDayOrdinalLabel(dayOrdinal);
-  const uint64_t totalReadingMs =
-      !entries.empty() ? ReadingStatsAnalytics::buildTimelineDayEntry(dayOrdinal).totalReadingMs : 0;
+  const uint64_t totalReadingMs = ReadingStatsAnalytics::buildTimelineDayEntry(dayOrdinal).totalReadingMs;
 
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_READING_DAY), dateLabel.c_str());
 

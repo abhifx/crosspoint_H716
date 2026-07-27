@@ -1260,11 +1260,11 @@ void LibraryActivity::drawTileContent(int i, int x, int y) const {
     }
   }
 
-  if (drawn) {
-    const auto* rbStats = READING_STATS.findBook(path.c_str());
-    const bool isComplete = rbStats && rbStats->completed;
-    const bool isFav = FAVORITES.isFavorite(path.c_str());
-    const bool isOpened = rbStats && rbStats->totalReadingMs > 0 && !isComplete;
+  // Ribbon badge — shows on both covers AND placeholders
+  {
+    const bool isFav = pageCache_[i].isFavorite;
+    const bool isComplete = pageCache_[i].isCompleted;
+    const bool isOpened = pageCache_[i].isOpened && !isComplete;
     if (isComplete || isFav || isOpened)
       drawRibbonBadge(renderer, x, y, coverWidth_, coverHeight_, isComplete, isFav, isOpened);
   }

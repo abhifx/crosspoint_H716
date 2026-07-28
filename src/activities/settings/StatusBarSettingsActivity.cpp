@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -13,7 +14,7 @@
 #include "../util/ListRenderHelper.h"
 
 namespace {
-constexpr int MENU_ITEMS = 8;
+constexpr int MENU_ITEMS = 11;
 const StrId menuNames[MENU_ITEMS] = {StrId::STR_CHAPTER_PAGE_COUNT,
                                      StrId::STR_BOOK_PROGRESS_PERCENTAGE,
                                      StrId::STR_PROGRESS_BAR,
@@ -21,6 +22,9 @@ const StrId menuNames[MENU_ITEMS] = {StrId::STR_CHAPTER_PAGE_COUNT,
                                      StrId::STR_TITLE,
                                      StrId::STR_TIME_LEFT,
                                      StrId::STR_BATTERY,
+                                     StrId::STR_CLOCK,
+                                     StrId::STR_CLOCK_FORMAT,
+                                     StrId::STR_CLOCK_SYNC_NOW,
                                      StrId::STR_XTC_STATUS_BAR};
 constexpr int PROGRESS_BAR_ITEMS = 3;
 const StrId progressBarNames[PROGRESS_BAR_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE};
@@ -31,6 +35,12 @@ const StrId progressBarThicknessNames[PROGRESS_BAR_THICKNESS_ITEMS] = {
 
 constexpr int TITLE_ITEMS = 3;
 const StrId titleNames[TITLE_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE};
+
+constexpr int CLOCK_POSITION_ITEMS = 3;
+const StrId clockPositionNames[CLOCK_POSITION_ITEMS] = {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT};
+
+constexpr int CLOCK_FORMAT_ITEMS = 2;
+const StrId clockFormatNames[CLOCK_FORMAT_ITEMS] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
 
 constexpr int XTC_STATUS_BAR_ITEMS = 3;
 const StrId xtcStatusBarNames[XTC_STATUS_BAR_ITEMS] = {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP};
@@ -123,6 +133,17 @@ void StatusBarSettingsActivity::handleSelection() {
     // Show Battery
     SETTINGS.statusBarBattery = (SETTINGS.statusBarBattery + 1) % 2;
   } else if (selectedIndex == 7) {
+    // Clock position
+    SETTINGS.statusBarClock = (SETTINGS.statusBarClock + 1) % CLOCK_POSITION_ITEMS;
+  } else if (selectedIndex == 8) {
+    // Clock format
+    SETTINGS.clockFormat = (SETTINGS.clockFormat + 1) % CLOCK_FORMAT_ITEMS;
+  } else if (selectedIndex == 9) {
+    // Sync clock now — launches ClockSyncActivity
+    startActivityForResult(std::make_unique<ClockSyncActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) { finish(); });
+    return;
+  } else if (selectedIndex == 10) {
     // XTC Status Bar
     SETTINGS.xtcStatusBarMode = (SETTINGS.xtcStatusBarMode + 1) % XTC_STATUS_BAR_ITEMS;
   }
@@ -158,6 +179,12 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
         } else if (index == 6) {
           return SETTINGS.statusBarBattery ? tr(STR_SHOW) : tr(STR_HIDE);
         } else if (index == 7) {
+          return I18N.get(clockPositionNames[SETTINGS.statusBarClock]);
+        } else if (index == 8) {
+          return I18N.get(clockFormatNames[SETTINGS.clockFormat]);
+        } else if (index == 9) {
+          return tr(STR_CLOCK_SYNC);
+        } else if (index == 10) {
           return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
         } else {
           return tr(STR_HIDE);

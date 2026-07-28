@@ -385,13 +385,6 @@ static bool startReplacementScreenSaver() {
   if (activityManager.isScreenSaverActive()) return false;
   if (!activityManager.isReaderActivity()) return false;
 
-  // Free font caches and decompressor memory to maximise contiguous heap for
-  // the PNG decoder (~58 KB).  These will be rebuilt on the next font access.
-  fontCacheManager.clearCache();
-  if (fontDecompressor.isInitialized()) {
-    fontDecompressor.deinit();
-  }
-
   activityManager.pushActivity(std::make_unique<ScreenSaverActivity>(renderer, mappedInputManager, true));
   return true;
 }
@@ -461,6 +454,34 @@ void ensureSdFontLoaded() {
   }
 }
 
+// Free font heap memory for use by other subsystems (e.g. screensaver PNG decoder).
+// Font caches and decompressor are rebuilt on next font access.
+void freeFontMemory() {
+  const int beforeFree = static_cast<int>(ESP.getFreeHeap());
+  const int beforeMaxAlloc = static_cast<int>(ESP.getMaxAllocHeap());
+  fontCacheManager.clearCache();
+  if (fontDecompressor.isInitialized()) {
+    fontDecompressor.deinit();
+  }
+  LOG_DBG("FNT", "freeFontMemory: free=%d->%d maxAlloc=%d->%d",
+          beforeFree, static_cast<int>(ESP.getFreeHeap()),
+          beforeMaxAlloc, static_cast<int>(ESP.getMaxAllocHeap()));
+}
+
+// Restore font memory that was freed with freeFontMemory().
+// Reinitialises the decompressor (lazy — pages decompress on demand).
+void restoreFontMemory() {
+  const int beforeFree = static_cast<int>(ESP.getFreeHeap());
+  const int beforeMaxAlloc = static_cast<int>(ESP.getMaxAllocHeap());
+  if (!fontDecompressor.isInitialized()) {
+    fontDecompressor.init();
+  }
+  fontCacheManager.setFontDecompressor(&fontDecompressor);
+  LOG_DBG("FNT", "restoreFontMemory: free=%d->%d maxAlloc=%d->%d",
+          beforeFree, static_cast<int>(ESP.getFreeHeap()),
+          beforeMaxAlloc, static_cast<int>(ESP.getMaxAllocHeap()));
+}
+
 void setupDisplayAndFonts(bool seamless = false) {
   display.begin(seamless);
   renderer.begin();
@@ -517,6 +538,10 @@ void setup() {
   powerManager.begin();
   halClock.begin();
   halTiltSensor.begin();
+
+  // Seed the PRNG from ESP32 hardware entropy (RF ADC noise).
+  // Without this, random() produces a deterministic sequence on each cold boot.
+  randomSeed(esp_random());
 
   // Disable Arduino core's NVS auto-persist of Wi-Fi credentials. WifiSelectionActivity
   // always scans first and uses WifiCredentialStore (SD card JSON) as the source of
@@ -807,7 +832,7 @@ void loop() {
     return;
   }
 
-  if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  if (gpio.wasPressed(HalGPIO::BTN_POWER)) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;

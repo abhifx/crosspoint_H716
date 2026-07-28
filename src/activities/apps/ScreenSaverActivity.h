@@ -14,9 +14,12 @@ class ScreenSaverActivity final : public Activity {
   unsigned long lastBatteryCheckMs_ = 0;
   bool firstRender_ = true;
   bool returnToCaller_ = false;
-  std::string callerFrameBufferPath_ = "/.crosspoint/screensaver-caller.tmp";  // temp file for caller framebuffer snapshot
+  std::string currentImagePath_;
+  std::string callerFrameBufferPath_ = "/.crosspoint/screensaver-caller.tmp";
 
   void loadImages();
+  void pickNextImage();
+  void freeImageList();
   unsigned long getIntervalMs() const;
   int getMinBatteryPercent() const;
   bool isWakeButtonPressed() const;

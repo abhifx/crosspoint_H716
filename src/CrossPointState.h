@@ -59,11 +59,15 @@ class CrossPointState {
 
  public:
   static constexpr uint8_t SLEEP_RECENT_COUNT = 16;
+  static constexpr uint8_t SCREENSAVER_RECENT_COUNT = 12;
 
   std::string openEpubPath;
   uint16_t recentSleepImages[SLEEP_RECENT_COUNT] = {};  // circular buffer of recent wallpaper indices
   uint8_t recentSleepPos = 0;                           // next write slot
   uint8_t recentSleepFill = 0;                          // valid entries (0..SLEEP_RECENT_COUNT)
+  uint16_t recentScreensaverImages[SCREENSAVER_RECENT_COUNT] = {};  // screensaver anti-repetition
+  uint8_t recentScreensaverPos = 0;
+  uint8_t recentScreensaverFill = 0;
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   uint32_t lastKnownValidTimestamp = 0;
@@ -83,6 +87,9 @@ class CrossPointState {
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;
   void pushRecentSleep(uint16_t idx);
   uint16_t getMostRecentSleepIndex() const;
+  bool isRecentScreensaver(uint16_t idx, uint8_t checkCount) const;
+  void pushRecentScreensaver(uint16_t idx);
+  uint16_t getMostRecentScreensaverIndex() const;
   void recordUsefulStart(uint8_t reminderThreshold);
   void registerValidTimeSync(uint32_t validTimestamp);
   bool shouldShowSyncDayReminder(uint8_t reminderThreshold) const;

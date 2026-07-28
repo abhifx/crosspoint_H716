@@ -74,6 +74,29 @@ uint16_t CrossPointState::getMostRecentSleepIndex() const {
   return recentSleepImages[slot];
 }
 
+bool CrossPointState::isRecentScreensaver(const uint16_t idx, const uint8_t checkCount) const {
+  const uint8_t effectiveCount = std::min(checkCount, recentScreensaverFill);
+  for (uint8_t i = 0; i < effectiveCount; i++) {
+    const uint8_t slot = (recentScreensaverPos + SCREENSAVER_RECENT_COUNT - 1 - i) % SCREENSAVER_RECENT_COUNT;
+    if (recentScreensaverImages[slot] == idx) return true;
+  }
+  return false;
+}
+
+void CrossPointState::pushRecentScreensaver(const uint16_t idx) {
+  recentScreensaverImages[recentScreensaverPos] = idx;
+  recentScreensaverPos = (recentScreensaverPos + 1) % SCREENSAVER_RECENT_COUNT;
+  if (recentScreensaverFill < SCREENSAVER_RECENT_COUNT) recentScreensaverFill++;
+}
+
+uint16_t CrossPointState::getMostRecentScreensaverIndex() const {
+  if (recentScreensaverFill == 0) {
+    return UINT16_MAX;
+  }
+  const uint8_t slot = (recentScreensaverPos + SCREENSAVER_RECENT_COUNT - 1) % SCREENSAVER_RECENT_COUNT;
+  return recentScreensaverImages[slot];
+}
+
 bool CrossPointState::saveToFile() {
   Storage.mkdir("/.crosspoint");
   lastKnownValidTimestamp = std::max(lastKnownValidTimestamp, TimeUtils::getCurrentValidTimestamp());

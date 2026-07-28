@@ -750,6 +750,11 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   jump["bookPath"] = s.pendingBookmarkJump.bookPath;
   jump["spineIndex"] = s.pendingBookmarkJump.spineIndex;
   jump["pageNumber"] = s.pendingBookmarkJump.pageNumber;
+  // Screensaver anti-repetition history
+  JsonArray ssRecentArr = doc["recentScreensaverImages"].to<JsonArray>();
+  for (int i = 0; i < CrossPointState::SCREENSAVER_RECENT_COUNT; i++) ssRecentArr.add(s.recentScreensaverImages[i]);
+  doc["recentScreensaverPos"] = s.recentScreensaverPos;
+  doc["recentScreensaverFill"] = s.recentScreensaverFill;
   return saveJsonDocumentToFile("CPS", path, doc);
 }
 
@@ -821,6 +826,18 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
     } else {
       s.pendingBookmarkJump.clear();
     }
+    // Screensaver anti-repetition history
+    memset(s.recentScreensaverImages, 0, sizeof(s.recentScreensaverImages));
+    JsonArrayConst ssRecentArr = doc["recentScreensaverImages"];
+    const int ssActualCount = ssRecentArr.isNull() ? 0
+        : std::min(static_cast<int>(ssRecentArr.size()),
+                   static_cast<int>(CrossPointState::SCREENSAVER_RECENT_COUNT));
+    for (int i = 0; i < ssActualCount; i++) s.recentScreensaverImages[i] = ssRecentArr[i] | static_cast<uint16_t>(0);
+    s.recentScreensaverPos = doc["recentScreensaverPos"] | static_cast<uint8_t>(0);
+    if (s.recentScreensaverPos >= CrossPointState::SCREENSAVER_RECENT_COUNT)
+      s.recentScreensaverPos = ssActualCount > 0 ? s.recentScreensaverPos % CrossPointState::SCREENSAVER_RECENT_COUNT : 0;
+    s.recentScreensaverFill = doc["recentScreensaverFill"] | static_cast<uint8_t>(0);
+    s.recentScreensaverFill = static_cast<uint8_t>(std::min(static_cast<int>(s.recentScreensaverFill), ssActualCount));
   }
   return true;
 }

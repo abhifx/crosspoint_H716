@@ -49,6 +49,9 @@ these files during a merge — always keep the local Steroids version:
 | **`src/ReadingStatsStore.h`** | **Steroids pace-tracking fields (avgSecondsPerForwardPage, paceSampleCount)** |
 | **`src/ReadingStatsStore.cpp`** | **Steroids pace-tracking implementation (recordForwardPageRead, mark-as-unread)** |
 | **`src/ReadingStatsActivity.cpp/h`** | **selectedBookPath constructor param (pre-select book in stats)** |
+| **`src/components/LibraryIndex.cpp`** | **Incremental scan vector pre-allocation, null-terminated ZIP reads** |
+| **`src/activities/settings/StatusBarSettingsActivity.cpp`** | **Clock position, clock format, sync clock now in status bar menu** |
+| **`src/util/TimeUtils.cpp`** | **applySystemClockFromRtc: no clockHasBeenSynced guard, DS3231 time used immediately** |
 
 ### Why ReadingStatsStore is critical
 
@@ -67,7 +70,7 @@ take upstream's `JsonSettingsIO.cpp`:
 - Shortcuts (clippings, library, screensaver) stop saving/loading
 - Screensaver settings (text, font, position, panel color, opacity, interval) stop working
 - Library settings (layout, filter, sort, root dir) stop working
-- Front long press behavior (bookmark/clipping) stops working
+- Front long press behavior (bookmark/clipping, chapter skip, orientation, font size) stops working
 - Guide dots, Bionic Reading, EPUB render modes stop saving
 
 ### Why CrossPointWebServer.cpp is critical
@@ -116,7 +119,7 @@ These are files that upstream modified AND have local Steroids changes.
 The **correct approach** is to keep the LOCAL version, then **manually add**
 only the specific upstream features (not the whole file).
 
-### 1. `src/CrossPointSettings.h` — Add clock/display enums
+### 1. `src/CrossPointSettings.h` — Add clock/display enums AND long-press enums
 
 The upstream adds `STATUS_BAR_CLOCK` and `DISPLAY_HEADER` enums, plus member
 fields. Keep the entire local file, and manually add:
@@ -157,6 +160,13 @@ void normalizeDisplayDay() {
 bool isHardwareRtcAutoDayClockActive() const { return true; }
 ```
 
+**Steroids also expands the long-press behavior enums beyond upstream:**
+
+- `LONG_PRESS_BUTTON_BEHAVIOR` (side buttons) adds `LONG_PRESS_BOOKMARK = 3`, `LONG_PRESS_CLIPPING = 4`, `LONG_PRESS_FONTSIZE = 5` — upstream only has OFF, CHAPTER_SKIP, ORIENTATION_CHANGE (0-2).
+- `FRONT_LONG_PRESS_BEHAVIOR` (front buttons) is entirely Steroids-specific. Upstream has NO separate front button long-press setting. The values are: `FRONT_LONG_PRESS_OFF = 0`, `FRONT_LONG_PRESS_BOOKMARK = 1`, `FRONT_LONG_PRESS_CLIPPING = 2`, `FRONT_LONG_PRESS_CHAPTER_SKIP = 3`, `FRONT_LONG_PRESS_ORIENTATION = 4`, `FRONT_LONG_PRESS_FONTSIZE = 5`.
+- Both enums use the **same option order**: OFF, BOOKMARK, CLIPPING, CHAPTER_SKIP, ORIENTATION, FONTSIZE.
+- If upstream modifies these enums, NEVER take their version — always keep the local expanded enums.
+
 ### 2. `src/main.cpp` — Add HalClock init
 
 ```cpp
@@ -191,6 +201,22 @@ doc["clockHasBeenSynced"] = s.clockHasBeenSynced;
 ### 4. Upstream files to take AS-IS (they add APIs needed by new features)
 
 These files should be taken from upstream because the new features (ClockSync, KOReader profiles) depend on their updated APIs. However, verify after taking them that Steroids-specific serialization still works:
+
+**After taking TimeUtils.cpp from upstream, you MUST re-apply the Steroids patch:**
+Remove the `!SETTINGS.clockHasBeenSynced` guard from `applySystemClockFromRtc()`.
+On X3 with a DS3231 RTC, this guard prevents the RTC time from being copied to
+the ESP32 system clock on first access if NTP was never synced, making the top
+header date invisible. The DS3231 time is independently validated by isClockValid()
+(epoch >= 2024-01-01), so stale RTC values are still safely rejected.
+
+Search for this pattern in the upstream file and remove the `!SETTINGS.clockHasBeenSynced` part:
+```
+  if (!halClock.isAvailable() || !SETTINGS.clockHasBeenSynced) {
+```
+Change to:
+```
+  if (!halClock.isAvailable()) {
+```
 
 ```powershell
 git checkout upstream/master -- src/util/TimeUtils.cpp src/util/TimeUtils.h
@@ -439,8 +465,13 @@ After completing a merge, verify these items ON DEVICE (not just build):
 | 6 | Open Web Browser → Settings | Device settings visible |
 | 7 | Open Web Browser → App Settings | App settings visible with Steroids sections |
 | 8 | Open Web Browser → Home | Logo.png visible, About card with Author + GitHub link |
-| 9 | Long press left/right side buttons in reader | Should trigger chapter skip |
-| 10 | Long press front buttons in reader | Should trigger bookmark/clipping (if configured) |
+| 9 | Long press left/right side buttons in reader | Should trigger configured action (chapter skip, bookmark, clipping, orientation, font size) |
+| 10 | Long press front buttons in reader | Should trigger configured action (bookmark, clipping, chapter skip, orientation, font size) |
+| 10b | Long press UP/DOWN side button (font size mode) | Font size increases on DOWN, decreases on UP |
+| 10c | Open Settings > Controls > Long-press side buttons | All 6 options present: OFF, Bookmarks, Clippings, Chapter skip, Orientation change, Font size |
+| 10d | Open Settings > Controls > Long-press front buttons | Same 6 options as side buttons |
+| 10e | Open Settings > Customize Status Bar | 11 items including Clock position, Clock format, Sync clock now |
+| 10f | Open Home screen (top header) on X3 with DS3231 | Date/time visible even without prior NTP sync |
 | 11 | Open Reading Stats | Should show pace info and book stats |
 | 12 | Library cover generation | Should not crash on corrupt EPUBs |
 
@@ -449,4 +480,101 @@ Refer to the "Files to NEVER Overwrite" section and restore the local version.
 
 ---
 
-*Last updated: 2026-07-27 — based on 1.3.0 → 1.5.0.2 merge*
+---
+
+## X3 DS3231 RTC: applySystemClockFromRtc without clockHasBeenSynced
+
+On X3 devices with the DS3231 hardware RTC (`halClock.isAvailable() == true`),
+the function `TimeUtils::applySystemClockFromRtc()` copies the DS3231 time to the
+ESP32 system clock via `settimeofday()`. Upstream gates this on both
+`halClock.isAvailable()` AND `SETTINGS.clockHasBeenSynced`.
+
+**Steroids removes the `clockHasBeenSynced` requirement.** Without this change, an
+X3 user who has never connected to WiFi for NTP sync gets no system clock time,
+so `getAuthoritativeTimestamp()` returns 0, and the top header date (`drawTopLine` in
+`HeaderDateUtils`) is empty. The status bar clock still works because it reads directly
+from the DS3231 via `halClock.readUtcEpoch()`, bypassing the system clock.
+
+The `isClockValid(epoch >= 2024-01-01)` check after reading the DS3231 provides
+sufficient protection against factory-default or corrupted RTC values.
+
+**If upstream modifies `TimeUtils.cpp`, re-apply this fix** — remove the
+`!SETTINGS.clockHasBeenSynced` condition in `applySystemClockFromRtc()`.
+
+## Long-press Button Behavior: Expanded Options
+
+Upstream provides only 3 options for side-button long-press (OFF, Chapter Skip,
+Orientation Change) and has NO separate front-button long-press setting.
+
+The Steroids `CrossPointSettings.h` expands both enums to 6 options in the same order:
+
+| Value | Side (`LONG_PRESS_BUTTON_BEHAVIOR`) | Front (`FRONT_LONG_PRESS_BEHAVIOR`) |
+|-------|-------------------------------------|------------------------------------|
+| 0 | `LONG_PRESS_OFF` | `FRONT_LONG_PRESS_OFF` |
+| 1 | `LONG_PRESS_BOOKMARK` | `FRONT_LONG_PRESS_BOOKMARK` |
+| 2 | `LONG_PRESS_CLIPPING` | `FRONT_LONG_PRESS_CLIPPING` |
+| 3 | `LONG_PRESS_CHAPTER_SKIP` | `FRONT_LONG_PRESS_CHAPTER_SKIP` |
+| 4 | `LONG_PRESS_ORIENTATION_CHANGE` | `FRONT_LONG_PRESS_ORIENTATION` |
+| 5 | `LONG_PRESS_FONTSIZE` | `FRONT_LONG_PRESS_FONTSIZE` |
+
+### Search patterns (find upstream diffs that touch these enums):
+```powershell
+Select-String -Path src/CrossPointSettings.h -Pattern "LONG_PRESS_BUTTON_BEHAVIOR"
+Select-String -Path src/CrossPointSettings.h -Pattern "FRONT_LONG_PRESS_BEHAVIOR"
+```
+
+### Implementation files (never take upstream from these):
+| File | What changed |
+|------|-------------|
+| `src/CrossPointSettings.h` | Expanded enums, `frontLongPressBehavior` member field |
+| `src/activities/reader/EpubReaderActivity.cpp` | `!fromFrontButton` guard on side-button handlers, front-button handler block, font-size lambda calling `ensureSdFontLoaded()` |
+| `src/activities/reader/XtcReaderActivity.cpp` | `fromFrontButton` guard on skip-pages |
+| `src/activities/reader/TxtReaderActivity.cpp` | `fromFrontButton` guard, front-button orientation handling |
+| `src/activities/settings/SettingsActivity.cpp` | Option lists with 6 entries |
+| `src/SettingsList.cpp` | Option lists with 6 entries, clock display settings |
+| `src/network/CrossPointWebServer.cpp` | `OPT_LONG_PRESS_BEHAVIOR` and `OPT_FRONT_LONG_PRESS_BEHAVIOR` arrays |
+| `lib/I18n/translations/english.yaml` | `STR_LONG_PRESS_BEHAVIOR_FONTSIZE` key |
+| `lib/I18n/translations/italian.yaml` | `STR_LONG_PRESS_BEHAVIOR_FONTSIZE` key |
+
+## Clocks, Timers, and X3/X4 Differences
+
+### Status bar clock (bottom of reading screen)
+
+| Aspect | Upstream | Steroids |
+|--------|----------|----------|
+| Available devices | DS3231 RTC only (probed on X3) | Same — `halClock.isAvailable()` gates on DS3231 presence on I2C bus |
+| Clock position | Same enum (`STATUS_BAR_CLOCK` with HIDE/RIGHT/LEFT) | Same |
+| Clock format | Same (`clockFormat`: 0=12h, 1=24h) | Same |
+| Clock settings location | On-device: `Customize Status Bar` menu (8 items) + Web Settings | On-device: `Customize Status Bar` menu (11 items — added Clock position, Clock format, Sync clock now) |
+| Sync clock now action | `ClockSyncActivity` launched from Web Settings only | Also accessible from on-device `Customize Status Bar` menu |
+
+### Top header date (Home, Library, Settings screens)
+
+| Aspect | Upstream | Steroids |
+|--------|----------|----------|
+| `displayDay` setting | Same enum (OFF, DATE_ONLY, TIME_ONLY, BOTH) | Same |
+| `applySystemClockFromRtc()` guard | `!halClock.isAvailable() \|\| !SETTINGS.clockHasBeenSynced` | `!halClock.isAvailable()` only (clockHasBeenSynced removed) |
+| X3 with DS3231, no NTP sync | Date header empty (system clock never set from RTC) | Date header shows current date (RTC applied on first access) |
+| X4 without DS3231 | Date depends on NTP sync via WiFi connection | Same (X4 behavior unchanged) |
+
+### `displayDay` default value
+
+Both upstream and Steroids default to `DISPLAY_HEADER_TIME_ONLY = 2`.
+
+The `getDisplayDateText()` function returns empty only when `displayDay == 0` (OFF).
+For any non-zero value, the formatted date string is drawn in the top header via
+`drawHeaderTopLine()`.
+
+### Search patterns for clock merge conflicts:
+```powershell
+# Check if upstream changed applySystemClockFromRtc
+Select-String -Path src/util/TimeUtils.cpp -Pattern "clockHasBeenSynced"
+# Expected Steroids: only non-applied boot conditional (WifiSelectionActivity)
+# The applySystemClockFromRtc guard must NOT have clockHasBeenSynced
+
+# Check if upstream changed the StatusBarSettings menu item count
+Select-String -Path src/activities/settings/StatusBarSettingsActivity.cpp -Pattern "MENU_ITEMS"
+# Expected Steroids: MENU_ITEMS = 11 (upstream has 8)
+```
+
+*Last updated: 2026-07-28 — based on 1.3.0 → 1.5.0.2 merge*

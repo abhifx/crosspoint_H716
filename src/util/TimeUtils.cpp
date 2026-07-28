@@ -327,7 +327,7 @@ bool TimeUtils::formatStatusBarClockTime(char* buf, const size_t bufSize, const 
 }
 
 bool TimeUtils::applySystemClockFromRtc(const bool forceRefresh) {
-  if (!halClock.isAvailable() || !SETTINGS.clockHasBeenSynced) {
+  if (!halClock.isAvailable()) {
     return false;
   }
 

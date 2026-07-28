@@ -55,7 +55,7 @@ bool readDirectFromZip(const std::string& epubPath, std::string& outTitle, std::
   size_t containerSize = 0;
   if (!zip.getInflatedFileSize("META-INF/container.xml", &containerSize) || containerSize == 0 || containerSize > 8192) return false;
 
-  uint8_t* containerData = zip.readFileToMemory("META-INF/container.xml", &containerSize);
+  uint8_t* containerData = zip.readFileToMemory("META-INF/container.xml", &containerSize, true);
   if (!containerData) return false;
 
   std::string contentOpfPath;
@@ -74,7 +74,7 @@ bool readDirectFromZip(const std::string& epubPath, std::string& outTitle, std::
   if (!zip.getInflatedFileSize(contentOpfPath.c_str(), &opfSize) || opfSize == 0) return false;
   if (opfSize > 64 * 1024) opfSize = 64 * 1024;
 
-  uint8_t* opfData = zip.readFileToMemory(contentOpfPath.c_str(), &opfSize);
+  uint8_t* opfData = zip.readFileToMemory(contentOpfPath.c_str(), &opfSize, true);
   if (!opfData) return false;
 
   const char* opfStr = (const char*)opfData;

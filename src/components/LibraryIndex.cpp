@@ -430,7 +430,11 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
 
   struct ScanState { int interval; } state = { kProgressInterval };
 
-  std::vector<ScanRec> newScan; newScan.reserve(total);
+  std::vector<ScanRec> newScan;
+  // For incremental scan (empty popupRect), total is 0 so reserve(0) is a no-op.
+  // Use prevScan.size() as a hint to avoid incremental vector growth that
+  // can fail with std::bad_alloc on a fragmented heap.
+  newScan.reserve(total > 0 ? total : prevScan.size());
 
   // Open library.dat for append (create fresh if no existing scan)
   {

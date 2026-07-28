@@ -1703,12 +1703,18 @@ bool ReadingStatsStore::exportToFile(const std::string& path) const {
 }
 
 bool ReadingStatsStore::importFromFile(const std::string& path) {
-  if (path.empty() || !Storage.exists(path.c_str())) {
+  if (path.empty()) {
+    CPR_VCODEX_LOG_EVENT("RST", "Reading stats import rejected an empty path");
+    return false;
+  }
+  if (!Storage.exists(path.c_str())) {
+    CPR_VCODEX_LOG_EVENT("RST", std::string("Reading stats import file was not found: ") + path);
     return false;
   }
 
   const bool loaded = JsonSettingsIO::loadReadingStatsFromFile(*this, path.c_str());
   if (!loaded) {
+    CPR_VCODEX_LOG_EVENT("RST", std::string("Reading stats import source was rejected: ") + path);
     return false;
   }
 

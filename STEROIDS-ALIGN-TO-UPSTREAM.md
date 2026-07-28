@@ -577,4 +577,98 @@ Select-String -Path src/activities/settings/StatusBarSettingsActivity.cpp -Patte
 # Expected Steroids: MENU_ITEMS = 11 (upstream has 8)
 ```
 
-*Last updated: 2026-07-28 — based on 1.3.0 → 1.5.0.2 merge*
+---
+
+## Incremental Merge Workflow (from an already-merged base)
+
+When Steroids **already has the previous release merged** (e.g., 1.5.0.2 is merged
+and only 1.5.0.3 needs to be applied), follow this lightweight workflow instead of
+the full merge procedure above.
+
+### Step 1: Identify the exact delta
+
+```powershell
+git fetch upstream --tags
+git log --oneline <PREVIOUS_TAG>..<CURRENT_TAG>
+```
+
+For example, to see the delta between 1.5.0.2 and 1.5.0.3:
+```powershell
+git log --oneline 1.5.0.2-cpr-vcodex..1.5.0.3-cpr-vcodex
+```
+
+This gives you 2–5 commits at most (the release-specific changes, not the entire
+upstream history).
+
+### Step 2: Inspect only the code-relevant commits
+
+Ignore `docs(release): sync auto-flash firmware X.Y.Z.W` commits — those are
+firmware binaries and docs only. Focus on actual code commits like
+`fix(stats): restore valid JSON imports`.
+
+```powershell
+# Show all files touched by relevant commits
+git diff <PREVIOUS_TAG>..<CURRENT_TAG> --stat
+```
+
+### Step 3: Extract the exact code changes
+
+Use `git diff` between the two tags, **only for files that exist locally**:
+
+```powershell
+git diff <PREVIOUS_TAG>..<CURRENT_TAG> -- src/File.cpp src/OtherFile.cpp
+```
+
+View the full diff of only the actual code files (skip docs, scripts, generated files):
+```powershell
+git diff <PREVIOUS_TAG>..<CURRENT_TAG> -- src/JsonSettingsIO.cpp src/ReadingStatsStore.cpp
+```
+
+### Step 4: Apply changes manually to local files
+
+Use the **edit** tool to surgically apply only the specific changes from the delta,
+preserving all Steroids-specific code around them. Never `git checkout` the
+upstream version of a file that Steroids has modified.
+
+### Step 5: Check None of the "Protected Files" are touched
+
+Run the 1.5.0.3 delta diff against the protected files list above. If any
+protected files appear in `git diff <PREVIOUS_TAG>..<CURRENT_TAG> --stat`,
+manually verify the delta does not remove Steroids features.
+
+### Step 6: Build and verify
+
+```powershell
+python -X utf8 -m platformio run -e default -j 16
+```
+
+If the build fails, the delta introduced an API dependency that Steroids doesn't
+have yet — check for:
+- New enum values in `CrossPointSettings.h` that need to be added
+- New i18n strings that need translation keys
+- New function declarations in headers exposed by the delta
+
+### Example: 1.5.0.2 → 1.5.0.3 merge
+
+The 1.5.0.3 delta was just 2 commits (1 docs-only, 1 code):
+
+```
+920cffd1 docs(release): sync auto-flash firmware 1.5.0.2  ← docs only, skip
+096bc73b fix(stats): restore valid JSON imports            ← actual code change
+```
+
+The code change touched `src/JsonSettingsIO.cpp` and `src/ReadingStatsStore.cpp`.
+Changes applied:
+1. **`saveJsonDocumentToFile`** — added `doc.overflowed()` check, `measureJson()` for
+   expected size, incomplete-write detection, and `copyVerifiedJsonTempToTarget()`
+   rename fallback when `Storage.rename()` fails on FAT filesystems.
+2. **`loadJsonDocumentFromFile`** — added `doc.overflowed()` check to parse errors.
+3. **`loadReadingStats` → extracted `loadReadingStatsDocument`** — improved JSON
+   import validation with `JsonObjectConst`/`JsonArrayConst` type checks,
+   formatVersion range validation, array key presence checks, and per-entry type
+   validation. Steroids-specific fields (`avgSecondsPerForwardPage`,
+   `paceSampleCount`) preserved.
+4. **`ReadingStatsStore::importFromFile`** — split empty-path check, added
+   `CPR_VCODEX_LOG_EVENT` logging for empty/missing/rejected paths.
+
+*Last updated: 2026-07-28 — based on 1.3.0 → 1.5.0.3 merge*

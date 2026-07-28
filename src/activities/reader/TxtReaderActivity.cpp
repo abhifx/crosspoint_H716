@@ -369,23 +369,44 @@ void TxtReaderActivity::loop() {
   }
 
   auto [prevTriggered, nextTriggered, fromTilt, fromFrontButton] = ReaderUtils::detectPageTurn(mappedInput);
-  (void)fromFrontButton;
+
   if (!prevTriggered && !nextTriggered) {
     return;
   }
+
+  // Front button long-press: Orientation change
+  if (fromFrontButton && !fromTilt &&
+      mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS &&
+      SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_ORIENTATION) {
+    const uint8_t newOrientation = nextTriggered ? (SETTINGS.orientation - 1 + CrossPointSettings::ORIENTATION_COUNT) %
+                                                       CrossPointSettings::ORIENTATION_COUNT
+                                                 : (SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT;
+    SETTINGS.orientation = newOrientation;
+    SETTINGS.saveToFile();
+    ReaderUtils::applyOrientation(renderer, newOrientation);
+    requestUpdate();
+    return;
+  }
+
   if (fromTilt) {
     waitingForConfirmSecondClick = false;
     firstConfirmClickMs = 0UL;
   }
 
+  // Side button long-press: Chapter Skip (skip 10 pages)
+  const bool skipPages = !fromFrontButton &&
+                         SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP &&
+                         mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS;
+
   if (prevTriggered && currentPage > 0) {
     READING_STATS.noteActivity();
-    currentPage--;
+    currentPage -= (skipPages && currentPage > 10) ? 10 : 1;
     requestUpdate();
   } else if (nextTriggered) {
     if (currentPage < totalPages - 1) {
       READING_STATS.noteActivity();
-      currentPage++;
+      const int pagesToMove = (skipPages && totalPages - currentPage > 10) ? 10 : 1;
+      currentPage += pagesToMove;
       requestUpdate();
     } else {
       READING_STATS.updateProgress(100, true, "", 100);

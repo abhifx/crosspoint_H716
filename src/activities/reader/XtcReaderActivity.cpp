@@ -193,7 +193,7 @@ void XtcReaderActivity::loop() {
   }
 
   auto [prevTriggered, nextTriggered, fromTilt, fromFrontButton] = ReaderUtils::detectPageTurn(mappedInput);
-  (void)fromFrontButton;
+
 
   if (!prevTriggered && !nextTriggered) {
     return;
@@ -214,10 +214,16 @@ void XtcReaderActivity::loop() {
     return;
   }
 
-  const bool skipPages = !fromTilt &&
-                         SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP &&
-                         mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS;
-  const int skipAmount = skipPages ? 10 : 1;
+  const bool sideLongPress = !fromFrontButton &&
+                             mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS;
+  // Side button long-press: Chapter Skip (or Orientation change for side buttons only)
+  const bool skipPages = !fromTilt && sideLongPress &&
+                         SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP;
+  // Front button long-press: Chapter Skip
+  const bool frontSkipPages = !fromTilt && fromFrontButton &&
+                              mappedInput.getHeldTime() > ReaderUtils::SKIP_HOLD_MS &&
+                              SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_CHAPTER_SKIP;
+  const int skipAmount = (skipPages || frontSkipPages) ? 10 : 1;
 
   if (prevTriggered) {
     READING_STATS.noteActivity();

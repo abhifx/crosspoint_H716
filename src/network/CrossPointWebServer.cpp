@@ -265,13 +265,17 @@ constexpr StrId OPT_IMAGES[] = {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLA
 constexpr StrId OPT_EPUB_RENDER_MODE[] = {StrId::STR_STATE_DEFAULT, StrId::STR_BALANCED, StrId::STR_LIGHT};
 constexpr StrId OPT_DOTS_SPACING[] = {StrId::STR_DOTS_SPACING_STANDARD, StrId::STR_DOTS_SPACING_LARGE};
 constexpr StrId OPT_SIDE_BUTTONS[] = {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV};
-constexpr StrId OPT_LONG_PRESS_BEHAVIOR[] = {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK,
-                                             StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING};
+constexpr StrId OPT_LONG_PRESS_BEHAVIOR[] = {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK,
+                                            StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING,
+                                            StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
+                                            StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION,
+                                            StrId::STR_LONG_PRESS_BEHAVIOR_FONTSIZE};
 constexpr StrId OPT_FRONT_LONG_PRESS_BEHAVIOR[] = {StrId::STR_LONG_PRESS_BEHAVIOR_OFF,
                                                     StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK,
-                                                    StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING};
+                                                    StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING,
+                                                    StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
+                                                    StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION,
+                                                    StrId::STR_LONG_PRESS_BEHAVIOR_FONTSIZE};
 constexpr StrId OPT_SHORT_PWR[] = {StrId::STR_IGNORE, StrId::STR_SLEEP, StrId::STR_PAGE_TURN, StrId::STR_FORCE_REFRESH,
                                    StrId::STR_TOGGLE_STATUS_BAR};
 constexpr StrId OPT_TILT_PAGE_TURN[] = {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED};

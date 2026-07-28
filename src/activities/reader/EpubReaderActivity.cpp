@@ -596,7 +596,6 @@ void EpubReaderActivity::loop() {
   }
 
   const bool longPress = !fromTilt && capturedHeldTime > ReaderUtils::SKIP_HOLD_MS;
-  // Front buttons use a separate behavior setting (Bookmarks/Clippings only, no Chapter Skip or Orientation)
   const bool frontLongPress = !fromTilt && fromFrontButton && longPress;
 
   // Don't skip chapter after screenshot
@@ -604,69 +603,86 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  if (longPress && SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP) {
-    READING_STATS.noteActivity();
-    lastPageTurnTime = millis();
+  // Helper lambda: change font size, clamp and save
+  auto adjustFontSize = [this](bool increase) {
+    if (increase) {
+      if (SETTINGS.fontSize < CrossPointSettings::EXTRA_LARGE) {
+        SETTINGS.fontSize++;
+      }
+    } else {
+      if (SETTINGS.fontSize > CrossPointSettings::X_SMALL) {
+        SETTINGS.fontSize--;
+      }
+    }
+    ensureSdFontLoaded();
+    SETTINGS.saveToFile();
+    // Force re-render with new font size
+    section.reset();
+    requestUpdate();
+  };
 
-    if (!nextTriggered && section && section->currentPage > 0) {
-      section->currentPage = 0;
-      nextPageNumber = 0;
-      sessionProgressTouched = true;
+  // ====== SIDE BUTTON long-press ======
+  if (longPress && !fromFrontButton) {
+    if (SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_BOOKMARK) {
+      if (prevTriggered) {
+        saveCurrentPageBookmark();
+      } else {
+        onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::VIEW_BOOKMARKS);
+      }
+      return;
+    }
+    if (SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CLIPPING) {
+      if (prevTriggered) {
+        enterClippingMode();
+      } else {
+        onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::VIEW_CLIPPINGS);
+      }
+      return;
+    }
+    if (SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP) {
+      READING_STATS.noteActivity();
+      lastPageTurnTime = millis();
+      if (!nextTriggered && section && section->currentPage > 0) {
+        section->currentPage = 0;
+        nextPageNumber = 0;
+        sessionProgressTouched = true;
+        requestUpdate();
+        return;
+      }
+      if (!nextTriggered && currentSpineIndex <= 0) {
+        return;
+      }
+      {
+        RenderLock lock(*this);
+        nextPageNumber = 0;
+        if (nextTriggered) {
+          currentSpineIndex++;
+        } else if (currentSpineIndex > 0) {
+          pendingPageJump = std::numeric_limits<uint16_t>::max();
+          currentSpineIndex--;
+        }
+        sessionProgressTouched = true;
+        section.reset();
+      }
       requestUpdate();
       return;
     }
-
-    if (!nextTriggered && currentSpineIndex <= 0) {
+    if (SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_ORIENTATION_CHANGE) {
+      const uint8_t newOrientation = nextTriggered ? (SETTINGS.orientation - 1 + CrossPointSettings::ORIENTATION_COUNT) %
+                                                         CrossPointSettings::ORIENTATION_COUNT
+                                                   : (SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT;
+      applyOrientation(newOrientation);
+      requestUpdate();
       return;
     }
-
-    // We don't want to delete the section mid-render, so grab the semaphore
-    {
-      RenderLock lock(*this);
-      nextPageNumber = 0;
-      if (nextTriggered) {
-        currentSpineIndex++;
-      } else if (currentSpineIndex > 0) {
-        pendingPageJump = std::numeric_limits<uint16_t>::max();
-        currentSpineIndex--;
-      }
-      sessionProgressTouched = true;
-      section.reset();
+    if (SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_FONTSIZE) {
+      // DOWN/Right (nextTriggered) = increase, UP/Left (prevTriggered) = decrease
+      adjustFontSize(nextTriggered);
+      return;
     }
-    requestUpdate();
-    return;
   }
 
-  if (longPress && SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_ORIENTATION_CHANGE) {
-    const uint8_t newOrientation = nextTriggered ? (SETTINGS.orientation - 1 + CrossPointSettings::ORIENTATION_COUNT) %
-                                                       CrossPointSettings::ORIENTATION_COUNT
-                                                 : (SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT;
-    applyOrientation(newOrientation);
-    requestUpdate();
-    return;
-  }
-
-  // Side button long-press: Bookmarks
-  if (longPress && !fromFrontButton && SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_BOOKMARK) {
-    if (prevTriggered) {
-      saveCurrentPageBookmark();
-    } else {
-      onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::VIEW_BOOKMARKS);
-    }
-    return;
-  }
-
-  // Side button long-press: Clippings
-  if (longPress && !fromFrontButton && SETTINGS.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CLIPPING) {
-    if (prevTriggered) {
-      enterClippingMode();
-    } else {
-      onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::VIEW_CLIPPINGS);
-    }
-    return;
-  }
-
-  // Front button long-press
+  // ====== FRONT BUTTON long-press ======
   if (frontLongPress) {
     if (SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_BOOKMARK) {
       if (prevTriggered) {
@@ -682,6 +698,47 @@ void EpubReaderActivity::loop() {
       } else {
         onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::VIEW_CLIPPINGS);
       }
+      return;
+    }
+    if (SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_CHAPTER_SKIP) {
+      READING_STATS.noteActivity();
+      lastPageTurnTime = millis();
+      if (!nextTriggered && section && section->currentPage > 0) {
+        section->currentPage = 0;
+        nextPageNumber = 0;
+        sessionProgressTouched = true;
+        requestUpdate();
+        return;
+      }
+      if (!nextTriggered && currentSpineIndex <= 0) {
+        return;
+      }
+      {
+        RenderLock lock(*this);
+        nextPageNumber = 0;
+        if (nextTriggered) {
+          currentSpineIndex++;
+        } else if (currentSpineIndex > 0) {
+          pendingPageJump = std::numeric_limits<uint16_t>::max();
+          currentSpineIndex--;
+        }
+        sessionProgressTouched = true;
+        section.reset();
+      }
+      requestUpdate();
+      return;
+    }
+    if (SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_ORIENTATION) {
+      const uint8_t newOrientation = nextTriggered ? (SETTINGS.orientation - 1 + CrossPointSettings::ORIENTATION_COUNT) %
+                                                         CrossPointSettings::ORIENTATION_COUNT
+                                                   : (SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT;
+      applyOrientation(newOrientation);
+      requestUpdate();
+      return;
+    }
+    if (SETTINGS.frontLongPressBehavior == CrossPointSettings::FRONT_LONG_PRESS_FONTSIZE) {
+      // DOWN/Right (nextTriggered) = increase, UP/Left (prevTriggered) = decrease
+      adjustFontSize(nextTriggered);
       return;
     }
   }

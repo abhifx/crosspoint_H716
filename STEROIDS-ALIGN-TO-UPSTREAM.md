@@ -648,6 +648,26 @@ have yet — check for:
 - New i18n strings that need translation keys
 - New function declarations in headers exposed by the delta
 
+### Step 7: Verify `platformio.ini` Steroids-only flags are preserved
+
+After a merge or rebase, `platformio.ini` may lose Steroids-specific build flags
+that are vital for runtime stability. Check that these lines are still present
+in the `[base] build_flags` section:
+
+```powershell
+Select-String -Path platformio.ini -Pattern "ARDUINO_LOOP_STACK_SIZE|PNG_MAX_BUFFERED_PIXELS"
+# Expected output:
+#   -DARDUINO_LOOP_STACK_SIZE=9216
+#   -DPNG_MAX_BUFFERED_PIXELS=8192
+```
+
+**Why each flag is needed:**
+
+| Flag | Value | Effect |
+|---|---|---|
+| `-DARDUINO_LOOP_STACK_SIZE` | **9216** | Prevents stack protection fault when entering Settings. The `getDeviceOnlyAppSettings()` static initializer constructs 53 `SettingInfo` entries with inline `std::vector<StrId>` temporaries, which uses ~9 KB of stack. The Arduino default of 8192 overflows by 1 word. |
+| `-DPNG_MAX_BUFFERED_PIXELS` | **8192** | Supports screensaver/sleep-screen PNG images up to 1023 px wide. The library default (2562) only supports 320 px. X4 screensaver images are 800 px in landscape. Formula: `(maxPixels * 4 + 1) * 2`. |
+
 ### Example: 1.5.0.2 → 1.5.0.3 merge
 
 The 1.5.0.3 delta was just 2 commits (1 docs-only, 1 code):
@@ -671,4 +691,4 @@ Changes applied:
 4. **`ReadingStatsStore::importFromFile`** — split empty-path check, added
    `CPR_VCODEX_LOG_EVENT` logging for empty/missing/rejected paths.
 
-*Last updated: 2026-07-28 — based on 1.3.0 → 1.5.0.3 merge*
+*Last updated: 2026-07-29 — based on 1.3.0 → 1.5.0.3 merge*

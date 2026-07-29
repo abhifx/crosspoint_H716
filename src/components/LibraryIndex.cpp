@@ -4,7 +4,6 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
-#include <HomepageDebugLog.h>
 #include <Txt.h>
 #include <Xtc.h>
 #include <esp_task_wdt.h>
@@ -579,7 +578,7 @@ bool scan(GfxRenderer& renderer, const Rect& popupRect, const char* rootDir,
   emitProgress(renderer, popupRect, total, total);
   if (outAdded) *outAdded = added;
   if (outRemoved) *outRemoved = removed;
-  HOMEPAGE_LOG("LIB", "Scan: added=%d skipped=%d removed=%d total=%d", added, skipped, removed, added+skipped);
+  LOG_DBG("LIB", "Scan: added=%d skipped=%d removed=%d total=%d", added, skipped, removed, added+skipped);
   LOG_DBG("LIB", "Scan: done added=%d skipped=%d removed=%d newScan=%u", added, skipped, removed, newScan.size());
   return true;
 }

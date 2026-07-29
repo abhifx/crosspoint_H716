@@ -48,49 +48,87 @@ class PanelDrawHelper {
    * @param sel If true draws a thicker border + inner outline for selected state.
    */
   static void drawCyberpunkPanel(const GfxRenderer& r, int x, int y, int w, int h, bool sel = false) {
-    constexpr int c = 4;       // chamfer
+    constexpr int c = 6;       // more pronounced chamfer
     constexpr int lw_out = 2;  // outer line width when sel
     constexpr int lw_in = 1;   // inner line width when not sel
     const int lw = sel ? lw_out : lw_in;
     if (w < c * 2 || h < c * 2) { r.drawRect(x, y, w, h, lw, true); return; }
     int x2 = x + w, y2 = y + h;
+    
     // Outer chamfered border
     r.drawLine(x + c, y, x2 - c, y, lw, true);
     r.drawLine(x2, y + c, x2, y2 - c, lw, true);
     r.drawLine(x2 - c, y2, x + c, y2, lw, true);
     r.drawLine(x, y2 - c, x, y + c, lw, true);
+    // Chamfer corners
     r.drawLine(x, y + c, x + c, y, 1, true);
     r.drawLine(x2 - c, y, x2, y + c, 1, true);
     r.drawLine(x2, y2 - c, x2 - c, y2, 1, true);
     r.drawLine(x + c, y2, x, y2 - c, 1, true);
-    // Selection: inner outline
+    
+    // Selection: inner outline with matching chamfer
     if (sel) {
-      int si = 3;
+      int si = 4;
       r.drawLine(x + si + c, y + si, x2 - si - c, y + si, 1, true);
       r.drawLine(x2 - si, y + si + c, x2 - si, y2 - si - c, 1, true);
       r.drawLine(x2 - si - c, y2 - si, x + si + c, y2 - si, 1, true);
       r.drawLine(x + si, y2 - si - c, x + si, y + si + c, 1, true);
+      // Inner chamfer corners
+      r.drawLine(x + si, y + si + c, x + si + c, y + si, 1, true);
+      r.drawLine(x2 - si - c, y + si, x2 - si, y + si + c, 1, true);
+      r.drawLine(x2 - si, y2 - si - c, x2 - si - c, y2 - si, 1, true);
+      r.drawLine(x + si + c, y2 - si, x + si, y2 - si - c, 1, true);
     }
-    // Corner accent brackets (short L-shapes at chamfer points)
-    constexpr int cg = 2, cl = 5;
+    
+    // Outer corner accent brackets (moved closer to physical corners)
+    constexpr int cg = 1, cl = 8;
+    // Top-left
     r.drawLine(x + cg, y + cg, x + cg + cl, y + cg, 1, true);
     r.drawLine(x + cg, y + cg, x + cg, y + cg + cl, 1, true);
+    r.drawLine(x + cg + 2, y + cg + 2, x + cg + 4, y + cg + 2, 1, true);
+    // Top-right
     r.drawLine(x + w - cg - cl, y + cg, x + w - cg, y + cg, 1, true);
     r.drawLine(x + w - cg, y + cg, x + w - cg, y + cg + cl, 1, true);
+    r.drawLine(x + w - cg - 4, y + cg + 2, x + w - cg - 2, y + cg + 2, 1, true);
+    // Bottom-left
     r.drawLine(x + cg, y + h - cg, x + cg + cl, y + h - cg, 1, true);
     r.drawLine(x + cg, y + h - cg - cl, x + cg, y + h - cg, 1, true);
+    r.drawLine(x + cg + 2, y + h - cg - 2, x + cg + 4, y + h - cg - 2, 1, true);
+    // Bottom-right
     r.drawLine(x + w - cg - cl, y + h - cg, x + w - cg, y + h - cg, 1, true);
     r.drawLine(x + w - cg, y + h - cg - cl, x + w - cg, y + h - cg, 1, true);
-    // Inner corner brackets (HUD-style)
-    constexpr int bi = 10, bl = 6;
+    r.drawLine(x + w - cg - 4, y + h - cg - 2, x + w - cg - 2, y + h - cg - 2, 1, true);
+    
+    // Inner corner brackets (moved closer to the outer chamfered edge)
+    constexpr int bi = 8, bl = 8;
+    // Top-left
     r.drawLine(x + bi, y + bi, x + bi + bl, y + bi, 1, true);
     r.drawLine(x + bi, y + bi, x + bi, y + bi + bl, 1, true);
+    r.drawLine(x + bi + 1, y + bi + 1, x + bi + 2, y + bi + 1, 1, true); // tiny tech dash
+    // Top-right
     r.drawLine(x + w - bi - bl, y + bi, x + w - bi, y + bi, 1, true);
     r.drawLine(x + w - bi, y + bi, x + w - bi, y + bi + bl, 1, true);
+    r.drawLine(x + w - bi - 2, y + bi + 1, x + w - bi - 1, y + bi + 1, 1, true);
+    // Bottom-left
     r.drawLine(x + bi, y + h - bi, x + bi + bl, y + h - bi, 1, true);
     r.drawLine(x + bi, y + h - bi - bl, x + bi, y + h - bi, 1, true);
+    r.drawLine(x + bi + 1, y + h - bi - 1, x + bi + 2, y + h - bi - 1, 1, true);
+    // Bottom-right
     r.drawLine(x + w - bi - bl, y + h - bi, x + w - bi, y + h - bi, 1, true);
     r.drawLine(x + w - bi, y + h - bi - bl, x + w - bi, y + h - bi, 1, true);
+    r.drawLine(x + w - bi - 2, y + h - bi - 1, x + w - bi - 1, y + h - bi - 1, 1, true);
+    
+    // Decorative edge ticks (cyberpunk "ruler" or "circuit" marks)
+    if (w > 40 && h > 40) {
+        // Top edge ticks
+        r.drawLine(x + w / 2 - 4, y + 1, x + w / 2 - 4, y + 3, 1, true);
+        r.drawLine(x + w / 2, y + 1, x + w / 2, y + 4, 1, true);
+        r.drawLine(x + w / 2 + 4, y + 1, x + w / 2 + 4, y + 3, 1, true);
+        // Bottom edge ticks
+        r.drawLine(x + w / 2 - 4, y2 - 3, x + w / 2 - 4, y2 - 1, 1, true);
+        r.drawLine(x + w / 2, y2 - 4, x + w / 2, y2 - 1, 1, true);
+        r.drawLine(x + w / 2 + 4, y2 - 3, x + w / 2 + 4, y2 - 1, 1, true);
+    }
   }
 
   static PanelLayout calculatePanel(int pageWidth, int pageHeight, int visibleRows) {
@@ -111,20 +149,24 @@ class PanelDrawHelper {
   }
 
   static void drawAngularPanel(GfxRenderer& r, int x, int y, int w, int h) {
-    constexpr int c = 4;
+    constexpr int c = 6;
     constexpr int lw = 2;
     if (w < c * 2 || h < c * 2) { r.drawRect(x, y, w, h, lw, true); return; }
     int x2 = x + w, y2 = y + h;
+    
+    // Main chamfered border
     r.drawLine(x + c, y, x2 - c, y, lw, true);
     r.drawLine(x2, y + c, x2, y2 - c, lw, true);
     r.drawLine(x2 - c, y2, x + c, y2, lw, true);
     r.drawLine(x, y2 - c, x, y + c, lw, true);
+    // Chamfer corners
     r.drawLine(x, y + c, x + c, y, 1, true);
     r.drawLine(x2 - c, y, x2, y + c, 1, true);
     r.drawLine(x2, y2 - c, x2 - c, y2, 1, true);
     r.drawLine(x + c, y2, x, y2 - c, 1, true);
-    // Inner corner accent brackets (cyberpunk style)
-    constexpr int bi = 10, bl = 6;
+
+    // Inner corner accent brackets (moved closer to outer corners)
+    constexpr int bi = 8, bl = 8;
     r.drawLine(x + bi, y + bi, x + bi + bl, y + bi, 1, true);
     r.drawLine(x + bi, y + bi, x + bi, y + bi + bl, 1, true);
     r.drawLine(x + w - bi - bl, y + bi, x + w - bi, y + bi, 1, true);
@@ -133,6 +175,12 @@ class PanelDrawHelper {
     r.drawLine(x + bi, y + h - bi - bl, x + bi, y + h - bi, 1, true);
     r.drawLine(x + w - bi - bl, y + h - bi, x + w - bi, y + h - bi, 1, true);
     r.drawLine(x + w - bi, y + h - bi - bl, x + w - bi, y + h - bi, 1, true);
+    
+    // Decorative center ticks
+    if (w > 40) {
+        r.drawLine(x + w / 2, y + 2, x + w / 2, y + 5, 1, true);
+        r.drawLine(x + w / 2, y2 - 5, x + w / 2, y2 - 2, 1, true);
+    }
   }
 
   static void drawBackground(GfxRenderer& renderer, const PanelLayout& layout) {
@@ -156,13 +204,17 @@ class PanelDrawHelper {
     int sepY = layout.y + kPadY + kTitleH + kSeparatorH;
     UITheme& theme = UITheme::getInstance();
     if (theme.isMarcoand75()) {
-      // Cyberpunk scanline separator
-      for (int cx = layout.x + kPadX; cx + 7 < layout.x + layout.width - kPadX; cx += 7) {
-        renderer.drawLine(cx, sepY, cx + 4, sepY, 1, true);
-        renderer.drawLine(cx + 1, sepY + 2, cx + 3, sepY + 2, 1, true);
+      // Cyberpunk data-bus separator
+      int startX = layout.x + kPadX;
+      int endX = layout.x + layout.width - kPadX;
+      for (int cx = startX; cx + 8 < endX; cx += 8) {
+        renderer.drawLine(cx, sepY, cx + 5, sepY, 1, true);
+        renderer.drawLine(cx + 6, sepY, cx + 6, sepY + 1, 1, true); // vertical tick
+        renderer.drawLine(cx + 1, sepY + 2, cx + 4, sepY + 2, 1, true);
       }
-      renderer.drawLine(layout.x + kPadX, sepY + 1, layout.x + kPadX, sepY + 2, 1, true);
-      renderer.drawLine(layout.x + layout.width - kPadX - 1, sepY + 1, layout.x + layout.width - kPadX - 1, sepY + 2, 1, true);
+      // End caps
+      renderer.drawLine(startX, sepY + 1, startX, sepY + 2, 1, true);
+      renderer.drawLine(endX - 1, sepY + 1, endX - 1, sepY + 2, 1, true);
     } else {
       renderer.drawLine(layout.x + kPadX, sepY, layout.x + layout.width - kPadX, sepY, kSeparatorH, true);
     }
@@ -197,15 +249,24 @@ class PanelDrawHelper {
   }
 
   static void drawScrollArrows(GfxRenderer& renderer, const PanelLayout& layout, bool showUp, bool showDown) {
+    int cx = layout.x + layout.width / 2;
     if (showUp) {
       int arrowY = layout.y + kPadY + kTitleH + kSeparatorH + kPadY + 2;
-      renderer.drawLine(layout.x + layout.width / 2 - 6, arrowY + 6, layout.x + layout.width / 2, arrowY, 2, true);
-      renderer.drawLine(layout.x + layout.width / 2, arrowY, layout.x + layout.width / 2 + 6, arrowY + 6, 2, true);
+      // Outer chevron
+      renderer.drawLine(cx - 7, arrowY + 6, cx, arrowY, 2, true);
+      renderer.drawLine(cx, arrowY, cx + 7, arrowY + 6, 2, true);
+      // Inner detail
+      renderer.drawLine(cx - 3, arrowY + 4, cx, arrowY + 2, 1, true);
+      renderer.drawLine(cx, arrowY + 2, cx + 3, arrowY + 4, 1, true);
     }
     if (showDown) {
       int arrowY = layout.y + layout.height - kPadY - 8;
-      renderer.drawLine(layout.x + layout.width / 2 - 6, arrowY, layout.x + layout.width / 2, arrowY + 6, 2, true);
-      renderer.drawLine(layout.x + layout.width / 2, arrowY + 6, layout.x + layout.width / 2 + 6, arrowY, 2, true);
+      // Outer chevron
+      renderer.drawLine(cx - 7, arrowY, cx, arrowY + 6, 2, true);
+      renderer.drawLine(cx, arrowY + 6, cx + 7, arrowY, 2, true);
+      // Inner detail
+      renderer.drawLine(cx - 3, arrowY + 2, cx, arrowY + 4, 1, true);
+      renderer.drawLine(cx, arrowY + 4, cx + 3, arrowY + 2, 1, true);
     }
   }
 };

@@ -13,7 +13,7 @@
 #include "Epub/parsers/TocNavParser.h"
 #include "Epub/parsers/TocNcxParser.h"
 
-#include <CoverDebugLog.h>
+#include <Logging.h>
 #include <esp_task_wdt.h>
 
 bool Epub::findContentOpfFile(std::string* contentOpfFile) const {
@@ -731,19 +731,19 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
   }
 
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
-    COVER_LOG("EBP-TH", "FAIL: cache not loaded path=%s", thumbPath.c_str());
+    LOG_DBG("EBP-TH", "FAIL: cache not loaded path=%s", thumbPath.c_str());
     LOG_ERR("EBP", "Cannot generate thumb BMP, cache not loaded");
     return false;
   }
 
   const auto coverImageHref = bookMetadataCache->coreMetadata.coverItemHref;
-  COVER_LOG("EBP-TH", "thumb W=%d H=%d coverHref=%s free=%u maxA=%u",
+  LOG_DBG("EBP-TH", "thumb W=%d H=%d coverHref=%s free=%u maxA=%u",
             width, height, coverImageHref.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   if (coverImageHref.empty()) {
-    COVER_LOG("EBP-TH", "FAIL: no cover image");
+    LOG_DBG("EBP-TH", "FAIL: no cover image");
     LOG_DBG("EBP", "No known cover image for thumbnail");
   } else if (FsHelpers::hasJpgExtension(coverImageHref)) {
-    COVER_LOG("EBP-TH", "JPEG thumb gen start: free=%u maxA=%u",
+    LOG_DBG("EBP-TH", "JPEG thumb gen start: free=%u maxA=%u",
               ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     LOG_DBG("EBP", "Generating thumb BMP from JPG cover image");
 
@@ -752,7 +752,7 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
     // return transient failure so the caller retries later instead of writing a
     // permanent sentinel.
     if (ESP.getMaxAllocHeap() < 28 * 1024) {
-      COVER_LOG("EBP-TH", "SKIP: low maxAlloc (%u < 28KB) href=%s", ESP.getMaxAllocHeap(), coverImageHref.c_str());
+      LOG_DBG("EBP-TH", "SKIP: low maxAlloc (%u < 28KB) href=%s", ESP.getMaxAllocHeap(), coverImageHref.c_str());
       LOG_DBG("EBP", "Insufficient contiguous heap for JPEG thumb, retry later");
       return false;
     }
@@ -774,7 +774,7 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
       // ZIP structure). Clear the temp file and abort; there is nothing to
       // decode.  Do NOT write a sentinel — the href might be resolvable
       // after a library reindex that rebuilds the metadata cache.
-      COVER_LOG("EBP-TH", "JPEG cover not found in ZIP: href=%s free=%u maxA=%u",
+      LOG_DBG("EBP-TH", "JPEG cover not found in ZIP: href=%s free=%u maxA=%u",
                 coverImageHref.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       Storage.remove(coverJpgTempPath.c_str());
       return false;
@@ -813,7 +813,7 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
       // error that would also affect the Exif segment (e.g. truncated stream).
       const bool tryExif = permanentJpegFailure || true;  // always try
       if (tryExif) {
-        COVER_LOG("EBP-TH", "JPEG failed (perm=%d), trying Exif: free=%u maxA=%u",
+        LOG_DBG("EBP-TH", "JPEG failed (perm=%d), trying Exif: free=%u maxA=%u",
                   permanentJpegFailure ? 1 : 0, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
         LOG_DBG("EBP", "JPEG decode failed, trying Exif thumbnail fallback");
         bool exifDecoded = false;
@@ -833,18 +833,18 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
           }
         }
         if (exifDecoded) {
-          COVER_LOG("EBP-TH", "Exif thumbnail OK: free=%u maxA=%u",
+          LOG_DBG("EBP-TH", "Exif thumbnail OK: free=%u maxA=%u",
                     ESP.getFreeHeap(), ESP.getMaxAllocHeap());
           LOG_DBG("EBP", "Cover extracted via Exif thumbnail");
           Storage.remove(coverJpgTempPath.c_str());
           return true;
         }
-        COVER_LOG("EBP-TH", "Exif fallback also failed: free=%u maxA=%u",
+        LOG_DBG("EBP-TH", "Exif fallback also failed: free=%u maxA=%u",
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       }
 
       // All code paths failed — write sentinel to prevent endless retries.
-      COVER_LOG("EBP-TH", "JPEG all attempts FAILED: path=%s free=%u maxA=%u",
+      LOG_DBG("EBP-TH", "JPEG all attempts FAILED: path=%s free=%u maxA=%u",
                 thumbPath.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       LOG_DBG("EBP", "All JPEG decode attempts failed, writing sentinel");
       Storage.remove(coverJpgTempPath.c_str());
@@ -854,19 +854,19 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
     }
 
     Storage.remove(coverJpgTempPath.c_str());
-    COVER_LOG("EBP-TH", "JPEG thumb OK: path=%s free=%u maxA=%u",
+    LOG_DBG("EBP-TH", "JPEG thumb OK: path=%s free=%u maxA=%u",
               thumbPath.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     LOG_DBG("EBP", "Generated thumb BMP from JPG cover image");
     return true;
   } else if (FsHelpers::hasPngExtension(coverImageHref)) {
-    COVER_LOG("EBP-TH", "PNG thumb gen start: free=%u maxA=%u",
+    LOG_DBG("EBP-TH", "PNG thumb gen start: free=%u maxA=%u",
               ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
 
     // PNG decoding uses a 32 KB inflate window plus scanline buffers.  Skip
     // transiently if the contiguous heap cannot accommodate it.
     if (ESP.getMaxAllocHeap() < 40 * 1024) {
-      COVER_LOG("EBP-TH", "SKIP: low maxAlloc for PNG (%u < 40KB) href=%s", ESP.getMaxAllocHeap(),
+      LOG_DBG("EBP-TH", "SKIP: low maxAlloc for PNG (%u < 40KB) href=%s", ESP.getMaxAllocHeap(),
                 coverImageHref.c_str());
       LOG_DBG("EBP", "Insufficient contiguous heap for PNG thumb, retry later");
       return false;
@@ -886,7 +886,7 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
     if (pngSize == 0) {
       // Same path mismatch protection as for JPEGs: the PNG cover href may not
       // exist in the ZIP.  Don't write a sentinel; a reindex could fix it.
-      COVER_LOG("EBP-TH", "PNG cover not found in ZIP: href=%s free=%u maxA=%u",
+      LOG_DBG("EBP-TH", "PNG cover not found in ZIP: href=%s free=%u maxA=%u",
                 coverImageHref.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       Storage.remove(coverPngTempPath.c_str());
       return false;
@@ -914,7 +914,7 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
     Storage.remove(coverPngTempPath.c_str());
 
     if (!success) {
-      COVER_LOG("EBP-TH", "PNG thumb FAILED: path=%s free=%u maxA=%u",
+      LOG_DBG("EBP-TH", "PNG thumb FAILED: path=%s free=%u maxA=%u",
                 thumbPath.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       LOG_ERR("EBP", "Failed to generate thumb BMP from PNG cover image");
       Storage.remove(thumbPath.c_str());
@@ -925,12 +925,12 @@ bool Epub::generateThumbBmpToPath(int width, int height, const std::string& thum
       Storage.openFileForWrite("EBP", thumbPath, sentinel);
       return false;
     }
-    COVER_LOG("EBP-TH", "PNG thumb OK: path=%s free=%u maxA=%u",
+    LOG_DBG("EBP-TH", "PNG thumb OK: path=%s free=%u maxA=%u",
               thumbPath.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     LOG_DBG("EBP", "Generated thumb BMP from PNG cover image");
     return true;
   } else {
-    COVER_LOG("EBP-TH", "FAIL: unsupported format coverHref=%s", coverImageHref.c_str());
+    LOG_DBG("EBP-TH", "FAIL: unsupported format coverHref=%s", coverImageHref.c_str());
     LOG_ERR("EBP", "Cover image is not a supported format, skipping thumbnail");
   }
 

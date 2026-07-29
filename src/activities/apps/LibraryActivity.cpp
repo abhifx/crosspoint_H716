@@ -8,7 +8,6 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <HomepageDebugLog.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -233,7 +232,7 @@ void LibraryActivity::onEnter() {
 
   scanSd();
 
-  HOMEPAGE_LOG("LIB", "onEnter: after scanSd heap=%u maxA=%u total=%d",
+  LOG_DBG("LIB", "onEnter: after scanSd heap=%u maxA=%u total=%d",
                ESP.getFreeHeap(), ESP.getMaxAllocHeap(), totalBooks_);
   requestUpdate();
 }

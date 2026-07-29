@@ -72,16 +72,29 @@ constexpr int kDotGap = 6;
 constexpr int kCornerRadius = 6;
 constexpr int kThinOutlineW = 1;
 constexpr int kSelectionLineW = 3;
-constexpr int kCenterOutlineW = 4;
+constexpr int kCenterOutlineW = 2;
 constexpr int kMenuIconSize = 32;
 constexpr int kMenuIconPad = 14;
 constexpr int kHighlightPad = 12;
-constexpr int kVisibleMenuSlots = 6;
+constexpr int kVisibleMenuSlots = 7;
 
-// Data panel layout
+// 5-cover perspective carousel constants
+constexpr int kFiveCoverCenterW = 210;
+constexpr int kFiveCoverCenterH = 340;
+constexpr int kFiveCoverNearW = 90;
+constexpr int kFiveCoverNearH = 300;
+constexpr int kFiveCoverFarW = 70;
+constexpr int kFiveCoverFarH = 250;
+constexpr int kFiveCoverOverlap = 16;
+constexpr int kFiveCoverFarOverlap = 20;
+constexpr int kFiveCoverOutlineW = 2;
+constexpr int kFiveCoverHaloW = 1;
+
+// Centratura perfetta: offset a 0
+constexpr int kCenterXOffset = 0;
+
 constexpr int kDotsToPanelGap = 6;
 
-// Segment progress bar
 constexpr int kProgSegW = 14;
 constexpr int kProgSegH = 24;
 constexpr int kProgSegGap = 4;
@@ -143,15 +156,21 @@ const uint8_t* iconForName(UIIcon icon) {
   }
 }
 
-void drawCoverPlaceholder(GfxRenderer& renderer, int x, int y, int maxW, int maxH) {
+void drawCoverPlaceholder(GfxRenderer& renderer, int x, int y, int maxW, int maxH,
+                                             const char* title) {
   renderer.drawRoundedRect(x, y, maxW, maxH, 1, kCornerRadius, true);
   renderer.fillRoundedRect(x, y + maxH / 3, maxW, 2 * maxH / 3, kCornerRadius, false, false, true, true, Color::Black);
   renderer.drawIcon(CoverIcon, x + maxW / 2 - 16, y + 8, 32, 32);
+  if (title && title[0]) {
+    // FIX: Usa truncatedText per accorciare il titolo con "..." se troppo lungo
+    const auto truncTitle = renderer.truncatedText(UI_10_FONT_ID, title, maxW - 8, EpdFontFamily::BOLD);
+    const int titleW = renderer.getTextWidth(UI_10_FONT_ID, truncTitle.c_str(), EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, x + (maxW - titleW) / 2, y + maxH / 3 + 4, truncTitle.c_str(), false, EpdFontFamily::BOLD);
+  }
 }
 
 // --- Data panel helpers ---
 
-// Draw cyberpunk panel border — delegates to shared util.
 static void drawCyberPanel(const GfxRenderer& r, int x, int y, int w, int h, bool sel) {
   PanelDrawHelper::drawCyberpunkPanel(r, x, y, w, h, sel);
 }
@@ -161,7 +180,6 @@ void drawSegmentProgressBar(const GfxRenderer& r, int x, int y, int filled, int 
   for (int i = 0; i < total; ++i) {
     if (i < filled) {
       r.fillRect(sx, y, kProgSegW, kProgSegH, true);
-      // Inner highlight for filled segments
       if (kProgSegW > 4 && kProgSegH > 4) {
         r.drawLine(sx + 2, y + 2, sx + kProgSegW - 3, y + 2, 1, false);
       }
@@ -170,7 +188,6 @@ void drawSegmentProgressBar(const GfxRenderer& r, int x, int y, int filled, int 
     }
     sx += kProgSegW + kProgSegGap;
   }
-  // End brackets
   r.drawLine(x - 2, y - 2, x - 2, y + kProgSegH + 2, 1, true);
   r.drawLine(x + total * (kProgSegW + kProgSegGap) - kProgSegGap + 1, y - 2,
              x + total * (kProgSegW + kProgSegGap) - kProgSegGap + 1, y + kProgSegH + 2, 1, true);
@@ -209,8 +226,6 @@ std::string getEta(const ReadingBookStats& s) {
   return "~" + std::to_string(h) + "h" + std::to_string(min) + "m";
 }
 
-// --- Data panel builder ---
-
 void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int px, int py, int pw) {
   const ReadingBookStats* stats = getBookStats(book);
   const uint8_t pct = getBookProgress(book);
@@ -235,12 +250,11 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
 
   constexpr int gap = 6;
   constexpr int pad = 5;
-  constexpr int textLeft = 20;  // 20px left margin for text inside panels
+  constexpr int textLeft = 20;
   const int dataFont = UI_10_FONT_ID;
   const int lh = r.getLineHeight(dataFont);
   int curY = py;
 
-  // --- ROW1: Title / Author panel ---
   {
     const int h1 = r.getLineHeight(SMALL_FONT_ID) + lh + 2 * pad + 6;
     drawCyberPanel(r, px, curY, pw, h1, inCar);
@@ -253,11 +267,9 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
     curY += h1 + gap;
   }
 
-  // --- ROW2: Two columns — Book panel (left) | Stats panel (right) ---
   {
     const int colW = (pw - gap) / 2;
     const int h2 = lh * 3 + 2 * pad + 6;
-    // Left panel: Book — no brackets
     drawCyberPanel(r, px, curY, colW, h2, inCar);
     int ly = curY + pad;
     r.drawText(dataFont, px + textLeft, ly, tr(STR_HOME_PANEL_BOOK), true, EpdFontFamily::BOLD);
@@ -269,7 +281,6 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
     snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_SESSIONS), sessVal);
     r.drawText(dataFont, px + textLeft, ly, buf, true);
 
-    // Right panel: Statistics — positioned inside its own panel, no brackets
     const int rightX = px + colW + gap;
     drawCyberPanel(r, rightX, curY, colW, h2, inCar);
     int ry = curY + pad;
@@ -284,7 +295,6 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
     curY += h2 + gap;
   }
 
-  // --- ROW3: Full-width progress bar panel (reduced 16px, centered) ---
   {
     const int h3 = kProgSegH + 2 * pad + 8;
     drawCyberPanel(r, px, curY, pw, h3, inCar);
@@ -311,7 +321,6 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
     curY += h3 + gap;
   }
 
-  // --- ROW4: Summary line (same height as ROW3) ---
   {
     const int h4 = kProgSegH + 2 * pad + 8;
     drawCyberPanel(r, px, curY, pw, h4, inCar);
@@ -325,7 +334,6 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
   }
 }
 
-// Kindle-style "Read" corner ribbon (top-right).
 void drawReadRibbon(GfxRenderer& renderer, int coverX, int coverY, int coverW, int coverH) {
   (void)coverH;
   const int leg = std::max(20, std::min(coverW * 2 / 5, 44));
@@ -355,10 +363,10 @@ void drawReadRibbon(GfxRenderer& renderer, int coverX, int coverY, int coverW, i
 void LyraMarcoand75Theme::setPreRenderIndex(int index) { lastCarouselSelectorIndex = index; }
 
 void LyraMarcoand75Theme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
-                                              const std::vector<RecentBook>& recentBooks,
-                                              const int selectorIndex, bool& coverRendered,
-                                              bool& coverBufferStored, bool& bufferRestored,
-                                              std::function<bool()> storeCoverBuffer) const {
+                                               const std::vector<RecentBook>& recentBooks,
+                                               const int selectorIndex, bool& coverRendered,
+                                               bool& coverBufferStored, bool& bufferRestored,
+                                               std::function<bool()> storeCoverBuffer) const {
   (void)bufferRestored;
   if (recentBooks.empty()) { drawEmptyRecents(renderer, rect); return; }
 
@@ -370,48 +378,134 @@ void LyraMarcoand75Theme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
   const int screenW = renderer.getScreenWidth();
   const int centerTileY = rect.y + kCoverTopPad;
-  const int sideTileY = centerTileY + (kCenterCoverH - kSideCoverH) / 2;
-  const int centerX = (screenW - kCenterCoverW) / 2;
-  const int leftX = centerX - kSideCoverW + kOverlap;
-  const int rightX = centerX + kCenterCoverW - kOverlap;
+  const int centerX = (screenW - kFiveCoverCenterW) / 2 + kCenterXOffset;
 
-  auto drawCover = [&](int bookIdx, int x, int y, int maxW, int maxH) -> bool {
-    if (bookIdx < 0 || bookIdx >= bookCount) return false;
+  // Side cover positions
+  const int nearLeftX  = centerX - kFiveCoverNearW + kFiveCoverOverlap;
+  const int nearRightX = centerX + kFiveCoverCenterW - kFiveCoverOverlap;
+  const int farLeftX   = std::max(8, nearLeftX - kFiveCoverFarW + kFiveCoverFarOverlap);
+  const int farRightX  = std::min(screenW - kFiveCoverFarW - 8,
+                                   nearRightX + kFiveCoverNearW - kFiveCoverFarOverlap);
+
+  const int clampedFarLeftX  = farLeftX;
+  const int clampedFarRightX = farRightX;
+
+  // Y positions
+  const int centerCoverTop = centerTileY + 12;
+  const int centerMidY     = centerCoverTop + kFiveCoverCenterH / 2;
+  const int nearLeftY  = centerMidY - kFiveCoverNearH / 2;
+  const int nearRightY = centerMidY - kFiveCoverNearH / 2;
+  const int farLeftY   = centerMidY - kFiveCoverFarH / 2 - 8;
+  const int farRightY  = centerMidY - kFiveCoverFarH / 2 - 8;
+
+  auto drawStackedCover = [&](int bookIdx, bool isLeft, bool isFar) -> bool {
+    if (bookIdx < 0 || bookIdx >= bookCount) {
+      return false;
+    }
+
     const RecentBook& book = recentBooks[bookIdx];
+
+    const int sw = isFar ? kFiveCoverFarW : kFiveCoverNearW;
+    const int sh = isFar ? kFiveCoverFarH : kFiveCoverNearH;
+    const int sx = isFar ? (isLeft ? clampedFarLeftX : clampedFarRightX)
+                         : (isLeft ? nearLeftX : nearRightX);
+    const int sy = isFar ? (isLeft ? farLeftY : farRightY)
+                         : (isLeft ? nearLeftY : nearRightY);
+
+    // Aggiunge un bordo bianco (padding) sotto le cover near, esattamente come per la cover centrale
+    if (!isFar) {
+      renderer.fillRect(sx - kCenterOutlineW, sy - kCenterOutlineW, 
+                        sw + 2 * kCenterOutlineW, sh + 2 * kCenterOutlineW, false);
+    } else {
+      renderer.fillRect(sx, sy, sw, sh, false);
+    }
+
     bool hasCover = false;
     std::string thumbPath;
+
     if (!book.coverBmpPath.empty()) {
-      thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, maxW, maxH);
-      const std::string centerThumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, kCenterCoverW, kCenterCoverH);
-      const std::string legacyThumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, LyraMarcoand75Metrics::values.homeCoverHeight);
+      // FIX: Ripristinata la ricerca originale delle cover per evitare problemi di percorso
+      thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, sw, sh);
       if (!Storage.exists(thumbPath.c_str())) {
-        if (Storage.exists(centerThumbPath.c_str())) thumbPath = centerThumbPath;
-        else if (Storage.exists(legacyThumbPath.c_str())) thumbPath = legacyThumbPath;
+        thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath,
+                                                kFiveCoverCenterW, kFiveCoverCenterH);
       }
+      if (!Storage.exists(thumbPath.c_str())) {
+        thumbPath = UITheme::getCoverThumbPath(
+            book.coverBmpPath, LyraMarcoand75Metrics::values.homeCoverHeight);
+      }
+      if (!Storage.exists(thumbPath.c_str())) {
+        thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath,
+                                                LyraMarcoand75Theme::kCenterCoverW, 
+                                                LyraMarcoand75Theme::kCenterCoverH);
+      }
+      
       FsFile file;
       if (Storage.openFileForRead("HOME", thumbPath, file)) {
         Bitmap bitmap(file);
         if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          const float bmpRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-          const float tileRatio = static_cast<float>(maxW) / static_cast<float>(maxH);
-          const float cropX = (bmpRatio > tileRatio) ? (1.0f - tileRatio / bmpRatio) : 0.0f;
-          const float cropY = (bmpRatio < tileRatio) ? (1.0f - bmpRatio / tileRatio) : 0.0f;
-          renderer.drawBitmap(bitmap, x, y, maxW, maxH, cropX, cropY);
-          renderer.maskRoundedRectOutsideCorners(x, y, maxW, maxH, kCornerRadius, Color::White);
+          const float bmpRatio  = static_cast<float>(bitmap.getWidth())
+                                  / static_cast<float>(bitmap.getHeight());
+          const float tileRatio = static_cast<float>(sw) / static_cast<float>(sh);
+
+          // Allineamento reale a libri sovrapposti per tutte le cover laterali.
+          if (bmpRatio > tileRatio) {
+            int drawH = sh;
+            int drawW = static_cast<int>(drawH * bmpRatio);
+            int drawX = isLeft ? sx : (sx + sw - drawW);
+            int drawY = sy;
+            // Disegna l'immagine scalata in altezza
+            renderer.drawBitmap(bitmap, drawX, drawY, drawW, drawH, 0.0f, 0.0f);
+            
+            // Copre la parte in eccesso con il bianco per simulare il taglio netto
+            if (isLeft) {
+              renderer.fillRect(sx + sw, sy, drawW - sw + 2, sh, false);
+            } else {
+              renderer.fillRect(drawX - 2, sy, sx - drawX + 2, sh, false);
+            }
+          } else {
+            // Cover verticali: taglio centrato classico
+            const float cropX = 0.0f;
+            const float cropY = (bmpRatio < tileRatio) ? (1.0f - bmpRatio / tileRatio) : 0.0f;
+            renderer.drawBitmap(bitmap, sx, sy, sw, sh, cropX, cropY);
+          }
           hasCover = true;
         }
         file.close();
       }
     }
-    if (!hasCover) { drawCoverPlaceholder(renderer, x, y, maxW, maxH); }
+
+    if (!hasCover) {
+      drawCoverPlaceholder(renderer, sx, sy, sw, sh, "");
+    }
+
+    // --- Outline ---
+    // Outline rettangolare semplice per tutte le cover, niente più tagli trapezoidali.
+    const int topY = sy;
+    const int botY = sy + sh;
+
+    renderer.drawLine(sx, topY, sx + sw, topY, kFiveCoverOutlineW, true);
+    renderer.drawLine(sx, botY, sx + sw, botY, kFiveCoverOutlineW, true);
+    renderer.drawLine(sx, topY, sx, botY, kFiveCoverOutlineW, true);
+    renderer.drawLine(sx + sw, topY, sx + sw, botY, kFiveCoverOutlineW, true);
+
+    // Dark overlay rettangolare pulito per le cover far
+    if (isFar) {
+      for (int y = 0; y < sh; y++) {
+        for (int x = sx; x < sx + sw; x += 2) {
+          if ((x + y) % 4 == 0) {
+            renderer.drawPixel(x, sy + y, true);
+          }
+        }
+      }
+    }
+
     if (hasCover && !book.path.empty()) {
-      // Draw completion ribbon directly on framebuffer instead of
-      // baking it into the BMP file (which requires 3-10KB heap + SD I/O).
       const ReadingBookStats* readStats = nullptr;
       if (!book.bookId.empty()) readStats = READING_STATS.findBook(book.bookId);
       if (readStats == nullptr) readStats = READING_STATS.findBook(book.path);
       if (readStats != nullptr && readStats->completed) {
-        drawReadRibbon(renderer, x, y, maxW, maxH);
+        drawReadRibbon(renderer, sx, sy, sw, sh);
       }
     }
     return true;
@@ -419,55 +513,137 @@ void LyraMarcoand75Theme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
   if (!coverRendered) {
     lastCarouselSelectorIndex = centerIdx;
+
     renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
-    const int panelX = rect.x + 8;
-    const int panelW = rect.width - 16;
-    const int carouselPanelY = rect.y + kCoverTopPad;
-    const int dotsY = centerTileY + kCenterCoverH + 8;
+    const int panelX   = rect.x + 8;
+    const int panelW   = rect.width - 16;
+    const int dotsY    = centerCoverTop + kFiveCoverCenterH + 8;
     constexpr int carouselGap = 14;
 
-    // Draw a thick white-filled panel area, then the cyberpunk border on top.
-    const int panelTopY = carouselPanelY + 6;
+    const int panelTopY = rect.y + kCoverTopPad + 6;
     const int panelBotY = dotsY + kDotSize + 14;
-    const int panelH = panelBotY - panelTopY;
+    const int panelH    = panelBotY - panelTopY;
     renderer.fillRect(panelX + 4, panelTopY, panelW - 8, panelH - 4, false);
     drawCyberPanel(renderer, panelX, panelTopY, panelW, panelH, inCarouselRow);
 
-    // Draw covers on white background
-    const int prevIdx = (centerIdx + bookCount - 1) % bookCount;
-    const int nextIdx = (centerIdx + 1) % bookCount;
-    if (bookCount >= 3 && drawCover(prevIdx, leftX, sideTileY, kSideCoverW, kSideCoverH))
-      renderer.drawRoundedRect(leftX, sideTileY, kSideCoverW, kSideCoverH, 1, kCornerRadius, true);
-    if (bookCount >= 2 && drawCover(nextIdx, rightX, sideTileY, kSideCoverW, kSideCoverH))
-      renderer.drawRoundedRect(rightX, sideTileY, kSideCoverW, kSideCoverH, 1, kCornerRadius, true);
-    renderer.fillRect(centerX - kCenterOutlineW, centerTileY + 12 - kCenterOutlineW,
-                      kCenterCoverW + 2 * kCenterOutlineW, kCenterCoverH + 2 * kCenterOutlineW, false);
-    drawCover(centerIdx, centerX, centerTileY+12, kCenterCoverW, kCenterCoverH);
+    const int showLeftCnt  = std::min(bookCount - 1, 2);
+    const int showRightCnt = std::min(bookCount - 1, 2);
 
-    // Navigation dots
+    // Far covers (drawn first, behind everything)
+    if (showLeftCnt >= 2) {
+      drawStackedCover((centerIdx + bookCount - 2) % bookCount, true, true);
+    }
+    if (showRightCnt >= 2) {
+      drawStackedCover((centerIdx + 2) % bookCount, false, true);
+    }
+    // Near covers (drawn on top of far covers, pulendo l'overflow interno col loro bordo bianco)
+    if (showLeftCnt >= 1) {
+      drawStackedCover((centerIdx + bookCount - 1) % bookCount, true, false);
+    }
+    if (showRightCnt >= 1) {
+      drawStackedCover((centerIdx + 1) % bookCount, false, false);
+    }
+
+    // Center cover background + outline
+    renderer.fillRect(centerX - kCenterOutlineW - kFiveCoverHaloW,
+                      centerCoverTop - kFiveCoverHaloW,
+                      kFiveCoverCenterW + 2 * (kCenterOutlineW + kFiveCoverHaloW),
+                      kFiveCoverCenterH + 2 * kFiveCoverHaloW, false);
+    renderer.fillRect(centerX - kCenterOutlineW, centerCoverTop,
+                      kFiveCoverCenterW + 2 * kCenterOutlineW,
+                      kFiveCoverCenterH + 2 * kCenterOutlineW, false);
+
+    {
+      const RecentBook& book = recentBooks[centerIdx];
+      bool hasCover = false;
+      std::string thumbPath;
+      if (!book.coverBmpPath.empty()) {
+        thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath,
+                                                kFiveCoverCenterW, kFiveCoverCenterH);
+        if (!Storage.exists(thumbPath.c_str())) {
+          thumbPath = UITheme::getCoverThumbPath(
+              book.coverBmpPath, LyraMarcoand75Metrics::values.homeCoverHeight);
+        }
+        if (!Storage.exists(thumbPath.c_str())) {
+          thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath,
+                                                  LyraMarcoand75Theme::kCenterCoverW, 
+                                                  LyraMarcoand75Theme::kCenterCoverH);
+        }
+        FsFile file;
+        if (Storage.openFileForRead("HOME", thumbPath, file)) {
+          Bitmap bitmap(file);
+          if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+            const float bmpRatio  = static_cast<float>(bitmap.getWidth())
+                                    / static_cast<float>(bitmap.getHeight());
+            const float tileRatio = static_cast<float>(kFiveCoverCenterW)
+                                    / static_cast<float>(kFiveCoverCenterH);
+            const float cropX = (bmpRatio > tileRatio)
+                                    ? (1.0f - tileRatio / bmpRatio)
+                                    : 0.0f;
+            const float cropY = (bmpRatio < tileRatio)
+                                    ? (1.0f - bmpRatio / tileRatio)
+                                    : 0.0f;
+            renderer.drawBitmap(bitmap, centerX, centerCoverTop,
+                                kFiveCoverCenterW, kFiveCoverCenterH, cropX, cropY);
+            renderer.maskRoundedRectOutsideCorners(centerX, centerCoverTop,
+                                                    kFiveCoverCenterW, kFiveCoverCenterH,
+                                                    kCornerRadius, Color::White);
+            hasCover = true;
+          }
+          file.close();
+        }
+      }
+      if (!hasCover) {
+        drawCoverPlaceholder(renderer, centerX, centerCoverTop,
+                             kFiveCoverCenterW, kFiveCoverCenterH,
+                             recentBooks[centerIdx].title.c_str());
+      }
+      if (hasCover && !book.path.empty()) {
+        const ReadingBookStats* readStats = nullptr;
+        if (!book.bookId.empty()) readStats = READING_STATS.findBook(book.bookId);
+        if (readStats == nullptr) readStats = READING_STATS.findBook(book.path);
+        if (readStats != nullptr && readStats->completed) {
+          drawReadRibbon(renderer, centerX, centerCoverTop,
+                         kFiveCoverCenterW, kFiveCoverCenterH);
+        }
+      }
+    }
+
+    if (inCarouselRow) {
+      renderer.drawRoundedRect(centerX - 1, centerCoverTop - 1, kFiveCoverCenterW + 2,
+                               kFiveCoverCenterH + 2, 4, kCornerRadius + 1, true);
+      renderer.drawRoundedRect(centerX - 3, centerCoverTop - 3, kFiveCoverCenterW + 6,
+                               kFiveCoverCenterH + 6, 2, kCornerRadius + 2, false);
+    }
+
     const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
-    int dotX = centerX + (kCenterCoverW - totalDotsW) / 2;
+    int dotX = centerX + (kFiveCoverCenterW - totalDotsW) / 2;
     for (int i = 0; i < bookCount; ++i) {
       if (i == centerIdx) renderer.fillRect(dotX, dotsY + 12, kDotSize, kDotSize, true);
-      else renderer.drawRect(dotX, dotsY+12, kDotSize, kDotSize, true);
+      else                  renderer.drawRect(dotX, dotsY + 12, kDotSize, kDotSize, true);
       dotX += kDotSize + kDotGap;
     }
 
     const int panelY = dotsY + kDotSize + carouselGap + 6;
-    const int panelAvailableH = rect.y + rect.height - panelY - 6;
     drawDataPanel(renderer, recentBooks[centerIdx], inCarouselRow, panelX, panelY, panelW);
     coverBufferStored = storeCoverBuffer();
-    coverRendered = coverBufferStored;
+    coverRendered     = coverBufferStored;
+
   }
-  const int outlineW = inCarouselRow ? kSelectionLineW : kThinOutlineW;
-  renderer.drawRoundedRect(centerX, centerTileY+12, kCenterCoverW, kCenterCoverH, outlineW, kCornerRadius, true);
+
+  if (inCarouselRow) {
+    renderer.drawRoundedRect(centerX - 1, centerCoverTop - 1, kFiveCoverCenterW + 2,
+                             kFiveCoverCenterH + 2, 4, kCornerRadius + 1, true);
+    renderer.drawRoundedRect(centerX - 3, centerCoverTop - 3, kFiveCoverCenterW + 6,
+                             kFiveCoverCenterH + 6, 2, kCornerRadius + 2, false);
+  }
 }
 
 void LyraMarcoand75Theme::drawCarouselBorder(GfxRenderer& renderer, Rect rect, bool inCarouselRow) const {
   if (!inCarouselRow) return;
   const int centerTileY = rect.y + kCoverTopPad;
-  const int centerX = (renderer.getScreenWidth() - kCenterCoverW) / 2;
-  renderer.drawRoundedRect(centerX, centerTileY+12, kCenterCoverW, kCenterCoverH, kSelectionLineW, kCornerRadius, true);
+  const int centerX = (renderer.getScreenWidth() - kFiveCoverCenterW) / 2 + kCenterXOffset;
+  renderer.drawRoundedRect(centerX, centerTileY+12, kFiveCoverCenterW, kFiveCoverCenterH, kSelectionLineW, kCornerRadius, true);
 }
 
 void LyraMarcoand75Theme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
@@ -489,16 +665,13 @@ void LyraMarcoand75Theme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int b
   const int tileH = kIconPad32 + kIconSize + kIconPad32;
   const int tileW = screenW / visibleCount;
   const int rowY = renderer.getScreenHeight() - LyraMarcoand75Metrics::values.buttonHintsHeight - tileH - 8;
-  // Same panel dimensions as the stats panels for consistent style
   const int panelX = rect.x + 8;
   const int panelW = rect.width - 16;
   constexpr int kIconPanelPadCyber = 4;
   const int panelIconY = rowY - kIconPanelPadCyber;
   const int panelIconH = tileH + 2 * kIconPanelPadCyber;
-  // White fill then cyberpanel border on top so corner brackets are visible
   renderer.fillRect(panelX + 5, panelIconY + 5, panelW - 10, panelIconH - 10, false);
   drawCyberPanel(renderer, panelX, panelIconY, panelW, panelIconH, false);
-  // Draw icons on the cleared background
   for (int slot = 0; slot < visibleCount; ++slot) {
     const int i = windowStart + slot;
     const int tileX = slot * tileW;

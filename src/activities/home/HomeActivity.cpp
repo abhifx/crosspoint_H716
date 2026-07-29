@@ -11,8 +11,7 @@
 #include <Txt.h>
 #include <Utf8.h>
 #include <Xtc.h>
-#include <CoverDebugLog.h>
-#include <HomepageDebugLog.h>
+#include <Logging.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
@@ -308,12 +307,12 @@ uint32_t fnv1aU32(uint32_t hash, const uint32_t value) {
 // Theme-aware helpers for cover dimensions
 int getCarouselCenterCoverW() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_MARCOAND75
-             ? LyraMarcoand75Theme::kCenterCoverW
+             ? LyraMarcoand75Theme::kFiveCoverCenterW
              : LyraCarouselTheme::kCenterCoverW;
 }
 int getCarouselCenterCoverH() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_MARCOAND75
-             ? LyraMarcoand75Theme::kCenterCoverH
+             ? LyraMarcoand75Theme::kFiveCoverCenterH
              : LyraCarouselTheme::kCenterCoverH;
 }
 std::string getCarouselCenterThumbPath(const RecentBook& book) {
@@ -409,7 +408,7 @@ int HomeActivity::getMenuItemCount() const {
 }
 
 void HomeActivity::loadRecentBooks(const int maxBooks) {
-  HOMEPAGE_LOG("HOME", "loadRecentBooks: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "loadRecentBooks: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   invalidateResidentCarouselFrame();
   invalidateCarouselFrameHash();
   recentBooks.clear();
@@ -435,7 +434,7 @@ void HomeActivity::loadRecentBooks(const int maxBooks) {
     for (const std::string& key : staleFavorites) {
       FAVORITES.removeBook(key);
     }
-    HOMEPAGE_LOG("HOME", "loadRecentBooks: favorites end heap=%u maxA=%u books=%zu",
+    LOG_DBG("HOME", "loadRecentBooks: favorites end heap=%u maxA=%u books=%zu",
                  ESP.getFreeHeap(), ESP.getMaxAllocHeap(), recentBooks.size());
     return;
   }
@@ -451,7 +450,7 @@ void HomeActivity::loadRecentBooks(const int maxBooks) {
       recentBooks.push_back(book);
     }
   }
-  HOMEPAGE_LOG("HOME", "loadRecentBooks: end heap=%u maxA=%u books=%zu",
+  LOG_DBG("HOME", "loadRecentBooks: end heap=%u maxA=%u books=%zu",
                ESP.getFreeHeap(), ESP.getMaxAllocHeap(), recentBooks.size());
 }
 
@@ -489,7 +488,7 @@ bool HomeActivity::needsRecentCoverLoad(const int coverHeight) const {
 }
 
 void HomeActivity::loadRecentCovers(int coverHeight) {
-  HOMEPAGE_LOG("HOME", "loadRecentCovers: start heap=%u maxA=%u books=%zu",
+  LOG_DBG("HOME", "loadRecentCovers: start heap=%u maxA=%u books=%zu",
                ESP.getFreeHeap(), ESP.getMaxAllocHeap(), recentBooks.size());
   recentsLoading = true;
   // The first home render can cache a placeholder while thumbnails are still missing.
@@ -537,17 +536,17 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       if (FsHelpers::hasEpubExtension(book.path)) {
         // EPUB extraction needs the inflate window (~32 KB) + JPEG/PNG decoder.
         // Require a minimum contiguous block; skip this pass if not met (retry on next render).
-        COVER_LOG("HOME", "EPUB try: path=%s H=%d lyra=%d free=%u maxA=%u",
+        LOG_DBG("HOME", "EPUB try: path=%s H=%d lyra=%d free=%u maxA=%u",
                   book.path.c_str(), coverHeight, isLyraCarouselTheme() ? 1 : 0,
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap());
         if (ESP.getMaxAllocHeap() < 32 * 1024) {
-          COVER_LOG("HOME", "EPUB SKIP (low heap): maxA=%u", ESP.getMaxAllocHeap());
+          LOG_DBG("HOME", "EPUB SKIP (low heap): maxA=%u", ESP.getMaxAllocHeap());
           progress++;
           continue;
         }
         Epub epub(book.path, "/.crosspoint");
         if (epub.load(isLyraCarouselTheme(), true)) {
-          COVER_LOG("HOME", "EPUB load ok: path=%s free=%u maxA=%u",
+          LOG_DBG("HOME", "EPUB load ok: path=%s free=%u maxA=%u",
                     book.path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
           if (!epub.getTitle().empty()) {
             book.title = epub.getTitle();
@@ -559,7 +558,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
           // Heap may be fragmented after parsing OPF/TOC.  Re-check before decode.
           if (ESP.getMaxAllocHeap() < 28 * 1024) {
-            COVER_LOG("HOME", "EPUB SKIP post-load (low heap): maxA=%u", ESP.getMaxAllocHeap());
+            LOG_DBG("HOME", "EPUB SKIP post-load (low heap): maxA=%u", ESP.getMaxAllocHeap());
             progress++;
             continue;
           }
@@ -572,7 +571,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
                   ? epub.generateThumbBmp(getCarouselCenterCoverW(), getCarouselCenterCoverH()) &&
                         isValidBmpFile(getCarouselCenterThumbPath(book))
                   : epub.generateThumbBmp(coverHeight) && isValidHomeCoverPath(book.coverBmpPath, coverHeight);
-          COVER_LOG("HOME", "EPUB thumb result=%d: path=%s free=%u maxA=%u",
+          LOG_DBG("HOME", "EPUB thumb result=%d: path=%s free=%u maxA=%u",
                     success ? 1 : 0, book.path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
           if (!success && !isLyraCarouselTheme()) {
             removeInvalidHomeCoverTarget(book.coverBmpPath, coverHeight);
@@ -582,7 +581,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           coverRendered = false;
           needsRefresh = true;
         } else {
-          COVER_LOG("HOME", "EPUB load FAIL: path=%s free=%u maxA=%u",
+          LOG_DBG("HOME", "EPUB load FAIL: path=%s free=%u maxA=%u",
                     book.path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
         }
       } else if (FsHelpers::hasXtcExtension(book.path)) {
@@ -640,15 +639,15 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       carouselFramesReady = false;
       invalidateResidentCarouselFrame();
       invalidateCarouselFrameHash();
-      HOMEPAGE_LOG("HOME", "loadRecentCovers: before preRenderCarouselFrames heap=%u maxA=%u",
+      LOG_DBG("HOME", "loadRecentCovers: before preRenderCarouselFrames heap=%u maxA=%u",
                    ESP.getFreeHeap(), ESP.getMaxAllocHeap());
       preRenderCarouselFrames();
-      HOMEPAGE_LOG("HOME", "loadRecentCovers: after preRenderCarouselFrames heap=%u maxA=%u",
+      LOG_DBG("HOME", "loadRecentCovers: after preRenderCarouselFrames heap=%u maxA=%u",
                    ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     }
     requestUpdate();
   }
-  HOMEPAGE_LOG("HOME", "loadRecentCovers: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "loadRecentCovers: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 void HomeActivity::scheduleCarouselCoverLoadIfNeeded() {
@@ -667,7 +666,7 @@ void HomeActivity::scheduleCarouselCoverLoadIfNeeded() {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
-  HOMEPAGE_LOG("HOME", "onEnter: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "onEnter: start heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   hasOpdsServers = OPDS_STORE.hasServers();
 
@@ -684,7 +683,7 @@ void HomeActivity::onEnter() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   reloadHomeBooks(metrics.homeRecentBooksCount);
 
-  HOMEPAGE_LOG("HOME", "onEnter: after reloadHomeBooks heap=%u maxA=%u books=%zu",
+  LOG_DBG("HOME", "onEnter: after reloadHomeBooks heap=%u maxA=%u books=%zu",
                ESP.getFreeHeap(), ESP.getMaxAllocHeap(), recentBooks.size());
 
   // Drop any stale carousel frame cache (e.g. frames rendered with old reading
@@ -697,7 +696,7 @@ void HomeActivity::onEnter() {
     pruneCarouselFrameCache();
   }
 
-  HOMEPAGE_LOG("HOME", "onEnter: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "onEnter: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   requestUpdate();
 }
@@ -711,7 +710,7 @@ void HomeActivity::onExit() {
   // Log heap state after freeing the 63 KB cover buffer. The next activity
   // (typically Library) can use this to schedule its scan with awareness of
   // fragmentation.
-  HOMEPAGE_LOG("HOME", "onExit: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "onExit: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 bool HomeActivity::storeCoverBuffer() {

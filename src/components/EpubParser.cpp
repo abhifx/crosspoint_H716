@@ -6,7 +6,6 @@
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
-#include <CoverDebugLog.h>
 #include <PngToBmpConverter.h>
 #include <ZipFile.h>
 

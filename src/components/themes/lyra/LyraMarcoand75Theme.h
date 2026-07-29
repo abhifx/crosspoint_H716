@@ -23,7 +23,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                   .homeTopPadding = 46,
                                  .homeCoverHeight = 420,
                                  .homeCoverTileHeight = 635,
-                                 .homeRecentBooksCount = 999,
+                                 .homeRecentBooksCount = 20,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
@@ -48,6 +48,9 @@ class LyraMarcoand75Theme : public LyraTheme {
   static constexpr int kCenterCoverH = LyraMarcoand75Metrics::values.homeCoverHeight - 60;
   static constexpr int kSideCoverW = 110;
   static constexpr int kSideCoverH = LyraMarcoand75Metrics::values.homeCoverHeight - 210;
+  // 5-cover carousel dimensions (used by carousel rendering and thumbnail gen)
+  static constexpr int kFiveCoverCenterW = 210;
+  static constexpr int kFiveCoverCenterH = 340;
 
   static void setPreRenderIndex(int index);
 

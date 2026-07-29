@@ -76,7 +76,7 @@ constexpr int kCenterOutlineW = 4;
 constexpr int kMenuIconSize = 32;
 constexpr int kMenuIconPad = 14;
 constexpr int kHighlightPad = 12;
-constexpr int kVisibleMenuSlots = 7;
+constexpr int kVisibleMenuSlots = 6;
 
 // Data panel layout
 constexpr int kDotsToPanelGap = 6;
@@ -176,21 +176,18 @@ void drawSegmentProgressBar(const GfxRenderer& r, int x, int y, int filled, int 
              x + total * (kProgSegW + kProgSegGap) - kProgSegGap + 1, y + kProgSegH + 2, 1, true);
 }
 
-uint8_t getBookProgress(const ReadingBookStats* stats) {
-  return stats ? std::min<uint8_t>(stats->lastProgressPercent, 100) : 0;
+uint8_t getBookProgress(const RecentBook& b) {
+  const ReadingBookStats* s = nullptr;
+  if (!b.bookId.empty()) s = READING_STATS.findBook(b.bookId);
+  if (!s) s = READING_STATS.findBook(b.path);
+  return s ? std::min<uint8_t>(s->lastProgressPercent, 100) : 0;
 }
 
-void getEtaBuf(const ReadingBookStats& s, char* buf, size_t bufSize) {
-  if (s.completed || s.lastProgressPercent >= 100 || s.totalReadingMs < 600000ULL || s.lastProgressPercent < 5) {
-    buf[0] = '\0';
-    return;
-  }
-  uint64_t tot = (s.totalReadingMs * 100ULL + s.lastProgressPercent - 1) / s.lastProgressPercent;
-  if (tot <= s.totalReadingMs) { buf[0] = '\0'; return; }
-  uint64_t rem = ((tot - s.totalReadingMs + 299999ULL) / 300000ULL) * 300000ULL;
-  uint64_t min = rem / 60000ULL, h = min / 60;
-  min %= 60;
-  snprintf(buf, bufSize, "~%lluh%llum", h, min);
+const ReadingBookStats* getBookStats(const RecentBook& b) {
+  const ReadingBookStats* s = nullptr;
+  if (!b.bookId.empty()) s = READING_STATS.findBook(b.bookId);
+  if (!s) s = READING_STATS.findBook(b.path);
+  return s;
 }
 
 void fmtDuration(uint64_t ms, char* buf, size_t bufSize) {
@@ -201,21 +198,29 @@ void fmtDuration(uint64_t ms, char* buf, size_t bufSize) {
   else snprintf(buf, bufSize, "%llum", m);
 }
 
+std::string getEta(const ReadingBookStats& s) {
+  if (s.completed || s.lastProgressPercent >= 100 || s.totalReadingMs < 600000ULL || s.lastProgressPercent < 5)
+    return "";
+  uint64_t tot = (s.totalReadingMs * 100ULL + s.lastProgressPercent - 1) / s.lastProgressPercent;
+  if (tot <= s.totalReadingMs) return "";
+  uint64_t rem = ((tot - s.totalReadingMs + 299999ULL) / 300000ULL) * 300000ULL;
+  uint64_t min = rem / 60000ULL, h = min / 60;
+  min %= 60;
+  return "~" + std::to_string(h) + "h" + std::to_string(min) + "m";
+}
+
 // --- Data panel builder ---
 
 void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int px, int py, int pw) {
-  // Cache stats lookup — both getBookProgress and the data fields need the same pointer.
-  const ReadingBookStats* stats = nullptr;
-  if (!book.bookId.empty()) stats = READING_STATS.findBook(book.bookId);
-  if (!stats) stats = READING_STATS.findBook(book.path);
-
-  const uint8_t pct = getBookProgress(stats);
+  const ReadingBookStats* stats = getBookStats(book);
+  const uint8_t pct = getBookProgress(book);
   const bool done = stats && stats->completed;
   const uint64_t tMs = stats ? stats->totalReadingMs : 0;
   const uint32_t sess = stats ? stats->sessions : 0;
   char etaBuf[32] = {};
   if (stats) {
-    getEtaBuf(*stats, etaBuf, sizeof(etaBuf));
+    const auto e = getEta(*stats);
+    snprintf(etaBuf, sizeof(etaBuf), "%s", e.c_str());
   } else {
     snprintf(etaBuf, sizeof(etaBuf), "...");
   }
@@ -377,11 +382,11 @@ void LyraMarcoand75Theme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     std::string thumbPath;
     if (!book.coverBmpPath.empty()) {
       thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, maxW, maxH);
+      const std::string centerThumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, kCenterCoverW, kCenterCoverH);
+      const std::string legacyThumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, LyraMarcoand75Metrics::values.homeCoverHeight);
       if (!Storage.exists(thumbPath.c_str())) {
-        thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, kCenterCoverW, kCenterCoverH);
-        if (!Storage.exists(thumbPath.c_str())) {
-          thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, LyraMarcoand75Metrics::values.homeCoverHeight);
-        }
+        if (Storage.exists(centerThumbPath.c_str())) thumbPath = centerThumbPath;
+        else if (Storage.exists(legacyThumbPath.c_str())) thumbPath = legacyThumbPath;
       }
       FsFile file;
       if (Storage.openFileForRead("HOME", thumbPath, file)) {

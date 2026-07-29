@@ -40,6 +40,7 @@
 #include "activities/apps/ReadingHeatmapActivity.h"
 #include "activities/apps/ReadingProfileActivity.h"
 #include "activities/apps/LibraryActivity.h"
+#include "activities/apps/LibraryContextMenuActivity.h"
 #include "activities/apps/ReadingStatsActivity.h"
 #include "activities/apps/ReadingStatsDetailActivity.h"
 #include "activities/apps/ScreenSaverActivity.h"
@@ -1242,7 +1243,13 @@ void HomeActivity::loop() {
                                  [this](const ActivityResult&) { requestFreshHomeRender(true); });
           break;
         case ShortcutId::Library:
-          activityManager.goToLibrary();
+          if (mappedInput.getHeldTime() >= RECENT_BOOK_LONG_PRESS_MS) {
+            startActivityForResult(
+                std::make_unique<LibraryContextMenuActivity>(renderer, mappedInput),
+                [this](const ActivityResult&) { requestFreshHomeRender(true); });
+          } else {
+            activityManager.goToLibrary();
+          }
           break;
         case ShortcutId::Achievements:
           startActivityForResult(std::make_unique<AchievementsActivity>(renderer, mappedInput),

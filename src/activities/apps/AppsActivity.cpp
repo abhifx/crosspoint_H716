@@ -11,6 +11,7 @@
 #include "FavoritesAppActivity.h"
 #include "FlashcardsAppActivity.h"
 #include "IfFoundActivity.h"
+#include "LibraryContextMenuActivity.h"
 #include "ReadingHeatmapActivity.h"
 #include "ReadingProfileActivity.h"
 #include "ReadingStatsActivity.h"
@@ -196,7 +197,12 @@ void AppsActivity::openSelectedApp() {
       activityManager.goToFileTransfer();
       return;
     case ShortcutId::Library:
-      activityManager.goToLibrary();
+      if (mappedInput.getHeldTime() >= 1000) {
+        startActivityForResult(std::make_unique<LibraryContextMenuActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) { requestUpdate(); });
+      } else {
+        activityManager.goToLibrary();
+      }
       return;
     case ShortcutId::ScreenClean:
       activity = std::make_unique<ScreenCleanActivity>(renderer, mappedInput);

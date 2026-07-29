@@ -477,6 +477,7 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   loadString("libraryRootDir", s.libraryRootDir, sizeof(s.libraryRootDir));
   s.libraryLastCleanupDay = doc["libraryLastCleanupDay"] | static_cast<uint8_t>(0);
   loadEnum("librarySort", s.librarySort, CrossPointSettings::LIBRARY_SORT_COUNT);
+  loadEnum("libraryUpdateMode", s.libraryUpdateMode, CrossPointSettings::LIBRARY_UPDATE_MODE_COUNT);
   {
     const std::string searchText = doc["librarySearchText"] | std::string("");
     strncpy(s.librarySearchText, searchText.c_str(), sizeof(s.librarySearchText) - 1);
@@ -905,6 +906,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   }
   doc["libraryLastCleanupDay"] = s.libraryLastCleanupDay;
   doc["librarySort"] = s.librarySort;
+  doc["libraryUpdateMode"] = s.libraryUpdateMode;
   {
     const std::string searchText(s.librarySearchText);
     if (!searchText.empty()) {

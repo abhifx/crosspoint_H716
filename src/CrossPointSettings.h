@@ -289,6 +289,7 @@ class CrossPointSettings {
     LIBRARY_SORT_COLLECTIONS = 6,
     LIBRARY_SORT_COUNT
   };
+  enum LIBRARY_UPDATE_MODE { LIBRARY_UPDATE_MANUAL = 0, LIBRARY_UPDATE_AUTO = 1, LIBRARY_UPDATE_MODE_COUNT };
   enum SLEEP_IMAGE_ORDER { SLEEP_IMAGE_SHUFFLE = 0, SLEEP_IMAGE_SEQUENTIAL = 1, SLEEP_IMAGE_ORDER_COUNT };
   enum SCREENSAVER_ORDER { SCREENSAVER_SHUFFLE = 0, SCREENSAVER_SEQUENTIAL = 1, SCREENSAVER_ORDER_COUNT };
   enum SCREENSAVER_INTERVAL {
@@ -534,6 +535,7 @@ class CrossPointSettings {
   char librarySearchText[64] = "";
   char libraryRootDir[128] = "/";
   uint8_t libraryLastCleanupDay = 0;  // day-of-year of last zero-size thumb cleanup
+  uint8_t libraryUpdateMode = LIBRARY_UPDATE_MANUAL;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // ScreenSaver settings

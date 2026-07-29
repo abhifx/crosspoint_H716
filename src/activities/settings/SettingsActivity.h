@@ -50,6 +50,7 @@ enum class SettingAction {
   DownloadFonts,
   RebuildLibrary,
   ClearCorruptCovers,
+  UpdateLibrary,
   ScreenSaverReaderDir,
 };
 

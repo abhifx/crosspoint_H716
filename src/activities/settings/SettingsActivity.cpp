@@ -235,7 +235,10 @@ const std::vector<SettingInfo>& getDeviceOnlyAppSettings() {
                         {StrId::STR_LIBRARY_4X4, StrId::STR_LIBRARY_3X3, StrId::STR_LIBRARY_2X2}),
       SettingInfo::Enum(StrId::STR_LIBRARY_FILTER, &CrossPointSettings::libraryFilter,
                         {StrId::STR_ALL_BOOKS, StrId::STR_FAVOURITES, StrId::STR_LATEST_READ}),
+      SettingInfo::Enum(StrId::STR_LIBRARY_UPDATE_MODE, &CrossPointSettings::libraryUpdateMode,
+                        {StrId::STR_LIBRARY_UPDATE_MANUAL, StrId::STR_LIBRARY_UPDATE_AUTO}),
       SettingInfo::String(StrId::STR_LIBRARY_ROOT_DIR, SETTINGS.libraryRootDir, sizeof(SETTINGS.libraryRootDir)),
+      SettingInfo::Action(StrId::STR_UPDATE_LIBRARY, SettingAction::UpdateLibrary),
       SettingInfo::Action(StrId::STR_REBUILD_LIBRARY, SettingAction::RebuildLibrary),
       SettingInfo::Action(StrId::STR_CLEAR_CORRUPT_COVERS, SettingAction::ClearCorruptCovers),
       SettingInfo::Section(StrId::STR_SCREENSAVER),
@@ -910,6 +913,19 @@ void SettingsActivity::toggleCurrentSetting() {
                   std::snprintf(msg, sizeof(msg), "%s", tr(STR_NO_CORRUPT_COVERS));
                 }
                 showTransientPopup(msg, removedCount > 0 ? 100 : -1, removedCount > 0 ? 350 : 700);
+              }
+              requestUpdate(true);
+            });
+        break;
+      case SettingAction::UpdateLibrary:
+        startActivityForResult(
+            std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_UPDATE_LIBRARY_PROMPT), ""),
+            [this](const ActivityResult& result) {
+              if (!result.isCancelled) {
+                // Forces a full scan on next LibraryActivity launch by marking
+                // the cache as needing refresh, then navigate to the library.
+                LibraryCache::invalidate();
+                activityManager.goToLibrary();
               }
               requestUpdate(true);
             });

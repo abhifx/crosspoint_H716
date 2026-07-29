@@ -40,6 +40,8 @@
 #include "components/icons/search_minus.h"
 #include "components/icons/sort_asc.h"
 #include "components/icons/sort_desc.h"
+
+bool LibraryActivity::forceScanOnNextOpen_ = false;
 #include "components/icons/text24.h"
 #include "components/icons/time_fast.h"
 #include "components/icons/transfer.h"
@@ -281,42 +283,52 @@ void LibraryActivity::scanSd() {
   // Init LibraryIndex if needed
   LibraryIndex::init();
 
-  // Fast path: existing library.dat — but always scan for new/removed books
-  if (LibraryIndex::exists()) {
+  if (!LibraryIndex::exists()) {
+    // Cold path: full scan with progress popup — always needed when no index exists
+    renderer.clearScreen();
+    Rect popupRect = GUI.drawPopup(renderer, tr(STR_INDEXING));
+    GUI.fillPopupProgress(renderer, popupRect, 0);
+    renderer.displayBuffer();
+
+    LibraryIndex::scan(renderer, popupRect, SETTINGS.libraryRootDir);
+    LibraryIndex::buildIndices();
+    LibraryIndex::buildCollectionsIndex();
+    totalBooks_ = collectionsMode_
+        ? LibraryIndex::totalCollections()
+        : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                                       static_cast<LibraryIndex::FilterMode>(currentFilter_));
+    totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
+    refreshPageCache();
+    return;
+  }
+
+  // Fast path: existing library.dat
+  // Decide whether to perform SD scan based on:
+  //   - forceScanOnNextOpen_ (set by "Update & Open" popup)
+  //   - libraryUpdateMode == AUTO
+  const bool doScan = forceScanOnNextOpen_ ||
+      SETTINGS.libraryUpdateMode == CrossPointSettings::LIBRARY_UPDATE_AUTO;
+  forceScanOnNextOpen_ = false;
+
+  if (doScan) {
     int added = 0, removed = 0;
-    LibraryIndex::scan(renderer, {}, SETTINGS.libraryRootDir, &added, &removed);
+    LibraryIndex::scan(renderer, Rect(), SETTINGS.libraryRootDir, &added, &removed);
     if (added > 0 || removed > 0) {
-      // Show a one-shot popup while rebuilding indices — no progress bar updates
       renderer.clearScreen();
       GUI.drawPopup(renderer, tr(STR_UPDATING_LIBRARY));
       renderer.displayBuffer();
       LibraryIndex::buildIndices();
       LibraryIndex::buildCollectionsIndex();
     }
-    totalBooks_ = collectionsMode_
-        ? LibraryIndex::totalCollections()
-        : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
-                                       static_cast<LibraryIndex::FilterMode>(currentFilter_));
-    totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
-    LOG_DBG("LIB", "scanSd: existing index, total=%d collMode=%d", totalBooks_, collectionsMode_);
-    refreshPageCache();
-    return;
   }
 
-  // Cold path: full scan with progress popup
-  renderer.clearScreen();
-  Rect popupRect = GUI.drawPopup(renderer, tr(STR_INDEXING));
-  GUI.fillPopupProgress(renderer, popupRect, 0);
-  renderer.displayBuffer();
-
-  LibraryIndex::scan(renderer, popupRect, SETTINGS.libraryRootDir);
-  LibraryIndex::buildIndices();
-  LibraryIndex::buildCollectionsIndex();
   totalBooks_ = collectionsMode_
       ? LibraryIndex::totalCollections()
       : LibraryIndex::totalMatching(currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
                                      static_cast<LibraryIndex::FilterMode>(currentFilter_));
   totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
+  LOG_DBG("LIB", "scanSd: existing index, doScan=%d total=%d collMode=%d",
+          static_cast<int>(doScan), totalBooks_, collectionsMode_);
   refreshPageCache();
 }
 

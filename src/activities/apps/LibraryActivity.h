@@ -94,6 +94,10 @@ class LibraryActivity final : public Activity {
   void beginTextSearch();
 
  public:
+  // When true, the next LibraryActivity launch will force an SD scan even
+  // in manual update mode. Set by LibraryContextMenuActivity ("Update & Open").
+  static bool forceScanOnNextOpen_;
+
   explicit LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("Library", renderer, mappedInput) {}
   void onEnter() override;

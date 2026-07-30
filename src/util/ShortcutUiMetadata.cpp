@@ -109,6 +109,8 @@ std::string ShortcutUiMetadata::getSubtitle(const ShortcutDefinition& definition
       return getFileTransferShortcutSubtitle();
     case ShortcutId::OpdsBrowser:
       return std::to_string(OPDS_STORE.getCount());
+    case ShortcutId::Wikipedia:
+      return std::string(I18N.get(definition.descriptionId));
     default:
       return (definition.descriptionId == StrId::STR_NONE_OPT) ? "" : std::string(I18N.get(definition.descriptionId));
   }

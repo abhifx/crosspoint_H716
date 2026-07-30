@@ -76,6 +76,8 @@
 #include "components/icons/notification_unread.h"
 #include "components/icons/file_transfer.h"
 #include "components/icons/calibre.h"
+#include "components/icons/wikipediaicon.h"
+#include "components/icons/wikipediaicon24.h"
 #include "fontIds.h"
 #include "util/ReadingStatsAnalytics.h"
 
@@ -253,6 +255,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Rotation24Icon;
       case UIIcon::Pageview:
         return Pageview24Icon;
+      case UIIcon::Wikipedia:
+        return Wikipedia24Icon;
       default:
         return nullptr;
     }
@@ -354,6 +358,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return FileTransferIcon;
       case UIIcon::Calibre:
         return CalibreIcon;
+      case UIIcon::Wikipedia:
+        return WikipediaIcon;
       default:
         return nullptr;
     }

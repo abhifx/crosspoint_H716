@@ -45,6 +45,7 @@
 #include "activities/apps/ScreenSaverActivity.h"
 #include "activities/apps/ClippingsAppActivity.h"
 #include "activities/apps/SleepAppActivity.h"
+#include "activities/apps/WikipediaActivity.h"
 #include "activities/apps/SyncDayActivity.h"
 #include "activities/home/BookContextMenuActivity.h"
 #include "activities/home/BookMetadataActivity.h"
@@ -1292,12 +1293,15 @@ void HomeActivity::loop() {
           startActivityForResult(std::make_unique<ScreenSaverActivity>(renderer, mappedInput),
                                  [this](const ActivityResult&) { requestFreshHomeRender(true); });
           break;
-        case ShortcutId::Clippings:
-          startActivityForResult(std::make_unique<ClippingsAppActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult&) { requestFreshHomeRender(true); });
-          break;
-        case ShortcutId::OpdsBrowser:
-          onOpdsBrowserOpen();
+         case ShortcutId::Clippings:
+           startActivityForResult(std::make_unique<ClippingsAppActivity>(renderer, mappedInput),
+                                  [this](const ActivityResult&) { requestFreshHomeRender(true); });
+           break;
+         case ShortcutId::Wikipedia:
+           onWikipediaOpen();
+           break;
+         case ShortcutId::OpdsBrowser:
+           onOpdsBrowserOpen();
           break;
       }
     }
@@ -1453,3 +1457,9 @@ void HomeActivity::onSyncDayOpen() {
 }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
+
+void HomeActivity::onWikipediaOpen() {
+  startActivityForResult(
+      std::make_unique<WikipediaActivity>(renderer, mappedInput),
+      [this](const ActivityResult&) { requestFreshHomeRender(true); });
+}

@@ -25,6 +25,7 @@
 #include "OpdsServerStore.h"
 #include "util/HeaderDateUtils.h"
 #include "util/ShortcutUiMetadata.h"
+#include "WikipediaActivity.h"
 
 namespace {
 std::string buildAppsHeaderSubtitle(const int selectedIndex, const int totalItems, const int itemsPerPage) {
@@ -219,6 +220,9 @@ void AppsActivity::openSelectedApp() {
     case ShortcutId::OpdsBrowser:
       activityManager.goToBrowser();
       return;
+    case ShortcutId::Wikipedia:
+      activity = std::make_unique<WikipediaActivity>(renderer, mappedInput);
+      break;
   }
 
   startActivityForResult(std::move(activity), [this](const ActivityResult&) {

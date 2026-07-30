@@ -500,6 +500,8 @@ class CrossPointSettings {
   uint8_t opdsBrowserShortcutOrder = 19;
   uint8_t clippingsShortcut = SHORTCUT_APPS;
   uint8_t clippingsShortcutOrder = 21;
+  uint8_t wikipediaShortcut = SHORTCUT_APPS;
+  uint8_t wikipediaShortcutOrder = 22;
   uint8_t browseFilesShortcutVisible = 1;
   // Legacy Stats shortcut visibility retained for settings.json migration to readingStatsShortcut.
   uint8_t statsShortcutVisible = 1;
@@ -523,6 +525,7 @@ class CrossPointSettings {
   uint8_t opdsBrowserShortcutVisible = 1;
   uint8_t screenSaverShortcutVisible = 1;
   uint8_t clippingsShortcutVisible = 1;
+  uint8_t wikipediaShortcutVisible = 1;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)

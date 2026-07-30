@@ -28,9 +28,10 @@ enum class ShortcutId {
   ScreenClean,
   Sleep,
   OpdsBrowser,
-  ScreenSaver,
-  Clippings,
-};
+   ScreenSaver,
+   Clippings,
+   Wikipedia,
+ };
 
 struct ShortcutDefinition {
   ShortcutId id;
@@ -42,8 +43,8 @@ struct ShortcutDefinition {
   uint8_t CrossPointSettings::* visiblePtr;
 };
 
-inline const std::array<ShortcutDefinition, 20>& getShortcutDefinitions() {
-  static const std::array<ShortcutDefinition, 20> definitions = {
+inline const std::array<ShortcutDefinition, 21>& getShortcutDefinitions() {
+  static const std::array<ShortcutDefinition, 21> definitions = {
       ShortcutDefinition{ShortcutId::BrowseFiles, StrId::STR_BROWSE_FILES, StrId::STR_NONE_OPT, UIIcon::Folder,
                          &CrossPointSettings::browseFilesShortcut, &CrossPointSettings::browseFilesShortcutOrder,
                          &CrossPointSettings::browseFilesShortcutVisible},
@@ -105,10 +106,13 @@ inline const std::array<ShortcutDefinition, 20>& getShortcutDefinitions() {
                           UIIcon::ScreenSaver, &CrossPointSettings::screenSaverShortcut,
                           &CrossPointSettings::screenSaverShortcutOrder,
                           &CrossPointSettings::screenSaverShortcutVisible},
-       ShortcutDefinition{ShortcutId::Clippings, StrId::STR_CLIPPINGS, StrId::STR_CLIPPINGS_APP_DESC, UIIcon::File,
-                          &CrossPointSettings::clippingsShortcut, &CrossPointSettings::clippingsShortcutOrder,
-                          &CrossPointSettings::clippingsShortcutVisible},
-  };
+        ShortcutDefinition{ShortcutId::Clippings, StrId::STR_CLIPPINGS, StrId::STR_CLIPPINGS_APP_DESC, UIIcon::File,
+                           &CrossPointSettings::clippingsShortcut, &CrossPointSettings::clippingsShortcutOrder,
+                           &CrossPointSettings::clippingsShortcutVisible},
+        ShortcutDefinition{ShortcutId::Wikipedia, StrId::STR_WIKIPEDIA, StrId::STR_WIKIPEDIA_APP_DESC, UIIcon::Wikipedia,
+                           &CrossPointSettings::wikipediaShortcut, &CrossPointSettings::wikipediaShortcutOrder,
+                           &CrossPointSettings::wikipediaShortcutVisible},
+   };
 
   return definitions;
 }

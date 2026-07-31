@@ -734,4 +734,32 @@ The 1.5.0.5 delta was 3 code commits (plus docs/version-bump only):
 **Verification:** `python -X utf8 -m platformio run -e default -j 16` → SUCCESS;
 dev artifact `1.5.0.5.dev1-...-cpr-vcodex-steroids.bin`.
 
-*Last updated: 2026-07-31 — based on 1.5.0.3 → 1.5.0.5 merge*
+### Power button handling (main.cpp loop)
+
+**Divergence from upstream:** upstream unconditionally calls `enterDeepSleep()` on every
+power button press edge (`gpio.wasPressed(BTN_POWER)`), regardless of the `shortPwrBtn`
+setting (`IGNORE`, `SLEEP`, `PAGE_TURN`, `FORCE_REFRESH`, `TOGGLE_STATUS_BAR`). This means
+that only `SLEEP` mode works; all other values are unreachable.
+
+**Fix applied in Steroids:** the power button is now treated as a short/long-press event:
+
+- **Short press** (< `getPowerButtonDuration()`, 400 ms for non-SLEEP modes): the release
+  edge triggers the configured `shortPwrBtn` action — `FORCE_REFRESH` refreshes the screen,
+  `TOGGLE_STATUS_BAR` toggles the status bar, `PAGE_TURN` turns the page, `IGNORE` does nothing.
+- **Long press** (held ≥ `getPowerButtonDuration()`): always deep sleeps, or starts the
+  replacement screen saver if one is configured for the current reader activity and battery
+  condition (`canStartReplacementScreenSaver()`).
+- **Active screen saver**: the long-press check is skipped so the screen saver can process
+  the wake button without interference. The release edge is also suppressed so that a brief
+  press used to dismiss the screen saver does not accidentally fire the configured `shortPwrBtn`
+  action.
+
+**Files changed:** `src/main.cpp` — restructured the power button event loop from an
+unconditional `enterDeepSleep()` on press edge to state machine tracking `powerBtnDownMs`
+and `powerBtnInScreensaver` flags.
+
+**Verification:** `python -X utf8 -m platformio run -e default -j 16` → SUCCESS.
+
+---
+
+*Last updated: 2026-07-31 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix*

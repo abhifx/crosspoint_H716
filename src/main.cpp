@@ -832,7 +832,8 @@ void loop() {
     return;
   }
 
-  if (gpio.wasPressed(HalGPIO::BTN_POWER)) {
+   if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP &&
+       gpio.wasPressed(HalGPIO::BTN_POWER)) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;

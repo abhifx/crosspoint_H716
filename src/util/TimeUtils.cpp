@@ -148,6 +148,22 @@ uint32_t TimeUtils::getCurrentValidTimestamp() {
   return isClockValid(now) ? now : 0;
 }
 
+uint32_t TimeUtils::getBestEffortFileTimestamp() {
+  // Prefer a live system clock once RTC/NTP has been applied this boot.
+  const uint32_t authoritative = getAuthoritativeTimestamp();
+  if (isClockValid(authoritative)) {
+    return authoritative;
+  }
+
+  // Without a live clock, use the last Sync Day / last known good wall time.
+  if (isClockValid(APP_STATE.lastKnownValidTimestamp)) {
+    return APP_STATE.lastKnownValidTimestamp;
+  }
+
+  // Any currently valid system time (e.g. set without syncedThisBoot).
+  return getCurrentValidTimestamp();
+}
+
 bool TimeUtils::setCurrentDate(const int year, const unsigned month, const unsigned day, uint32_t* epochSeconds) {
   configureTimezone();
 

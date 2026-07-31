@@ -43,3 +43,4 @@ enable_testing()
 include(GoogleTest)
 
 add_subdirectory(utf8_compose)
+add_subdirectory(reader_position)

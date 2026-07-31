@@ -376,7 +376,7 @@ The development and feature discussion for CPR-vCodex Steroids takes place in th
 |---|---|
 | Project | `CPR-vCodex Steroids` |
 | Device | `Xteink X4`; `Xteink X3` compatibility reported by users, not personally tested |
-| Current upstream base | [`1.5.0.0-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.5.0.0-cpr-vcodex) |
+| Current upstream base | [`1.5.0.5-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.5.0.5-cpr-vcodex) |
 | Current Steroids build | Synced with upstream `1.5.0` + Steroids features (clippings, bookmarks v4, guide dots, library, carousel, web portal, screensaver, configurable long-press, EPUB render modes, OTA fixes, time/clock X3 support, progressive EPUB indexing, EndOfBook options) |
 | Latest SD font package | [`sd-fonts-m1-b4`](https://github.com/franssjz/cpr-vcodex/releases/tag/sd-fonts-m1-b4) |
 | Changelog | [CHANGELOG.md](./CHANGELOG.md) |

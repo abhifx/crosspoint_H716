@@ -691,4 +691,47 @@ Changes applied:
 4. **`ReadingStatsStore::importFromFile`** — split empty-path check, added
    `CPR_VCODEX_LOG_EVENT` logging for empty/missing/rejected paths.
 
-*Last updated: 2026-07-29 — based on 1.3.0 → 1.5.0.3 merge*
+### Example: 1.5.0.3 → 1.5.0.5 merge
+
+The 1.5.0.5 delta was 3 code commits (plus docs/version-bump only):
+
+```
+47f10008 docs(release): sync auto-flash firmware 1.5.0.3     ← docs only, skip
+81a288b4 fix(storage): stamp SD files with RTC or last Sync Day time   ← 1.5.0.4
+2c02674b fix(reader): preserve exact EPUB reopen position     ← 1.5.0.5
+```
+
+**Applied to Steroids:**
+
+1. **SD FAT timestamps (1.5.0.4)** — clean, non-conflicting storage improvement:
+   - Added new `src/util/SdFatDateTime.cpp` with `TimeUtils::registerSdFatDateTimeCallback()`.
+   - Added `TimeUtils::getBestEffortFileTimestamp()` to `src/util/TimeUtils.cpp`.
+   - Added both declarations to `src/util/TimeUtils.h`.
+   - Wired `#include "util/TimeUtils.h"` + `TimeUtils::registerSdFatDateTimeCallback()` in `src/main.cpp`
+     after the SD-card init block.
+   - `ScreenshotUtil.cpp` gained a comment-only note.
+   - The Steroids `applySystemClockFromRtc()` fix (no `clockHasBeenSynced` guard) was **preserved** —
+     only `getBestEffortFileTimestamp()` was added, never the upstream file wholesale.
+
+2. **EPUB reopen position (1.5.0.5)** — **NOT ported into the Steroids reader.**
+   The fix targets upstream's progressive/async cache reader (`applyDeferredReposition()`,
+   `buildTickHeapGate()`, `estimatedTotalPages()`, `pendingPaginationReposition`). The Steroids
+   `EpubReaderActivity.cpp` is a synchronous section-build architecture (`createSectionFile`,
+   `section->pageCount`) that already preserves the exact saved page unless the page count
+   actually changes (the percentage remap only fires on `pageCount != cachedChapterTotalPageCount`).
+   So the bug upstream fixed (page jumps from converging progressive estimates) cannot occur in
+   Steroids. Porting the flag machinery would add risk to a heavily Steroids-modified file with no
+   behavioral gain. Instead:
+   - Added the new `src/activities/reader/ReaderPosition.h` helper (self-contained, unused).
+   - Added `test/reader_position/` unit tests + `add_subdirectory(reader_position)` in
+     `test/CMakeLists.txt` for future parity.
+   - Did **not** touch the repositioning logic in `EpubReaderActivity.cpp`.
+
+**Protected/unchanged in this delta:** `src/activities/reader/*`, `src/components/Library*`,
+`src/JsonSettingsIO.*`, `src/network/CrossPointWebServer.*`, web HTML, i18n yaml, settings lists,
+`platformio.ini` Steroids flags (`ARDUINO_LOOP_STACK_SIZE=9216`, `PNG_MAX_BUFFERED_PIXELS=8192`).
+
+**Verification:** `python -X utf8 -m platformio run -e default -j 16` → SUCCESS;
+dev artifact `1.5.0.5.dev1-...-cpr-vcodex-steroids.bin`.
+
+*Last updated: 2026-07-31 — based on 1.5.0.3 → 1.5.0.5 merge*

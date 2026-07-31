@@ -80,6 +80,7 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
 
   bool saved = saveFramebufferAsBmp(filename, fb, renderer.getDisplayWidth(), renderer.getDisplayHeight());
   if (saved) {
+    // FAT create/modify times come from TimeUtils::registerSdFatDateTimeCallback().
     LOG_DBG("SCR", "Screenshot saved to %s", filename);
   } else {
     LOG_ERR("SCR", "Failed to save screenshot");

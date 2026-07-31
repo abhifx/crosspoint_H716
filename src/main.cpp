@@ -42,6 +42,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/CprVcodexLogs.h"
 #include "util/ScreenshotUtil.h"
+#include "util/TimeUtils.h"
 
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
@@ -569,6 +570,9 @@ void setup() {
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
     return;
   }
+
+  // Stamp all SdFat creates/syncs with RTC time when available, else last Sync Day.
+  TimeUtils::registerSdFatDateTimeCallback();
 
   HalSystem::checkPanic();
   BootRecovery::initialize();

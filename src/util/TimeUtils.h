@@ -12,6 +12,10 @@ bool isClockValid();
 bool isClockValid(uint32_t epochSeconds);
 uint32_t getAuthoritativeTimestamp();
 uint32_t getCurrentValidTimestamp();
+// Best wall-clock for SD FAT metadata: live RTC/NTP clock when available,
+// otherwise last Sync Day / last known good timestamp.
+uint32_t getBestEffortFileTimestamp();
+void registerSdFatDateTimeCallback();
 bool setCurrentDate(int year, unsigned month, unsigned day, uint32_t* epochSeconds = nullptr);
 bool getTimestampForLocalDate(int year, unsigned month, unsigned day, uint32_t* epochSeconds);
 uint32_t getLocalDayOrdinal(uint32_t epochSeconds);

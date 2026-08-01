@@ -17,9 +17,11 @@
 > | `STEROIDS-ADDICTIONS.md` | All Steroids apps, screensavers, sleep/screens, and enhancements (this file) |
 > | `STEROIDS-ALIGN-TO-UPSTREAM.md` | Instructions for merging upstream while keeping Steroids features |
 
-This document consolidates the former `STEROIDS-CLIPPINGS-BOOKMARKS.md` and
-`STEROIDS-LIBRARY.md` and adds the full app catalog (including the **Wikipedia**
-app and the **deep-sleep / sleep screen** handling).
+This document consolidates the former `STEROIDS-CLIPPINGS-BOOKMARKS.md`,
+`STEROIDS-LIBRARY.md`, and `STEROIDS-APP-ICON-THEME.md`, and adds the full app
+catalog (including the **Wikipedia** app and the **deep-sleep / sleep screen**
+handling). It is the **only** Steroids "definitions" file for apps and
+enhancements; see §10 for the upstream-merge counterpart.
 
 ---
 
@@ -67,28 +69,163 @@ icon/theme checklist at the end of this file).
 
 ---
 
-## 3. App Registration, Icons & Persistence (Required Checklist)
+## 3. App Registration, Icons & Persistence (Full Guide)
 
-For an app to appear in Home / Apps grid, render an icon in **every theme**, and
-persist its order/visibility across reboots:
+When an app appears in Home or the Apps grid, the data flows through:
 
-1. **Sprite bitmap** in `src/components/icons/*.h` (32px `<Name>Icon`, and 24px
-   `<Name>24Icon` when a theme has a 24px block).
-2. **`UIIcon` enum** value in `src/components/themes/BaseTheme.h`.
-3. **`ShortcutDefinition`** in `src/util/ShortcutRegistry.h::getShortcutDefinitions()`
-   with pointers to the app's `...Shortcut`, `...ShortcutOrder`, `...ShortcutVisible`
-   settings fields.
-4. **3 fields** in `CrossPointSettings.h` (location / order / visible).
-5. **`case UIIcon::<App>`** in `iconForName()` of **every** theme
-   (`LyraTheme` 24+32, `LyraCarouselTheme` 24+32, `LyraMarcoand75Theme`, and any
-   custom theme).
-6. **`#include`** of the bitmap header in each modified theme.
-7. **JSON load ×2 + save** for the 3 fields in `src/JsonSettingsIO.cpp`, otherwise
-   order/visibility reset to defaults at every boot (e.g. the Wikipedia shortcut
-   always fell back to "last app" before its fields were serialized).
-8. **Build** `python -X utf8 -m platformio run -e default -j 16`.
+```
+ShortcutRegistry (ShortcutDefinition)
+        |            +-- UIIcon enum value (BaseTheme.h)
+        |            +-- location/order/visible ptr (CrossPointSettings.h)
+        v
+Home / ShortcutOrderActivity
+        |
+        v
+Theme::drawIcon / renderer.drawIcon(...)
+        |
+        v
+Theme iconForName(UIIcon icon, [size])  ->  const uint8_t* bitmap  (or nullptr)
+        |
+        v
+renderer.drawIcon(bitmap, x, y, w, h)
+```
 
-> Full step-by-step guide: `STEROIDS-APP-ICON-THEME.md`.
+So making an app visible requires **exactly 5 pieces**:
+
+1. **Sprite bitmap** header in `src/components/icons/*.h`
+   (32px `<Name>Icon[]`, and 24px `<Name>24Icon[]` when a theme has a 24px block).
+2. A value in the **`UIIcon` enum** (`src/components/themes/BaseTheme.h`).
+3. A **`ShortcutDefinition`** row in
+   `src/util/ShortcutRegistry.h::getShortcutDefinitions()`.
+4. A **`case UIIcon::<App>`** in `iconForName()` of **every** active theme.
+5. **JSON persistence** of the app's 3 settings in `src/JsonSettingsIO.cpp`
+   (load + save), otherwise order/visibility reset at every boot.
+
+### 3.1 Adding a new icon (sprite bitmap)
+
+1. Convert the PNG into a 1-bpp bitmap array. Two sizes are conventional:
+   - **32×32** → `components/icons/<name>icon.h`, symbol `<Name>Icon[]`
+   - **24×24** → `components/icons/<name>icon24.h`, symbol `<Name>24Icon[]`
+   - Existing example: `wikipediaicon.h` (`WikipediaIcon`, 32) and
+     `wikipediaicon24.h` (`Wikipedia24Icon`, 24).
+
+   ```cpp
+   #pragma once
+   #include <cstdint>
+   // size: 32x32
+   static const uint8_t WikipediaIcon[] = { ... };
+   ```
+
+> Note: app icons in Home / grid are typically 32px. Older themes (Classic,
+> `TextInd`/`ScreenSaver`/`Pageview`) may use 24px; check the destination theme.
+
+### 3.2 Registering the app in ShortcutRegistry
+
+All registration lives in **`src/util/ShortcutRegistry.h`**:
+
+```cpp
+enum class ShortcutId { ..., Wikipedia, };  // add to the enum if new
+
+ShortcutDefinition{ShortcutId::Wikipedia, StrId::STR_WIKIPEDIA, StrId::STR_WIKIPEDIA_APP_DESC,
+                   UIIcon::Wikipedia,
+                   &CrossPointSettings::wikipediaShortcut,        // location
+                   &CrossPointSettings::wikipediaShortcutOrder,   // order
+                   &CrossPointSettings::wikipediaShortcutVisible} // visible
+```
+
+The 3 pointers must reference `CrossPointSettings` fields (see §3.4). The array
+count is automatic (`std::array`); `.size() + 1` is the order ceiling. Keep
+`ShortcutId` and the entry count coherent.
+
+### 3.3 Mapping the icon in EVERY theme
+
+The most common cause of an invisible icon is a missing `case` in a theme's
+`switch` on `UIIcon` (default returns `nullptr`). Every theme with its own
+`iconForName()` must include the case:
+
+| File | Function | Sizes |
+|------|----------|-------|
+| `src/components/themes/lyra/LyraTheme.cpp` | `iconForName(UIIcon)`, 2 blocks (24 and 32) | 24 + 32 |
+| `src/components/themes/lyra/LyraCarouselTheme.cpp` | `iconForName(UIIcon, int size)` | 24 + 32 |
+| `src/components/themes/lyra/LyraMarcoand75Theme.cpp` | `iconForName(UIIcon)` | 32 (maps all apps) |
+| `src/components/themes/lyra/LyraCustomTheme.cpp` | (inherits) | — |
+
+Add, per private `iconForName` block, plus the matching `#include`:
+```cpp
+case UIIcon::Wikipedia: return WikipediaIcon;    // 32px block
+// and, for a 24px block:
+case UIIcon::Wikipedia: return Wikipedia24Icon;  // 24px block
+```
+
+> Historical reference: commits `47a18ae…` and `51862b2…` fixed many invisible
+> icons (25+ missing in Carousel theme; `UIIcon::File -> ClipIcon32` missing in
+> the 32px block). The same pattern fixed Wikipedia in `LyraMarcoand75Theme`.
+
+### 3.4 Persistence of order / visibility / location
+
+For order, visibility and location (Home vs Apps) to survive reboots, the app's
+3 settings must be serialized in `src/JsonSettingsIO.cpp`. Three fields in
+`CrossPointSettings.h`:
+```cpp
+uint8_t wikipediaShortcut = SHORTCUT_APPS;  // location
+uint8_t wikipediaShortcutOrder = 22;        // order (default: last)
+uint8_t wikipediaShortcutVisible = 1;       // visible
+```
+
+And 3 lines in **both** load points and the save point of `JsonSettingsIO.cpp`:
+
+Load (repeat in **every** load function):
+```cpp
+s.wikipediaShortcut       = clamp(doc["wikipediaShortcut"]       | s.wikipediaShortcut,       shortcutLocationCount, s.wikipediaShortcut);
+s.wikipediaShortcutOrder  = clamp(doc["wikipediaShortcutOrder"]  | s.wikipediaShortcutOrder,  shortcutOrderCount,    s.wikipediaShortcutOrder);
+s.wikipediaShortcutVisible= clamp(doc["wikipediaShortcutVisible"]| s.wikipediaShortcutVisible, static_cast<uint8_t>(2), s.wikipediaShortcutVisible);
+```
+Save:
+```cpp
+doc["wikipediaShortcut"]        = s.wikipediaShortcut;
+doc["wikipediaShortcutOrder"]   = s.wikipediaShortcutOrder;
+doc["wikipediaShortcutVisible"] = s.wikipediaShortcutVisible;
+```
+
+Clamp bounds:
+- `shortcutLocationCount = CrossPointSettings::SHORTCUT_LOCATION_COUNT` (0=Home, 1=Apps).
+- `shortcutOrderCount = getShortcutDefinitions().size() + 1` (22 with 21 defs).
+
+> A default order equal to `shortcutOrderCount` (e.g. 22) is the **highest** → the
+> app always sorts last until the user reorders it. Give a lower value to start in
+> the middle.
+
+### 3.5 Verification checklist
+
+When adding an app or icon, check ALL of the following:
+
+- [ ] Sprite bitmap present in `src/components/icons/`.
+- [ ] Value added to the `UIIcon` enum in `BaseTheme.h` (if a new icon).
+- [ ] `ShortcutDefinition` present in `ShortcutRegistry.h::getShortcutDefinitions()`.
+- [ ] 3 fields (`...Shortcut`, `...ShortcutOrder`, `...ShortcutVisible`) in `CrossPointSettings.h`.
+- [ ] `case` in `LyraTheme.cpp` (24 and 32 blocks).
+- [ ] `case` in `LyraCarouselTheme.cpp` (24 and 32 blocks).
+- [ ] `case` in `LyraMarcoand75Theme.cpp` (and any other theme with a private `iconForName`).
+- [ ] `#include` of the bitmap header in every modified theme.
+- [ ] 3 load lines in `JsonSettingsIO.cpp` (in ALL load points).
+- [ ] 3 save lines in `JsonSettingsIO.cpp`.
+- [ ] `python -X utf8 -m platformio run -e default -j 16` compiles.
+- [ ] Device test: open the app from Home and from the Apps grid in every theme,
+      change order/visibility/location, reboot, and verify they persist.
+
+### 3.6 Involved files
+
+| File | Role |
+|------|------|
+| `src/components/icons/*.h` | Icon bitmap data |
+| `src/components/themes/BaseTheme.h` | `enum UIIcon` |
+| `src/util/ShortcutRegistry.h` | `ShortcutDefinition` + order/visibility helpers |
+| `src/CrossPointSettings.h` | `...Shortcut`, `...ShortcutOrder`, `...ShortcutVisible` fields |
+| `src/JsonSettingsIO.cpp` | JSON serialization (load + save) |
+| `src/components/themes/lyra/LyraTheme.cpp` | Icon mapping (24 + 32) |
+| `src/components/themes/lyra/LyraCarouselTheme.cpp` | Icon mapping (24 + 32) |
+| `src/components/themes/lyra/LyraMarcoand75Theme.cpp` | Icon mapping (32, apps) |
+| `src/components/themes/lyra/LyraCustomTheme.cpp` | Icon mapping (if present) |
 
 ---
 
@@ -216,9 +353,9 @@ book-reader side effects:
 
 ## 6. Library Module (Detail)
 
-`STEROIDS-LIBRARY.md` content (rewritten from scratch July 2026). Full library
-subsystem: on-device book collection, grid browsing with sort/filter/search, cover
-generation, and collections/series navigation.
+The complete library subsystem (rewritten from scratch July 2026): on-device book
+collection, grid browsing with sort/filter/search, cover generation, and
+collections/series navigation.
 
 ### 6.1 Storage layout
 ```
@@ -351,17 +488,27 @@ words from chapter start to the beginning of `page`. Bookmarks store
 ## 9. Build & Merge Reference
 
 - Build: `python -X utf8 -m platformio run -e default -j 16` (release: `-e gh_release`).
+- Icon/theme checklist: see §3 of this file (self-contained — no separate file needed).
 - **Merging upstream:** see `STEROIDS-ALIGN-TO-UPSTREAM.md`. When that file says
   "keep local", it means **never overwrite** the Steroids files listed there —
   including `src/JsonSettingsIO.cpp`, `src/CrossPointSettings.h`,
   `src/ReadingStatsStore.cpp`, the EPUB parser/renderer files, web server + HTML,
   i18n yaml, the LyraMarcoand75 theme, and the screensaver/sleep `main.cpp` logic.
-- **Icons/theme checklist:** see `STEROIDS-APP-ICON-THEME.md`.
+
+### 10. Relationship Between the Two Steroids Definition Files
+
+There are **exactly two** Steroids definition files. Keep it that way — do not
+reintroduce standalone `STEROIDS-LIBRARY.md` or `STEROIDS-APP-ICON-THEME.md`:
+
+| File | Role |
+|------|------|
+| **`STEROIDS-ADDICTIONS.md`** | All Steroids apps, screensaver/sleep/deep-sleep handling, and every enhancement (this file: app catalog §2, icon/theme guide §3, Wikipedia §5, library §6, bookmarks & clippings §7). |
+| **`STEROIDS-ALIGN-TO-UPSTREAM.md`** | Instructions for merging a new upstream release into Steroids while preserving everything in this file. |
 
 ---
 
-*Last updated: 2026-08-01 — CPR-vCodex Steroids. Consolidated from
-STEROIDS-LIBRARY.md, former STEROIDS-CLIPPINGS-BOOKMARKS.md, README, and the
-Wikipedia feature. Two Steroids definition files exist:
+*Last updated: 2026-08-01 — CPR-vCodex Steroids. Consolidated from the former
+STEROIDS-CLIPPINGS-BOOKMARKS.md, STEROIDS-LIBRARY.md, STEROIDS-APP-ICON-THEME.md,
+README, and the Wikipedia feature. Two Steroids definition files exist:
 STEROIDS-ADDICTIONS.md (enhancements, this file) and
 STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge instructions).*

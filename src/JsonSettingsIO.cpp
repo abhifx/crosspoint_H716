@@ -675,6 +675,9 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
   s.clippingsShortcut = clamp(doc["clippingsShortcut"] | s.clippingsShortcut, shortcutLocationCount, s.clippingsShortcut);
   s.clippingsShortcutOrder = clamp(doc["clippingsShortcutOrder"] | s.clippingsShortcutOrder, shortcutOrderCount, s.clippingsShortcutOrder);
   s.clippingsShortcutVisible = clamp(doc["clippingsShortcutVisible"] | s.clippingsShortcutVisible, static_cast<uint8_t>(2), s.clippingsShortcutVisible);
+  s.wikipediaShortcut = clamp(doc["wikipediaShortcut"] | s.wikipediaShortcut, shortcutLocationCount, s.wikipediaShortcut);
+  s.wikipediaShortcutOrder = clamp(doc["wikipediaShortcutOrder"] | s.wikipediaShortcutOrder, shortcutOrderCount, s.wikipediaShortcutOrder);
+  s.wikipediaShortcutVisible = clamp(doc["wikipediaShortcutVisible"] | s.wikipediaShortcutVisible, static_cast<uint8_t>(2), s.wikipediaShortcutVisible);
   s.achievementsShortcutVisible = clamp(doc["achievementsShortcutVisible"] | s.achievementsShortcutVisible,
                                         static_cast<uint8_t>(2), s.achievementsShortcutVisible);
   s.ifFoundShortcutVisible = clamp(doc["ifFoundShortcutVisible"] | s.ifFoundShortcutVisible, static_cast<uint8_t>(2),
@@ -1041,6 +1044,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["clippingsShortcut"] = s.clippingsShortcut;
   doc["clippingsShortcutOrder"] = s.clippingsShortcutOrder;
   doc["clippingsShortcutVisible"] = s.clippingsShortcutVisible;
+  doc["wikipediaShortcut"] = s.wikipediaShortcut;
+  doc["wikipediaShortcutOrder"] = s.wikipediaShortcutOrder;
+  doc["wikipediaShortcutVisible"] = s.wikipediaShortcutVisible;
   doc["achievementsShortcutVisible"] = s.achievementsShortcutVisible;
   doc["ifFoundShortcutVisible"] = s.ifFoundShortcutVisible;
   doc["readMeShortcutVisible"] = s.readMeShortcutVisible;
@@ -1297,6 +1303,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.clippingsShortcut = clamp(doc["clippingsShortcut"] | s.clippingsShortcut, shortcutLocationCount, s.clippingsShortcut);
   s.clippingsShortcutOrder = clamp(doc["clippingsShortcutOrder"] | s.clippingsShortcutOrder, shortcutOrderCount, s.clippingsShortcutOrder);
   s.clippingsShortcutVisible = clamp(doc["clippingsShortcutVisible"] | s.clippingsShortcutVisible, static_cast<uint8_t>(2), s.clippingsShortcutVisible);
+  s.wikipediaShortcut = clamp(doc["wikipediaShortcut"] | s.wikipediaShortcut, shortcutLocationCount, s.wikipediaShortcut);
+  s.wikipediaShortcutOrder = clamp(doc["wikipediaShortcutOrder"] | s.wikipediaShortcutOrder, shortcutOrderCount, s.wikipediaShortcutOrder);
+  s.wikipediaShortcutVisible = clamp(doc["wikipediaShortcutVisible"] | s.wikipediaShortcutVisible, static_cast<uint8_t>(2), s.wikipediaShortcutVisible);
 
   normalizeShortcutOrderSettings(s);
   CrossPointSettings::validateFrontButtonMapping(s);

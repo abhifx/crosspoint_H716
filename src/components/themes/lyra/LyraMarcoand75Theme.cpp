@@ -62,6 +62,7 @@
 #include "components/icons/transfer.h"
 #include "components/icons/trophy.h"
 #include "components/icons/wifi.h"
+#include "components/icons/wikipediaicon.h"
 #include "fontIds.h"
 
 namespace {
@@ -152,6 +153,7 @@ const uint8_t* iconForName(UIIcon icon) {
     case UIIcon::FileTransfer: return FileTransferIcon;
     case UIIcon::Calibre: return CalibreIcon;
     case UIIcon::File: return ClipIcon32;
+    case UIIcon::Wikipedia: return WikipediaIcon;
     default: return nullptr;
   }
 }

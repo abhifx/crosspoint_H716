@@ -111,10 +111,18 @@ bool MappedInputManager::wasPressed(const Button button) const { return mapButto
 
 void MappedInputManager::armConfirmReleaseGuard() const { suppressConfirmReleaseUntilButtonUp = true; }
 
+void MappedInputManager::armBackReleaseGuard() const { suppressBackReleaseUntilButtonUp = true; }
+
 bool MappedInputManager::wasReleased(const Button button) const {
   if (button == Button::Confirm && suppressConfirmReleaseUntilButtonUp) {
     if (!isPressed(Button::Confirm)) {
       suppressConfirmReleaseUntilButtonUp = false;
+    }
+    return false;
+  }
+  if (button == Button::Back && suppressBackReleaseUntilButtonUp) {
+    if (!isPressed(Button::Back)) {
+      suppressBackReleaseUntilButtonUp = false;
     }
     return false;
   }

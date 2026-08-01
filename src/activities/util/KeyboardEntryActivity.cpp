@@ -1,5 +1,6 @@
 #include "KeyboardEntryActivity.h"
 
+#include <EpdFontFamily.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
@@ -8,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HeaderDateUtils.h"
 
 const char* const KeyboardEntryActivity::shiftString[2] = {"shift", "SHIFT"};
 
@@ -366,7 +368,21 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title.c_str());
+  if (headerIcon != nullptr) {
+    // Custom header with a leading icon (e.g. the Wikipedia logo) before the title.
+    HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
+    const int iconSize = 28;
+    const int headerY = metrics.topPadding;
+    const int iconMargin = 20;
+    const int iconX = iconMargin;
+    const int iconY = headerY + (metrics.headerHeight - iconSize) / 2;
+    renderer.drawIcon(headerIcon, iconX, iconY, iconSize, iconSize);
+    const int titleLh = renderer.getLineHeight(UI_12_FONT_ID);
+    const int titleY = headerY + (metrics.headerHeight - titleLh) / 2;
+    renderer.drawText(UI_12_FONT_ID, iconX + iconSize + 10, titleY, title.c_str(), true, EpdFontFamily::BOLD);
+  } else {
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title.c_str());
+  }
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int inputStartY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing +

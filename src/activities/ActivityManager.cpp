@@ -127,6 +127,7 @@ void ActivityManager::loop() {
         currentActivity = std::move(stackActivities.back());
         stackActivities.pop_back();
         mappedInput.armConfirmReleaseGuard();
+        mappedInput.armBackReleaseGuard();
         requestUiTransitionRefresh(previousWeight, currentActivity->getUiTransitionRefreshWeight());
         LOG_DBG("ACT", "Popped from activity stack, new size = %zu", stackActivities.size());
         // Handle result if necessary
@@ -180,6 +181,7 @@ void ActivityManager::loop() {
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
       mappedInput.armConfirmReleaseGuard();
+      mappedInput.armBackReleaseGuard();
       requestUiTransitionRefresh(previousWeight, nextWeight);
 
       lock.unlock();  // onEnter may acquire its own lock
@@ -224,6 +226,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
         newActivity ? newActivity->getUiTransitionRefreshWeight() : Activity::UI_TRANSITION_REFRESH_WEIGHT_NONE;
     currentActivity = std::move(newActivity);
     mappedInput.armConfirmReleaseGuard();
+    mappedInput.armBackReleaseGuard();
     requestUiTransitionRefresh(previousWeight, nextWeight);
     currentActivity->onEnter();
   }

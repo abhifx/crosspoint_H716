@@ -22,12 +22,14 @@ class KeyboardEntryActivity : public Activity {
  public:
   explicit KeyboardEntryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                  std::string title = "Enter Text", std::string initialText = "",
-                                 const size_t maxLength = 0, InputType inputType = InputType::Text)
+                                 const size_t maxLength = 0, InputType inputType = InputType::Text,
+                                 const uint8_t* headerIcon = nullptr)
       : Activity("KeyboardEntry", renderer, mappedInput),
         title(std::move(title)),
         text(std::move(initialText)),
         maxLength(maxLength),
-        inputType(inputType) {}
+        inputType(inputType),
+        headerIcon(headerIcon) {}
 
   // Backward-compatible constructor for older callers still using isPassword.
   explicit KeyboardEntryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -47,6 +49,7 @@ class KeyboardEntryActivity : public Activity {
   std::string text;
   size_t maxLength;
   InputType inputType;
+  const uint8_t* headerIcon = nullptr;  // optional icon drawn before the header title
   bool passwordVisible = false;
 
   ButtonNavigator buttonNavigator;

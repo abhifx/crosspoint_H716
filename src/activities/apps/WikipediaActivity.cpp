@@ -25,6 +25,7 @@
 #include "network/HttpDownloader.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/WikiTxtReaderActivity.h"
+#include "components/PanelDrawHelper.h"
 #include "components/icons/wikipediaicon.h"
 #include "util/HeaderDateUtils.h"
 #include "util/MarkdownReader.h"
@@ -425,40 +426,68 @@ void WikipediaActivity::render(RenderLock&&) {
   }
 }
 
-void WikipediaActivity::renderSearchInput() {
-  int iconX = 6;
-  int iconY = 8;
-  const uint8_t* iconData = WikipediaIcon;
-  for (int row = 0; row < 32; row++) {
-    for (int col = 0; col < 32; col++) {
-      int byteIdx = row * 4 + col / 8;
-      int bitIdx = col % 8;
-      if (byteIdx < 128) {
-        bool white = (iconData[byteIdx] & (0x80 >> bitIdx)) != 0;
-        renderer.drawPixel(iconX + col, iconY + row, !white);
-      }
-    }
-  }
-  HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_WIKIPEDIA));
-  int pw = renderer.getScreenWidth();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int ct = hh + 20;
-  int bw = pw - 40;
+// Shared header for every Wikipedia screen: Wikipedia logo (top-left, same
+// rendering as Home) followed by the page title, always at the same position.
+void WikipediaActivity::renderWikipediaHeader(const char* title) {
+  // Top thin line (date/reminder) consistent with the rest of the UI.
+  HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
 
-  auto drawBtn = [&](int idx, int y, const char* label) {
-    bool sel = selectedIndex == idx;
-    if (sel) renderer.fillRect(20, y, bw, 36, 1);
-    renderer.drawRect(20, y, bw, 36, 1);
-    renderer.drawText(UI_10_FONT_ID, 28, y + 10, label, !sel);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int margin = 20;
+  const int logoSize = 32;
+
+  // Same position on every page: logo at the left, title right after it.
+  const int headerY = metrics.topPadding;
+  const int logoX = margin;
+  const int logoY = headerY + 12;
+
+  // Draw exactly like Home uses the app icon (renderer.drawIcon), so the logo
+  // is not rotated and looks identical to the Home/Apps grid.
+  renderer.drawIcon(WikipediaIcon, logoX, logoY, logoSize, logoSize);
+
+  // Title text, left-aligned and vertically centred with the logo.
+  const int titleLh = renderer.getLineHeight(UI_12_FONT_ID);
+  const int titleY = logoY + (logoSize - titleLh) / 2;
+  renderer.drawText(UI_12_FONT_ID, logoX + logoSize + 10, titleY, title, true, EpdFontFamily::BOLD);
+}
+
+// Returns the shared header content top (below logo+title) used by the screens.
+namespace {
+int wikipediaHeaderContentTop(GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return metrics.topPadding + 12 + 32 + 14;
+}
+}  // namespace
+
+void WikipediaActivity::renderSearchInput() {
+  const int pw = renderer.getScreenWidth();
+  const int margin = 20;
+
+  // --- Header: logo + "Wikipedia" title, shared across all app pages ---
+  renderWikipediaHeader(tr(STR_WIKIPEDIA));
+
+  // --- Cyberpunk action panels (pushed down 64px below the shared header) ---
+  const int ct = wikipediaHeaderContentTop(renderer) + 64;
+  const int panelW = pw - margin * 2;
+  const int panelH = 54;
+  const int gap = 18;
+
+  auto drawPanel = [&](int idx, int x, int y, int w, int h, const char* label) {
+    const bool sel = selectedIndex == idx;
+    if (sel) renderer.fillRect(x, y, w, h, 1);
+    PanelDrawHelper::drawCyberpunkPanel(renderer, x, y, w, h, sel);
+    // Label, left-aligned with a little padding, vertically centred.
+    const int lh = renderer.getLineHeight(UI_10_FONT_ID);
+    renderer.drawText(UI_10_FONT_ID, x + 16, y + (h - lh) / 2, label, !sel, EpdFontFamily::BOLD);
   };
 
   const char* searchLbl = searchInput.empty() ? tr(STR_SEARCH_HINT) : searchInput.c_str();
-  drawBtn(0, ct, searchLbl);
-  drawBtn(1, ct + 46, tr(STR_RECENT_SEARCHES));
-  int cacheCount = static_cast<int>(cachedPageTitles.size());
+  drawPanel(0, margin, ct, panelW, panelH, searchLbl);
+  drawPanel(1, margin, ct + panelH + gap, panelW, panelH, tr(STR_RECENT_SEARCHES));
+  const int cacheCount = static_cast<int>(cachedPageTitles.size());
   char cacheLbl[64];
   snprintf(cacheLbl, sizeof(cacheLbl), "%s (%d)", tr(STR_CACHED_PAGES), cacheCount);
-  drawBtn(2, ct + 92, cacheLbl);
+  drawPanel(2, margin, ct + 2 * (panelH + gap), panelW, panelH, cacheLbl);
 
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, lb.btn1, lb.btn2, lb.btn3, lb.btn4);
@@ -466,7 +495,7 @@ void WikipediaActivity::renderSearchInput() {
 }
 
 void WikipediaActivity::renderSearchHistory() {
-  HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_RECENT_SEARCHES));
+  renderWikipediaHeader(tr(STR_RECENT_SEARCHES));
   auto layout = ListLayout::compute(renderer, true, false);
   if (historyQueries.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, layout.contentTop + layout.contentHeight/2, tr(STR_WIKIPEDIA_NO_RESULTS));
@@ -481,7 +510,7 @@ void WikipediaActivity::renderSearchHistory() {
 }
 
 void WikipediaActivity::renderCachedPages() {
-  HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_CACHED_PAGES));
+  renderWikipediaHeader(tr(STR_CACHED_PAGES));
   auto layout = ListLayout::compute(renderer, true, false);
   if (cachedPageTitles.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, layout.contentTop + layout.contentHeight/2, tr(STR_WIKIPEDIA_NO_RESULTS));
@@ -497,7 +526,7 @@ void WikipediaActivity::renderCachedPages() {
 
 void WikipediaActivity::renderResults() {
   auto layout = ListLayout::compute(renderer, true, false);
-  HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_WIKIPEDIA));
+  renderWikipediaHeader(tr(STR_WIKIPEDIA));
   int rc = static_cast<int>(searchResults.size());
   if (rc == 0) {
     renderer.drawCenteredText(UI_10_FONT_ID, layout.contentTop + layout.contentHeight/2, tr(STR_WIKIPEDIA_NO_RESULTS));
@@ -886,10 +915,31 @@ void WikipediaActivity::fetchFullArticle() {
 }
 
 void WikipediaActivity::launchSearchKeyboard() {
+  // Launch the text editor. On cancel we must return to the Wikipedia main page
+  // (SEARCH_INPUT), not close the app; on confirm we run the search.
   startActivityForResult(
-      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_WIKIPEDIA), searchInput, 128),
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_WIKIPEDIA), searchInput, 128,
+                                              InputType::Text, WikipediaIcon),
       [this](const ActivityResult& r) {
-        if (!r.isCancelled) { searchInput = std::get<KeyboardResult>(r.data).text; performSearch(searchInput); }
+        if (r.isCancelled) {
+          // Stay on the main search page.
+          state = State::SEARCH_INPUT;
+          requestUpdate();
+          return;
+        }
+        const auto* kbResult = std::get_if<KeyboardResult>(&r.data);
+        if (!kbResult) {
+          state = State::SEARCH_INPUT;
+          requestUpdate();
+          return;
+        }
+        searchInput = kbResult->text;
+        if (searchInput.empty()) {
+          state = State::SEARCH_INPUT;  // empty query: just return to main page
+          requestUpdate();
+          return;
+        }
+        performSearch(searchInput);
       });
 }
 

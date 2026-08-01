@@ -69,6 +69,10 @@ class WikipediaActivity final : public Activity {
 
   int pagesUntilFullRefresh = 0;
 
+  // Shared header for every Wikipedia screen: Wikipedia logo at top-left, then
+  // the page title, always at the same position (matches the Home rendering).
+  void renderWikipediaHeader(const char* title);
+
   void renderSearchInput();
   void renderSearchHistory();
   void renderCachedPages();

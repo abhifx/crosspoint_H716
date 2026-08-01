@@ -14,8 +14,6 @@
 #include <cstdio>
 #include <cctype>
 
-#include <Serialization.h>
-
 #include "CrossPointSettings.h"
 #include "SdCardFontGlobals.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -26,6 +24,7 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/WikiTxtReaderActivity.h"
 #include "components/icons/wikipediaicon.h"
 #include "util/HeaderDateUtils.h"
 #include "util/MarkdownReader.h"
@@ -245,10 +244,10 @@ char* WikipediaActivity::ensureBuffer() {
 void WikipediaActivity::freeBuffer() {
   textBuffer.reset();
   textLength = 0;
-  articlePageOffset = 0;
   g_articleFilePath.clear();
   closeArticleFile();
-  LOG_DBG("WIKI", "Freed text buffer");
+
+  LOG_DBG("WIKI", "Freed resources");
 }
 
 void WikipediaActivity::wifiOff() {
@@ -282,13 +281,8 @@ void WikipediaActivity::onEnter() {
   selectedIndex = 0;
   searchInput.clear();
   searchResults.clear();
-  textLength = 0;
-  articlePageOffset = 0;
   errorMessage.clear();
-  textBuffer.reset();
-  g_articleFilePath.clear();
-  pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  invalidatePageIndex();
+  freeBuffer(); // Assicura stato pulito
   loadHistory();
   loadCachedPages();
   requestUpdate();
@@ -304,10 +298,6 @@ void WikipediaActivity::onExit() {
 }
 
 void WikipediaActivity::loop() {
-  static uint32_t lastLog = 0;
-  uint32_t now = millis();
-  if (now - lastLog > 2000) { LOG_DBG("WIKI", "loop state=%d", static_cast<int>(state)); lastLog = now; }
-
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     switch (state) {
       case State::SEARCH_INPUT:
@@ -328,13 +318,6 @@ void WikipediaActivity::loop() {
       case State::LOADING_ARTICLE:
       case State::LOADING_FULL_ARTICLE:
         freeBuffer(); state = State::SEARCH_INPUT; requestUpdate(); break;
-      case State::FULL_ARTICLE:
-        if (fromCache) {
-          fromCache = false; freeBuffer(); state = State::CACHED_PAGES; requestUpdate();
-        } else {
-          freeBuffer(); state = State::ARTICLE_DISPLAY; requestUpdate();
-        }
-        break;
     }
     return;
   }
@@ -409,8 +392,6 @@ void WikipediaActivity::loop() {
       if (!cachedPageTitles.empty()) { int old = selectedIndex; selectedIndex = ButtonNavigator::nextIndex(selectedIndex, static_cast<int>(cachedPageTitles.size())); if (old != selectedIndex) requestUpdate(); }
     } else if (state == State::SEARCH_RESULTS) {
       if (!searchResults.empty()) { int old = selectedIndex; selectedIndex = ButtonNavigator::nextIndex(selectedIndex, static_cast<int>(searchResults.size())); if (old != selectedIndex) requestUpdate(); }
-    } else if (state == State::FULL_ARTICLE) {
-      advancePage(1);
     }
   });
 
@@ -424,8 +405,6 @@ void WikipediaActivity::loop() {
       if (!cachedPageTitles.empty()) { int old = selectedIndex; selectedIndex = ButtonNavigator::previousIndex(selectedIndex, static_cast<int>(cachedPageTitles.size())); if (old != selectedIndex) requestUpdate(); }
     } else if (state == State::SEARCH_RESULTS) {
       if (!searchResults.empty()) { int old = selectedIndex; selectedIndex = ButtonNavigator::previousIndex(selectedIndex, static_cast<int>(searchResults.size())); if (old != selectedIndex) requestUpdate(); }
-    } else if (state == State::FULL_ARTICLE) {
-      advancePage(-1);
     }
   });
 }
@@ -442,7 +421,6 @@ void WikipediaActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight()/2, tr(STR_WIKIPEDIA_LOADING_ARTICLE));
       renderer.displayBuffer(); break;
     case State::ARTICLE_DISPLAY:      renderArticle(); break;
-    case State::FULL_ARTICLE:         renderFullArticle(); break;
     case State::ERROR:                renderError(); break;
   }
 }
@@ -587,218 +565,6 @@ void WikipediaActivity::renderArticle() {
   renderer.displayBuffer();
 }
 
-void WikipediaActivity::renderFullArticle() {
-  renderFullArticleMarkdown();
-}
-
-void WikipediaActivity::renderFullArticleMarkdown() {
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ct = hh + 4, ch = ph - ct - bh - 4;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-  int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
-
-  if (!indexBuilt) {
-    ensureArticleIndex();
-  }
-
-  std::vector<MarkdownReader::TextLine> pageLines;
-  size_t nextOffset = 0;
-  if (!loadArticlePage(pageOffsets[currentPage], pageLines, nextOffset) || pageLines.empty()) {
-    renderer.drawCenteredText(UI_10_FONT_ID, ph / 2, "No content");
-    auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, nullptr, nullptr);
-    GUI.drawButtonHints(renderer, lb.btn1, nullptr, nullptr, nullptr);
-    renderer.displayBuffer();
-    return;
-  }
-
-  // Disegna header con titolo e numero di pagina
-  HeaderDateUtils::drawHeaderWithDate(renderer, currentQuery.c_str());
-  
-  // Numero di pagina in alto a sinistra nell'header
-  char pageInfo[24];
-  snprintf(pageInfo, sizeof(pageInfo), "%d/%d", currentPage + 1, totalPages > 0 ? totalPages : 1);
-  renderer.drawText(SMALL_FONT_ID, readingMarginH, 8, pageInfo, true);
-
-  auto* fcm = renderer.getFontCacheManager();
-  if (fcm) {
-    auto scope = fcm->createPrewarmScope();
-    renderArticleLines(pageLines, ct, ch, lineHeight);
-    scope.endScanAndPrewarm();
-    renderArticleLines(pageLines, ct, ch, lineHeight);
-  } else {
-    renderArticleLines(pageLines, ct, ch, lineHeight);
-  }
-
-  auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, lb.btn1, lb.btn2, lb.btn3, lb.btn4);
-
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, false);
-}
-
-void WikipediaActivity::renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y,
-                                           int contentHeight, int lineHeight) {
-  int pw = renderer.getScreenWidth();
-  int tw = pw - readingMarginH * 2;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-  const int bottom = y + contentHeight;
-
-  for (const auto& line : lines) {
-    if (y + lineHeight > bottom) break;
-    int x = readingMarginH;
-    if (!line.text.empty()) {
-      int indentPx = line.indent * renderer.getSpaceWidth(fId, EpdFontFamily::REGULAR) * 2;
-      x += indentPx;
-      if (line.spans.empty()) {
-        renderer.drawText(fId, x, y, line.text.c_str(), true, static_cast<EpdFontFamily::Style>(line.style));
-      } else {
-        int spanX = x;
-        for (const auto& span : line.spans) {
-          const auto spanStyle = static_cast<EpdFontFamily::Style>(span.style);
-          renderer.drawText(fId, spanX, y, span.text.c_str(), true, spanStyle);
-          spanX += renderer.getTextAdvanceX(fId, span.text.c_str(), spanStyle);
-        }
-      }
-    }
-    y += lineHeight;
-  }
-}
-
-bool WikipediaActivity::loadArticlePage(size_t offset, std::vector<MarkdownReader::TextLine>& outLines,
-                                        size_t& nextOffset) {
-  outLines.clear();
-
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ch = ph - hh - bh - 8;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-  int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
-  int linesPerPage = std::max(1, ch / lineHeight);
-  int tw = pw - readingMarginH * 2;
-
-  char* buf = ensureBuffer();
-  size_t readLen = 0;
-  
-  size_t articleLen = textLength;
-
-  if (!g_articleFilePath.empty()) {
-    // Usa il file mantenuto aperto per affidabilità e velocità
-    if (isFileOpen) {
-      openFile.seek(offset);
-      readLen = openFile.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-    } else {
-      HalFile f;
-      if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), f)) {
-        f.seek(offset);
-        readLen = f.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-        f.close();
-      }
-    }
-  } else if (textBuffer) {
-    size_t available = (textLength > offset) ? (textLength - offset) : 0;
-    readLen = std::min(available, TEXT_BUF_SIZE - 1);
-    memcpy(buf, textBuffer.get() + offset, readLen);
-  }
-  
-  if (readLen >= TEXT_BUF_SIZE) readLen = TEXT_BUF_SIZE - 1;
-  buf[readLen] = '\0';
-
-  size_t pos = 0;
-  size_t consumedBytes = 0;
-
-  while (pos < readLen && static_cast<int>(outLines.size()) < linesPerPage) {
-    size_t lineEnd = pos;
-    while (lineEnd < readLen && buf[lineEnd] != '\n') lineEnd++;
-
-    if (lineEnd >= readLen && (offset + lineEnd < articleLen)) {
-      consumedBytes = pos;
-      break;
-    }
-
-    size_t lineLen = lineEnd - pos;
-    while (lineLen > 0 && buf[pos + lineLen - 1] == '\r') lineLen--;
-
-    const std::string sourceLine(buf + pos, lineLen);
-    MarkdownReader::TextLine lineInfo = MarkdownReader::parseLine(sourceLine);
-
-    if (lineInfo.text.empty()) {
-      pos = (lineEnd < readLen) ? lineEnd + 1 : readLen;
-      consumedBytes = pos;
-      continue;
-    }
-
-    std::vector<MarkdownReader::TextLine> wrappedLines;
-    {
-      const int indentPx = lineInfo.indent * renderer.getSpaceWidth(fId, EpdFontFamily::REGULAR) * 2;
-      const int usableWidth = std::max(1, tw - indentPx);
-      size_t wrappedStart = 0;
-      const size_t total = lineInfo.text.length();
-      while (wrappedStart < total) {
-        const std::string remain = lineInfo.text.substr(wrappedStart);
-        if (mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, remain.length())) <= usableWidth) {
-          wrappedLines.push_back(sliceMdLine(lineInfo, wrappedStart, remain.length()));
-          wrappedStart = total;
-          break;
-        }
-        size_t breakPos = remain.length();
-        while (breakPos > 0 &&
-               mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, breakPos)) > usableWidth) {
-          const size_t spacePos = remain.rfind(' ', breakPos - 1);
-          if (spacePos != std::string::npos && spacePos > 0) {
-            breakPos = spacePos;
-            while (breakPos > 0 && remain[breakPos - 1] == ' ') breakPos--;
-            if (breakPos == 0) { breakPos = 1; }
-            continue;
-          }
-          size_t lo = 1, hi = breakPos, best = 1;
-          while (lo <= hi) {
-            const size_t mid = (lo + hi) / 2;
-            if (mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, mid)) <= usableWidth) {
-              best = mid;
-              lo = mid + 1;
-            } else {
-              hi = mid - 1;
-            }
-          }
-          breakPos = best;
-          break;
-        }
-        if (breakPos == 0) breakPos = 1;
-        wrappedLines.push_back(sliceMdLine(lineInfo, wrappedStart, breakPos));
-        size_t skip = breakPos;
-        if (breakPos < remain.length() && remain[breakPos] == ' ') skip++;
-        wrappedStart += skip;
-      }
-    }
-
-    if (!outLines.empty() && outLines.size() + wrappedLines.size() > static_cast<size_t>(linesPerPage)) {
-      consumedBytes = pos;
-      break;
-    }
-    for (auto& w : wrappedLines) {
-      outLines.push_back(std::move(w));
-    }
-
-    pos = (lineEnd < readLen) ? lineEnd + 1 : readLen;
-    consumedBytes = pos;
-  }
-
-  // Garantisce che nextOffset sia sempre all'inizio esatto di una riga
-  if (consumedBytes > 0 && consumedBytes < readLen && buf[consumedBytes - 1] != '\n') {
-      size_t searchPos = consumedBytes;
-      while (searchPos < readLen && buf[searchPos] != '\n') searchPos++;
-      if (searchPos < readLen) {
-          consumedBytes = searchPos + 1;
-      }
-  }
-  
-  nextOffset = offset + consumedBytes;
-  if (nextOffset > articleLen) nextOffset = articleLen;
-  return !outLines.empty();
-}
-
 void WikipediaActivity::renderError() {
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_WIKIPEDIA));
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight()/2 - 20, tr(STR_WIKIPEDIA_ERROR));
@@ -859,42 +625,24 @@ void WikipediaActivity::performSearch(const std::string& query) {
 void WikipediaActivity::openArticleForReading(const std::string& title) {
   currentQuery = title;
   cacheReadingSettings();
-  articlePageOffset = 0;
-  currentPage = 0;
-  
-  invalidatePageIndex(); 
-  
-  if (!loadCachedArticle(title)) {
-      showError(tr(STR_WIKIPEDIA_ERROR));
-      return;
+
+  // Il testo dell'articolo e' gia' stato convertito in markdown e salvato nel
+  // file .wiki in cache. La lettura/rendering e' affidata a WikiTxtReaderActivity,
+  // che usa lo stesso identico sistema di TxtReaderActivity (span markdown,
+  // paginazione con indice, rendering a doppio passaggio) senza aggiornare
+  // statistiche/progressi/recent books.
+  const std::string wikiPath = cachePathForTitle(title);
+  if (!Storage.exists(wikiPath.c_str())) {
+    showError(tr(STR_WIKIPEDIA_ERROR));
+    return;
   }
 
-  // Mantieni il file aperto per tutta la sessione di lettura
-  openArticleFile();
-
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-  if (renderer.isSdCardFont(fId)) {
-      char* buf = ensureBuffer();
-      size_t readLen = 0;
-      if (!g_articleFilePath.empty()) {
-          if (isFileOpen) {
-              openFile.seek(0);
-              readLen = openFile.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-          }
-      } else if (textBuffer) {
-          readLen = std::min(textLength, TEXT_BUF_SIZE - 1);
-          memcpy(buf, textBuffer.get(), readLen);
-      }
-      if (readLen > 0) {
-          buf[readLen] = '\0';
-          renderer.ensureSdCardFontReady(fId, buf, /*styleMask=*/0x0F);
-      }
-  }
-
-  ensureArticleIndex();
-  
-  state = State::FULL_ARTICLE;
-  requestUpdate();
+  // Quando il reader chiude, si torna qui (alla schermata precedente).
+  startActivityForResult(
+      std::make_unique<WikiTxtReaderActivity>(renderer, mappedInput, wikiPath, title),
+      [](const ActivityResult& /*r*/) {
+        // Ritorno alla UI Wikipedia: nessuna azione extra richiesta.
+      });
 }
 
 void WikipediaActivity::fetchArticleSummary() {
@@ -1002,12 +750,11 @@ void WikipediaActivity::fetchFullArticle() {
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
       cacheArticle(currentQuery);
-      articlePageOffset = 0;
-      ensureArticleIndex();
-      state = State::FULL_ARTICLE; requestUpdate();
+      openArticleForReading(currentQuery);
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
+
 
   HalFile sdFile;
   if (!Storage.openFileForWrite("WIKI", rawPath.c_str(), sdFile)) {
@@ -1077,9 +824,7 @@ void WikipediaActivity::fetchFullArticle() {
       size_t len = std::min(fallbackText.size(), static_cast<size_t>(TEXT_BUF_SIZE - 1));
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
-      articlePageOffset = 0;
-      ensureArticleIndex();
-      state = State::FULL_ARTICLE; requestUpdate();
+      openArticleForReading(currentQuery);
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
@@ -1111,9 +856,7 @@ void WikipediaActivity::fetchFullArticle() {
       size_t len = std::min(fallbackText.size(), static_cast<size_t>(TEXT_BUF_SIZE - 1));
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
-      articlePageOffset = 0;
-      ensureArticleIndex();
-      state = State::FULL_ARTICLE; requestUpdate();
+      openArticleForReading(currentQuery);
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
@@ -1133,10 +876,6 @@ void WikipediaActivity::fetchFullArticle() {
       showError(tr(STR_WIKIPEDIA_ERROR));
       return;
     }
-  }
-
-  if (Storage.exists(indexCachePathForTitle(currentQuery).c_str())) {
-    Storage.remove(indexCachePathForTitle(currentQuery).c_str());
   }
 
   loadCachedPages();
@@ -1165,230 +904,6 @@ void WikipediaActivity::goBackToResults() {
 
 void WikipediaActivity::showError(const std::string& msg) {
   freeBuffer(); errorMessage = msg; state = State::ERROR; requestUpdate();
-}
-
-void WikipediaActivity::invalidatePageIndex() {
-  pageOffsets.clear();
-  totalPages = 0;
-  currentPage = 0;
-  indexBuilt = false;
-  articlePageOffset = 0;
-}
-
-void WikipediaActivity::ensureArticleIndex() {
-  if (indexBuilt) return;
-  if (loadPageIndexCache()) return;
-  
-  renderer.clearScreen();
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
-  renderer.displayBuffer();
-  buildArticlePageIndex();
-}
-
-void WikipediaActivity::buildArticlePageIndex() {
-  pageOffsets.clear();
-  pageOffsets.reserve(100);
-  pageOffsets.push_back(0);
-  totalPages = 1;
-
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ch = ph - hh - bh - 8;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-  int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
-  int linesPerPage = std::max(1, ch / lineHeight);
-  int tw = pw - readingMarginH * 2;
-
-  char* buf = ensureBuffer();
-  size_t articleLen = textLength;
-  
-  // FIX CRITICO PER VELOCITÀ: Pre-carica TUTTI i glyph del file nella cache dei font
-  // Questo evita la decompressione on-demand durante il word-wrap, che era il collo di bottiglia
-  if (renderer.isSdCardFont(fId)) {
-      size_t offset = 0;
-      while (offset < articleLen) {
-          size_t readLen = 0;
-          if (!g_articleFilePath.empty()) {
-              HalFile f;
-              if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), f)) {
-                  f.seek(offset);
-                  readLen = f.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-                  f.close();
-              }
-          } else if (textBuffer) {
-              size_t available = (textLength > offset) ? (textLength - offset) : 0;
-              readLen = std::min(available, TEXT_BUF_SIZE - 1);
-              memcpy(buf, textBuffer.get() + offset, readLen);
-          }
-          if (readLen > 0) {
-              buf[readLen] = '\0';
-              renderer.ensureSdCardFontReady(fId, buf, /*styleMask=*/0x0F);
-          }
-          offset += readLen;
-          if (readLen == 0) break;
-      }
-  }
-
-  renderer.clearScreen();
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
-  renderer.displayBuffer();
-
-  size_t offset = 0;
-  std::vector<MarkdownReader::TextLine> dummy;
-  dummy.reserve(64);
-  
-  int guard = 0;
-  const int maxGuard = 200000;
-
-  while (guard++ < maxGuard) {
-    size_t next = offset;
-    
-    if (!loadArticlePage(offset, dummy, next)) break;
-    if (next <= offset) break;
-    
-    if (!dummy.empty()) {
-        offset = next;
-        pageOffsets.push_back(static_cast<uint32_t>(offset));
-        totalPages++;
-    } else {
-        offset = next;
-    }
-    
-    if (totalPages % 50 == 0) {
-        vTaskDelay(1);
-    }
-  }
-
-  if (totalPages > 1 && pageOffsets.back() >= textLength && textLength > 0) {
-    pageOffsets.pop_back();
-    totalPages--;
-  }
-
-  indexBuilt = true;
-  indexedWidth = renderer.getScreenWidth() - readingMarginH * 2;
-  indexedLineHeight = readingLineHeight > 0 ? readingLineHeight : 0;
-  indexByteSize = textLength;
-  if (currentPage >= totalPages) currentPage = totalPages - 1;
-  LOG_DBG("WIKI", "Article page index built: %d pages (%zu bytes)", totalPages, textLength);
-
-  savePageIndexCache();
-}
-
-std::string WikipediaActivity::indexCachePathForTitle(const std::string& title) {
-  return cachePathForTitle(title) + ".bin";
-}
-
-bool WikipediaActivity::loadPageIndexCache() {
-  pageOffsets.clear();
-  const std::string path = indexCachePathForTitle(currentQuery);
-  FsFile f;
-  if (!Storage.openFileForRead("WIKI", path.c_str(), f)) return false;
-
-  uint32_t magic = 0, version = 0;
-  serialization::readPod(f, magic);
-  serialization::readPod(f, version);
-  if (magic != 0x5749434B || version != 1) {
-    Storage.remove(path.c_str());
-    return false;
-  }
-
-  uint32_t cachedSize = 0;
-  serialization::readPod(f, cachedSize);
-  if (cachedSize != textLength) {
-    Storage.remove(path.c_str());
-    return false;
-  }
-
-  int32_t cachedWidth = 0;
-  serialization::readPod(f, cachedWidth);
-  const int width = renderer.getScreenWidth() - readingMarginH * 2;
-  if (cachedWidth != width) {
-    Storage.remove(path.c_str());
-    return false;
-  }
-
-  int32_t cachedLineHeight = 0;
-  serialization::readPod(f, cachedLineHeight);
-  const int lh = readingLineHeight > 0 ? readingLineHeight : 0;
-  if (cachedLineHeight != lh) {
-    Storage.remove(path.c_str());
-    return false;
-  }
-
-  uint32_t numPages = 0;
-  serialization::readPod(f, numPages);
-  if (numPages == 0 || numPages > 100000) {
-    Storage.remove(path.c_str());
-    return false;
-  }
-  pageOffsets.reserve(numPages);
-  for (uint32_t i = 0; i < numPages; i++) {
-    uint32_t off = 0;
-    serialization::readPod(f, off);
-    pageOffsets.push_back(off);
-  }
-  f.close();
-
-  totalPages = static_cast<int>(pageOffsets.size());
-  indexBuilt = true;
-  indexByteSize = textLength;
-  indexedWidth = width;
-  indexedLineHeight = lh;
-  if (currentPage >= totalPages) currentPage = totalPages - 1;
-  LOG_DBG("WIKI", "Loaded page index cache: %d pages (%s)", totalPages, path.c_str());
-  return true;
-}
-
-void WikipediaActivity::savePageIndexCache() {
-  if (currentQuery.empty() || pageOffsets.empty()) return;
-  const std::string path = indexCachePathForTitle(currentQuery);
-  FsFile f;
-  if (!Storage.openFileForWrite("WIKI", path.c_str(), f)) {
-    LOG_ERR("WIKI", "Failed to save page index cache");
-    return;
-  }
-  serialization::writePod(f, uint32_t(0x5749434B));
-  serialization::writePod(f, uint32_t(1));
-  serialization::writePod(f, uint32_t(textLength));
-  serialization::writePod(f, int32_t(renderer.getScreenWidth() - readingMarginH * 2));
-  serialization::writePod(f, int32_t(readingLineHeight > 0 ? readingLineHeight : 0));
-  serialization::writePod(f, uint32_t(pageOffsets.size()));
-  for (size_t off : pageOffsets) {
-    serialization::writePod(f, uint32_t(off));
-  }
-  f.close();
-}
-
-void WikipediaActivity::advancePage(int dir) {
-  if (textLength == 0 && g_articleFilePath.empty()) return;
-  if (!indexBuilt) return;
-
-  if (dir > 0) {
-    if (currentPage + 1 < totalPages) {
-      currentPage++;
-      articlePageOffset = pageOffsets[currentPage];
-      requestUpdate();
-    }
-    return;
-  }
-
-  if (currentPage > 0) {
-    currentPage--;
-    articlePageOffset = pageOffsets[currentPage];
-    requestUpdate();
-  }
-}
-
-int WikipediaActivity::estimateCharsPerPage() {
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ch = ph - hh - bh - 8;
-  int avgCharWidth = (readingFontId == UI_10_FONT_ID) ? 8 : 10;
-  int charsPerLine = pw / avgCharWidth;
-  int linesPerPage = ch / readingLineHeight;
-  return std::max(200, charsPerLine * linesPerPage);
 }
 
 void WikipediaActivity::loadHistory() {
@@ -1467,8 +982,7 @@ bool WikipediaActivity::loadCachedArticle(const std::string& title) {
 
   if (fileSize == 0) return false;
 
-  freeBuffer(); 
-  invalidatePageIndex();
+  freeBuffer();
 
   if (fileSize > TEXT_BUF_SIZE - 1) {
     g_articleFilePath = path;

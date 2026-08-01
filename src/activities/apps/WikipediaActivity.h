@@ -23,7 +23,6 @@ class WikipediaActivity final : public Activity {
     LOADING_ARTICLE,
     ARTICLE_DISPLAY,
     LOADING_FULL_ARTICLE,
-    FULL_ARTICLE,
     ERROR,
   };
 
@@ -35,11 +34,11 @@ class WikipediaActivity final : public Activity {
   std::string errorMessage;
   std::string searchInput;
 
+  // Buffer fisso di 16KB per la lettura sicura
   static constexpr size_t TEXT_BUF_SIZE = 16384;
   std::unique_ptr<char[]> textBuffer;
-  size_t textLength = 0;
-  size_t articlePageOffset = 0;
-
+  size_t textLength = 0; // Lunghezza totale del testo (se in RAM) o dimensione file (se su SD)
+  
   bool fromCache = false;
 
   std::vector<std::string> historyQueries;
@@ -68,33 +67,14 @@ class WikipediaActivity final : public Activity {
   void openArticleFile();
   void closeArticleFile();
 
-  std::vector<uint32_t> pageOffsets;
-  int totalPages = 0;
-  int currentPage = 0;
-  bool indexBuilt = false;
-  int indexedWidth = 0;
-  int indexedLineHeight = 0;
-  size_t indexByteSize = 0;
   int pagesUntilFullRefresh = 0;
-  
-  void buildArticlePageIndex();
-  bool loadPageIndexCache();
-  void savePageIndexCache();
-  std::string indexCachePathForTitle(const std::string& title);
-  void ensureArticleIndex();
-  void invalidatePageIndex();
 
   void renderSearchInput();
   void renderSearchHistory();
   void renderCachedPages();
   void renderResults();
   void renderArticle();
-  void renderFullArticle();
   void renderError();
-
-  bool loadArticlePage(size_t offset, std::vector<MarkdownReader::TextLine>& outLines, size_t& nextOffset);
-  void renderFullArticleMarkdown();
-  void renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y, int contentHeight, int lineHeight);
 
   void performSearch(const std::string& query);
   void fetchArticleSummary();
@@ -113,8 +93,6 @@ class WikipediaActivity final : public Activity {
 
   void goBackToResults();
   void showError(const std::string& message);
-  void advancePage(int dir);
-  int estimateCharsPerPage();
 
  public:
   explicit WikipediaActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

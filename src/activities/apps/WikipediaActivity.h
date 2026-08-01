@@ -5,8 +5,11 @@
 #include <string>
 #include <vector>
 
+#include <EpdFontFamily.h>
+
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
+#include "util/MarkdownReader.h"
 
 /**
  * WikipediaActivity — search + cached reading of Wikipedia articles.
@@ -92,6 +95,14 @@ class WikipediaActivity final : public Activity {
   void renderArticle();       // Summary (extract)
   void renderFullArticle();   // Full article with reading settings
   void renderError();
+
+  // Markdown article rendering (styled bold/italic/heading spans)
+  // Loads the current article page as styled TextLines and renders them,
+  // preserving bold/italic/heading markdown formatting.
+  bool loadArticlePage(size_t offset, std::vector<MarkdownReader::TextLine>& outLines, size_t& nextOffset);
+  void renderFullArticleMarkdown();
+  void renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y, int contentHeight,
+                          int lineHeight);
 
   // Actions
   void performSearch(const std::string& query);

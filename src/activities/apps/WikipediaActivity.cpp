@@ -25,7 +25,8 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/icons/wikipediaicon.h"
 #include "util/HeaderDateUtils.h"
-#include "util/HtmlToTxt.h"
+#include "util/MarkdownReader.h"
+#include "util/WikitextToMarkdown.h"
 #include "util/NetworkMemory.h"
 
 namespace {
@@ -110,18 +111,6 @@ std::string urlEncodeForPath(const std::string& s) {
   return result;
 }
 
-// ======================================================================
-// Case-insensitive prefix check
-// ======================================================================
-
-bool startsWithCI(const char* str, size_t strLen, const char* prefix) {
-  size_t plen = strlen(prefix);
-  if (strLen < plen) return false;
-  for (size_t i = 0; i < plen; i++) {
-    if (tolower((unsigned char)str[i]) != tolower((unsigned char)prefix[i])) return false;
-  }
-  return true;
-}
 
 // ======================================================================
 // Search Results Parser (opensearch)
@@ -207,545 +196,42 @@ size_t extractExtractField(const char* json, char* buf, size_t sz) {
 }
 
 // ======================================================================
-// Wikitext Extraction from parse API JSON
+//  Markdown helper functions (styled span rendering)
 // ======================================================================
 
-std::string extractWikitextFromJson(const char* json) {
-  const char* p = strstr(json, "\"wikitext\"");
-  if (!p) return "";
-  p = strstr(p, "\"*\"");
-  if (!p) return "";
-  p = strchr(p + 3, ':');
-  if (!p) return "";
-  p++;
-  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-  if (*p != '"') return "";
-  p++;
-
-  std::string result;
-  result.reserve(4096);
-
-  while (*p && *p != '"') {
-    if (*p == '\\') {
-      p++;
-      switch (*p) {
-        case 'n': result += '\n'; p++; break;
-        case 't': result += '\t'; p++; break;
-        case 'r': result += '\r'; p++; break;
-        case '"': result += '"'; p++; break;
-        case '\\': result += '\\'; p++; break;
-        case '/': result += '/'; p++; break;
-        case 'u': {
-          p++;
-          int val = 0;
-          for (int i = 0; i < 4 && *p; i++) {
-            char h = *p++;
-            if (h <= '9') val = val * 16 + (h - '0');
-            else val = val * 16 + ((h & 0xDF) - 'A' + 10);
-          }
-          if (val < 0x80) result += (char)val;
-          else if (val < 0x800) {
-            result += (char)(0xC0 | (val >> 6));
-            result += (char)(0x80 | (val & 0x3F));
-          } else {
-            result += (char)(0xE0 | (val >> 12));
-            result += (char)(0x80 | ((val >> 6) & 0x3F));
-            result += (char)(0x80 | (val & 0x3F));
-          }
-          break;
-        }
-        default: result += *p; p++; break;
-      }
-    } else {
-      result += *p++;
-    }
+int mdLineWidth(GfxRenderer& renderer, int fontId, const MarkdownReader::TextLine& line) {
+  if (line.spans.empty()) {
+    return renderer.getTextAdvanceX(fontId, line.text.c_str(), static_cast<EpdFontFamily::Style>(line.style));
   }
-  return result;
+  int width = 0;
+  for (const auto& span : line.spans) {
+    width += renderer.getTextAdvanceX(fontId, span.text.c_str(), static_cast<EpdFontFamily::Style>(span.style));
+  }
+  return width;
 }
 
-// ======================================================================
-// Inline Wikitext Formatting Processor
-// ======================================================================
-
-void processInline(const char* in, size_t inLen, char* out, size_t& o, size_t outMax) {
-  const char* p = in;
-  const char* end = in + inLen;
-
-  while (p < end && o < outMax - 1) {
-    // Bold/italic markers
-    if (p + 2 < end && p[0] == '\'' && p[1] == '\'' && p[2] == '\'') {
-      if (p + 4 < end && p[3] == '\'' && p[4] == '\'') p += 5;
-      else p += 3;
-      continue;
+MarkdownReader::TextLine sliceMdLine(const MarkdownReader::TextLine& source, size_t begin, size_t length) {
+  MarkdownReader::TextLine out;
+  out.style = source.style;
+  out.indent = source.indent;
+  const size_t end = begin + length;
+  size_t spanBegin = 0;
+  for (const auto& span : source.spans) {
+    const size_t spanEnd = spanBegin + span.text.length();
+    if (spanEnd > begin && spanBegin < end) {
+      const size_t localBegin = begin > spanBegin ? begin - spanBegin : 0;
+      const size_t localEnd = std::min(span.text.length(), end - spanBegin);
+      const std::string part = span.text.substr(localBegin, localEnd - localBegin);
+      out.text += part;
+      out.spans.push_back({part, span.style});
     }
-    if (p + 1 < end && p[0] == '\'' && p[1] == '\'') {
-      p += 2;
-      continue;
-    }
-
-    // Wiki link [[...]]
-    if (p + 1 < end && p[0] == '[' && p[1] == '[') {
-      const char* linkStart = p + 2;
-      const char* linkEnd = linkStart;
-      while (linkEnd + 1 < end && !(linkEnd[0] == ']' && linkEnd[1] == ']')) linkEnd++;
-      if (linkEnd + 1 < end) {
-        size_t linkLen = linkEnd - linkStart;
-        bool skip = false;
-        if (startsWithCI(linkStart, linkLen, "File:") ||
-            startsWithCI(linkStart, linkLen, "Image:") ||
-            startsWithCI(linkStart, linkLen, "Aiuto:") ||
-            startsWithCI(linkStart, linkLen, "Portale:") ||
-            startsWithCI(linkStart, linkLen, "Template:") ||
-            startsWithCI(linkStart, linkLen, "Categoria:") ||
-            startsWithCI(linkStart, linkLen, "Category:") ||
-            startsWithCI(linkStart, linkLen, "Wikipedia:") ||
-            startsWithCI(linkStart, linkLen, "Progetto:") ||
-            startsWithCI(linkStart, linkLen, "Speciale:") ||
-            startsWithCI(linkStart, linkLen, "MediaWiki:")) {
-          skip = true;
-        }
-
-        if (!skip) {
-          const char* pipe = linkStart;
-          while (pipe < linkEnd && *pipe != '|') pipe++;
-          const char* textStart = (pipe < linkEnd) ? pipe + 1 : linkStart;
-
-          for (const char* c = textStart; c < linkEnd && o < outMax - 1; c++) {
-            if (c + 2 < linkEnd && c[0] == '\'' && c[1] == '\'' && c[2] == '\'') { c += 2; continue; }
-            if (c + 1 < linkEnd && c[0] == '\'' && c[1] == '\'') { c += 1; continue; }
-            out[o++] = *c;
-          }
-        }
-        p = linkEnd + 2;
-      } else {
-        out[o++] = *p++;
-      }
-      continue;
-    }
-
-    // External link [url text]
-    if (p < end && p[0] == '[' && (p + 1 >= end || p[1] != '[')) {
-      const char* linkEnd = p + 1;
-      while (linkEnd < end && *linkEnd != ']') linkEnd++;
-      if (linkEnd < end) {
-        const char* space = p + 1;
-        while (space < linkEnd && *space != ' ') space++;
-        if (space < linkEnd) {
-          for (const char* c = space + 1; c < linkEnd && o < outMax - 1; c++) {
-            out[o++] = *c;
-          }
-        }
-        p = linkEnd + 1;
-      } else {
-        out[o++] = *p++;
-      }
-      continue;
-    }
-
-    // Template {{...}}
-    if (p + 1 < end && p[0] == '{' && p[1] == '{') {
-      int depth = 1;
-      p += 2;
-      while (p + 1 < end && depth > 0) {
-        if (p[0] == '{' && p[1] == '{') { depth++; p += 2; }
-        else if (p[0] == '}' && p[1] == '}') { depth--; p += 2; }
-        else p++;
-      }
-      if (depth > 0) p = end;
-      continue;
-    }
-
-    // HTML comment
-    if (p + 3 < end && p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-') {
-      p += 4;
-      while (p + 2 < end && !(p[0] == '-' && p[1] == '-' && p[2] == '>')) p++;
-      if (p + 2 < end) p += 3;
-      else p = end;
-      continue;
-    }
-
-    // <ref> tags
-    if (p + 3 < end && p[0] == '<' &&
-        (p[1] == 'r' || p[1] == 'R') &&
-        (p[2] == 'e' || p[2] == 'E') &&
-        (p[3] == 'f' || p[3] == 'F')) {
-      const char* tagEnd = p + 4;
-      while (tagEnd < end && *tagEnd != '>') tagEnd++;
-      if (tagEnd < end) {
-        if (tagEnd > p && tagEnd[-1] == '/') {
-          p = tagEnd + 1;
-          continue;
-        }
-        const char* closeTag = tagEnd + 1;
-        while (closeTag + 5 < end) {
-          if (closeTag[0] == '<' && closeTag[1] == '/' &&
-              (closeTag[2] == 'r' || closeTag[2] == 'R') &&
-              (closeTag[3] == 'e' || closeTag[3] == 'E') &&
-              (closeTag[4] == 'f' || closeTag[4] == 'F') &&
-              closeTag[5] == '>') {
-            break;
-          }
-          closeTag++;
-        }
-        if (closeTag + 5 < end) p = closeTag + 6;
-        else p = end;
-        continue;
-      }
-    }
-
-    // <br> tags
-    if (p + 2 < end && p[0] == '<' &&
-        (p[1] == 'b' || p[1] == 'B') &&
-        (p[2] == 'r' || p[2] == 'R')) {
-      const char* tagEnd = p + 3;
-      while (tagEnd < end && *tagEnd != '>') tagEnd++;
-      if (tagEnd < end) {
-        if (o > 0 && out[o-1] != '\n' && o < outMax - 1) out[o++] = '\n';
-        p = tagEnd + 1;
-        continue;
-      }
-    }
-
-    // Other HTML tags
-    if (p < end && p[0] == '<') {
-      const char* tagEnd = p + 1;
-      while (tagEnd < end && *tagEnd != '>') tagEnd++;
-      if (tagEnd < end) {
-        p = tagEnd + 1;
-        continue;
-      }
-    }
-
-    // HTML entities
-    if (p < end && p[0] == '&') {
-      if (p + 5 <= end && strncmp(p, "&amp;", 5) == 0) { out[o++] = '&'; p += 5; continue; }
-      if (p + 4 <= end && strncmp(p, "&lt;", 4) == 0) { out[o++] = '<'; p += 4; continue; }
-      if (p + 4 <= end && strncmp(p, "&gt;", 4) == 0) { out[o++] = '>'; p += 4; continue; }
-      if (p + 6 <= end && strncmp(p, "&quot;", 6) == 0) { out[o++] = '"'; p += 6; continue; }
-      if (p + 6 <= end && strncmp(p, "&nbsp;", 6) == 0) { out[o++] = ' '; p += 6; continue; }
-      if (p + 5 <= end && strncmp(p, "&#39;", 5) == 0) { out[o++] = '\''; p += 5; continue; }
-      if (p + 8 <= end) {
-        if (strncmp(p, "&agrave;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xA0; p += 8; continue; }
-        if (strncmp(p, "&egrave;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xA8; p += 8; continue; }
-        if (strncmp(p, "&eacute;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xA9; p += 8; continue; }
-        if (strncmp(p, "&igrave;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xAC; p += 8; continue; }
-        if (strncmp(p, "&ograve;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xB2; p += 8; continue; }
-        if (strncmp(p, "&ugrave;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xB9; p += 8; continue; }
-        if (strncmp(p, "&ccedil;", 8) == 0) { out[o++] = (char)0xC3; out[o++] = (char)0xA7; p += 8; continue; }
-      }
-      if (p + 2 < end && p[1] == '#') {
-        const char* numStart = p + 2;
-        int val = 0;
-        const char* numEnd = numStart;
-        if (*numStart == 'x' || *numStart == 'X') {
-          numStart++;
-          while (numEnd < end && isxdigit((unsigned char)*numEnd)) {
-            char c = *numEnd++;
-            if (c <= '9') val = val * 16 + (c - '0');
-            else val = val * 16 + ((c & 0xDF) - 'A' + 10);
-          }
-        } else {
-          while (numEnd < end && isdigit((unsigned char)*numEnd)) {
-            val = val * 10 + (*numEnd - '0');
-            numEnd++;
-          }
-        }
-        if (numEnd < end && *numEnd == ';') numEnd++;
-        if (val < 0x80) { if (o < outMax - 1) out[o++] = (char)val; }
-        else if (val < 0x800) { if (o < outMax - 2) { out[o++] = (char)(0xC0 | (val >> 6)); out[o++] = (char)(0x80 | (val & 0x3F)); } }
-        else { if (o < outMax - 3) { out[o++] = (char)(0xE0 | (val >> 12)); out[o++] = (char)(0x80 | ((val >> 6) & 0x3F)); out[o++] = (char)(0x80 | (val & 0x3F)); } }
-        p = numEnd;
-        continue;
-      }
-      out[o++] = '&';
-      p++;
-      continue;
-    }
-
-    // Regular character
-    out[o++] = *p++;
+    spanBegin = spanEnd;
   }
-}
-
-// ======================================================================
-// Wikitext Parser
-// ======================================================================
-
-size_t parseWikitext(const char* wtext, size_t wtextLen, char* out, size_t outSize) {
-  size_t o = 0;
-  const char* lineStart = wtext;
-  const char* end = wtext + wtextLen;
-
-  bool inTable = false;
-  bool firstCellInRow = true;
-  bool prevBlank = true;
-  int olCounter[10] = {0};
-  bool inSkipBlock = false;
-  char skipTag[16] = "";
-
-  auto ensureNewline = [&]() {
-    if (o > 0 && out[o-1] != '\n' && o < outSize - 1) out[o++] = '\n';
-  };
-
-  auto ensureDoubleNewline = [&]() {
-    ensureNewline();
-    if (o > 1 && out[o-2] != '\n' && o < outSize - 1) out[o++] = '\n';
-  };
-
-  while (lineStart < end && o < outSize - 1) {
-    const char* lineEnd = lineStart;
-    while (lineEnd < end && *lineEnd != '\n') lineEnd++;
-    size_t lineLen = lineEnd - lineStart;
-    while (lineLen > 0 && lineStart[lineLen-1] == '\r') lineLen--;
-
-    const char* content = lineStart;
-    while (content < lineStart + lineLen && *content == ' ') content++;
-    size_t contentLen = lineStart + lineLen - content;
-
-    auto advance = [&]() {
-      lineStart = (lineEnd < end) ? lineEnd + 1 : end;
-    };
-
-    if (inSkipBlock) {
-      if (contentLen > 0) {
-        std::string closeTag = std::string("</") + skipTag;
-        if (startsWithCI(content, contentLen, closeTag.c_str())) {
-          inSkipBlock = false;
-          skipTag[0] = '\0';
-        }
-      }
-      advance();
-      continue;
-    }
-
-    if (contentLen > 0 && content[0] == '<') {
-      const char* tagStart = content + 1;
-      char tagName[16] = "";
-      int ti = 0;
-      while (tagStart < lineStart + lineLen && *tagStart != '>' && *tagStart != ' ' && *tagStart != '/' && ti < 15) {
-        tagName[ti++] = tolower((unsigned char)*tagStart++);
-      }
-      tagName[ti] = '\0';
-
-      if (strcmp(tagName, "gallery") == 0 || strcmp(tagName, "source") == 0 ||
-          strcmp(tagName, "syntaxhighlight") == 0 || strcmp(tagName, "timeline") == 0 ||
-          strcmp(tagName, "graph") == 0 || strcmp(tagName, "math") == 0 ||
-          strcmp(tagName, "score") == 0 || strcmp(tagName, "hiero") == 0 ||
-          strcmp(tagName, "pre") == 0 || strcmp(tagName, "nowiki") == 0 ||
-          strcmp(tagName, "table") == 0 || strcmp(tagName, "div") == 0) {
-        const char* tagEnd = content;
-        while (tagEnd < lineStart + lineLen && *tagEnd != '>') tagEnd++;
-        bool selfClosing = (tagEnd < lineStart + lineLen && tagEnd > content && tagEnd[-1] == '/');
-
-        if (!selfClosing) {
-          std::string closeTag = std::string("</") + tagName;
-          bool foundClose = false;
-          for (size_t i = 0; i + closeTag.length() <= contentLen; i++) {
-            bool match = true;
-            for (size_t j = 0; j < closeTag.length(); j++) {
-              if (tolower((unsigned char)content[i+j]) != tolower((unsigned char)closeTag[j])) { match = false; break; }
-            }
-            if (match) { foundClose = true; break; }
-          }
-          if (!foundClose) {
-            strncpy(skipTag, tagName, 15);
-            skipTag[15] = '\0';
-            inSkipBlock = true;
-            advance();
-            continue;
-          }
-        }
-      }
-    }
-
-    // Table end |}
-    if (contentLen >= 2 && content[0] == '|' && content[1] == '}') {
-      ensureNewline();
-      inTable = false;
-      prevBlank = true;
-      advance();
-      continue;
-    }
-
-    // Table start {|
-    if (contentLen >= 2 && content[0] == '{' && content[1] == '|') {
-      ensureDoubleNewline();
-      inTable = true;
-      firstCellInRow = true;
-      for (int i = 0; i < 10; i++) olCounter[i] = 0;
-      advance();
-      continue;
-    }
-
-    if (inTable) {
-      if (contentLen >= 2 && content[0] == '|' && content[1] == '-') {
-        ensureNewline();
-        firstCellInRow = true;
-        advance();
-        continue;
-      }
-
-      if (contentLen >= 2 && content[0] == '|' && content[1] == '+') {
-        ensureNewline();
-        processInline(content + 2, contentLen - 2, out, o, outSize);
-        ensureNewline();
-        advance();
-        continue;
-      }
-
-      if (contentLen > 0 && (content[0] == '|' || content[0] == '!')) {
-        const char* cellPtr = content + 1;
-        size_t remaining = contentLen - 1;
-
-        while (remaining > 0 && o < outSize - 1) {
-          if (remaining >= 2 && ((cellPtr[0] == '|' && cellPtr[1] == '|') || (cellPtr[0] == '!' && cellPtr[1] == '!'))) {
-            cellPtr += 2;
-            remaining -= 2;
-          }
-
-          if (!firstCellInRow) {
-            if (o < outSize - 3) { out[o++] = ' '; out[o++] = '|'; out[o++] = ' '; }
-          }
-          firstCellInRow = false;
-
-          const char* cellEnd = cellPtr;
-          const char* lineLimit = content + contentLen;
-          while (cellEnd < lineLimit) {
-            if (cellEnd + 1 < lineLimit &&
-                ((cellEnd[0] == '|' && cellEnd[1] == '|') ||
-                 (cellEnd[0] == '!' && cellEnd[1] == '!'))) {
-              break;
-            }
-            cellEnd++;
-          }
-
-          processInline(cellPtr, cellEnd - cellPtr, out, o, outSize);
-
-          if (cellEnd >= lineLimit) break;
-          cellPtr = cellEnd + 2;
-          remaining = lineLimit - cellPtr;
-        }
-
-        ensureNewline();
-        advance();
-        continue;
-      }
-    }
-
-    // Heading
-    if (contentLen > 0 && content[0] == '=') {
-      int level = 0;
-      while (level < (int)contentLen && content[level] == '=') level++;
-      if (level >= 2 && level <= 6) {
-        const char* headingEnd = content + contentLen - 1;
-        int closeLevel = 0;
-        while (headingEnd > content + level && *headingEnd == '=') { closeLevel++; headingEnd--; }
-        if (closeLevel >= 2) {
-          size_t headingLen = headingEnd - (content + level) + 1;
-          if (headingLen > 0) {
-            ensureDoubleNewline();
-            for (int i = 0; i < level - 1 && o < outSize - 1; i++) out[o++] = '#';
-            if (o < outSize - 1) out[o++] = ' ';
-            processInline(content + level, headingLen, out, o, outSize);
-            ensureDoubleNewline();
-            prevBlank = true;
-            advance();
-            continue;
-          }
-        }
-      }
-    }
-
-    // Blank line
-    if (contentLen == 0) {
-      if (!prevBlank) ensureNewline();
-      prevBlank = true;
-      for (int i = 0; i < 10; i++) olCounter[i] = 0;
-      advance();
-      continue;
-    }
-
-    // Horizontal rule
-    if (contentLen >= 4 && content[0] == '-' && content[1] == '-' && content[2] == '-' && content[3] == '-') {
-      ensureDoubleNewline();
-      if (o < outSize - 4) { out[o++] = '-'; out[o++] = '-'; out[o++] = '-'; }
-      ensureDoubleNewline();
-      prevBlank = true;
-      advance();
-      continue;
-    }
-
-    // List items
-    if (contentLen > 0 && (content[0] == '*' || content[0] == '#' || content[0] == ';' || content[0] == ':')) {
-      int depth = 0;
-      const char* itemContent = content;
-      while (itemContent < content + contentLen &&
-             (*itemContent == '*' || *itemContent == '#' || *itemContent == ':' || *itemContent == ';')) {
-        depth++;
-        itemContent++;
-      }
-
-      ensureNewline();
-      for (int i = 1; i < depth && o < outSize - 1; i++) out[o++] = ' ';
-
-      if (content[0] == '*') {
-        if (o < outSize - 3) { out[o++] = (char)0xE2; out[o++] = (char)0x80; out[o++] = (char)0xA2; out[o++] = ' '; }
-      } else if (content[0] == '#') {
-        if (depth <= 10) {
-          olCounter[depth - 1]++;
-          char num[8];
-          snprintf(num, sizeof(num), "%d. ", olCounter[depth - 1]);
-          for (const char* c = num; *c && o < outSize - 1; c++) out[o++] = *c;
-        }
-      } else if (content[0] == ';') {
-        // Definition term
-      } else {
-        if (o < outSize - 3) { out[o++] = ' '; out[o++] = ' '; }
-      }
-
-      const char* defSep = itemContent;
-      while (defSep < content + contentLen && *defSep != ':') defSep++;
-
-      if (content[0] == ';' && defSep < content + contentLen) {
-        processInline(itemContent, defSep - itemContent, out, o, outSize);
-        if (o < outSize - 3) { out[o++] = ':'; out[o++] = ' '; }
-        processInline(defSep + 1, content + contentLen - defSep - 1, out, o, outSize);
-      } else {
-        processInline(itemContent, content + contentLen - itemContent, out, o, outSize);
-      }
-
-      prevBlank = false;
-      advance();
-      continue;
-    }
-
-    // Redirects
-    if (contentLen >= 7 &&
-        (startsWithCI(content, contentLen, "#RINVIA") ||
-         startsWithCI(content, contentLen, "#REDIRECT") ||
-         startsWithCI(content, contentLen, "#Rinvia"))) {
-      advance();
-      continue;
-    }
-
-    // Magic words
-    if (contentLen >= 2 && content[0] == '_' && content[contentLen-1] == '_') {
-      advance();
-      continue;
-    }
-
-    // Regular text line
-    if (!prevBlank && o > 0 && out[o-1] != '\n') {
-      if (o < outSize - 1) out[o++] = ' ';
-    }
-    processInline(content, contentLen, out, o, outSize);
-    prevBlank = false;
-    advance();
+  if (out.spans.empty() && !source.text.empty()) {
+    out.text = source.text.substr(begin, length);
+    out.spans.push_back({out.text, source.style});
   }
-
-  if (o < outSize) out[o] = '\0';
-  else out[outSize - 1] = '\0';
-  return o;
+  return out;
 }
 
 } // anonymous namespace
@@ -1125,30 +611,25 @@ void WikipediaActivity::renderArticle() {
 }
 
 void WikipediaActivity::renderFullArticle() {
-  char* buf = ensureBuffer();
-  size_t readLen = 0;
+  renderFullArticleMarkdown();
+}
 
-  // Se l'articolo è sulla SD, carica solo il blocco (chunk) attuale nel buffer
-  if (!g_articleFilePath.empty()) {
-    HalFile f;
-    if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), f)) {
-      f.seek(articlePageOffset);
-      readLen = f.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-      f.close();
-    } else {
-      g_articleFilePath.clear();
-      textLength = 0;
-    }
-  } else if (textBuffer) {
-    size_t available = (textLength > articlePageOffset) ? (textLength - articlePageOffset) : 0;
-    readLen = std::min(available, TEXT_BUF_SIZE - 1);
-    memcpy(buf, textBuffer.get() + articlePageOffset, readLen);
-  }
+// ======================================================================
+//  Markdown full-article rendering
+// ======================================================================
 
-  buf[readLen] = '\0';
+void WikipediaActivity::renderFullArticleMarkdown() {
+  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
+  int hh = UITheme::getInstance().getMetrics().headerHeight;
+  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
+  int ct = hh + 4, ch = ph - ct - bh - 4;
+  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
+  int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
 
-  if (readLen == 0) {
-    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight()/2, "No content");
+  std::vector<MarkdownReader::TextLine> pageLines;
+  size_t nextOffset = 0;
+  if (!loadArticlePage(articlePageOffset, pageLines, nextOffset) || pageLines.empty()) {
+    renderer.drawCenteredText(UI_10_FONT_ID, ph / 2, "No content");
     auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, nullptr, nullptr);
     GUI.drawButtonHints(renderer, lb.btn1, nullptr, nullptr, nullptr);
     renderer.displayBuffer();
@@ -1156,43 +637,180 @@ void WikipediaActivity::renderFullArticle() {
   }
 
   HeaderDateUtils::drawHeaderWithDate(renderer, currentQuery.c_str());
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ct = hh + 4, ch = ph - ct - bh - 4, tw = pw - readingMarginH * 2;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
 
-  const char* pos = buf;
-  int y = ct;
-
-  while (*pos && y + readingLineHeight <= ct + ch) {
-    const char* nl = pos;
-    while (*nl && *nl != '\n') nl++;
-
-    std::string seg(pos, nl - pos);
-    auto wrapped = renderer.wrappedText(fId, seg.c_str(), tw, 1000);
-
-    if (wrapped.empty()) {
-      y += readingLineHeight / 2;
-    }
-
-    for (const auto& wl : wrapped) {
-      if (y + readingLineHeight > ct + ch) break;
-      if (!wl.empty()) {
-        bool blank = true; for (char c : wl) { if (c != ' ' && c != '\t') { blank = false; break; } }
-        if (!blank) renderer.drawText(fId, readingMarginH, y, wl.c_str(), true);
-      }
-      y += readingLineHeight;
-    }
-
-    if (*nl == '\n') nl++;
-    pos = nl;
+  // Two-pass rendering (scan then real draw) so the font cache is prewarmed,
+  // matching TxtReaderActivity. During scan mode drawText() records glyphs but
+  // does not paint pixels — a second pass is required to actually show text.
+  auto* fcm = renderer.getFontCacheManager();
+  if (fcm) {
+    auto scope = fcm->createPrewarmScope();
+    renderArticleLines(pageLines, ct, ch, lineHeight);  // scan pass
+    scope.endScanAndPrewarm();
+    renderArticleLines(pageLines, ct, ch, lineHeight);  // real render pass
+  } else {
+    renderArticleLines(pageLines, ct, ch, lineHeight);
   }
 
   renderer.drawCenteredText(SMALL_FONT_ID, ph - bh - readingLineHeight, "---");
   auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, lb.btn1, lb.btn2, lb.btn3, lb.btn4);
   renderer.displayBuffer();
+}
+
+void WikipediaActivity::renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y,
+                                           int contentHeight, int lineHeight) {
+  int pw = renderer.getScreenWidth();
+  int tw = pw - readingMarginH * 2;
+  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
+  const int bottom = y + contentHeight;
+
+  for (const auto& line : lines) {
+    if (y + lineHeight > bottom) break;
+    int x = readingMarginH;
+    if (!line.text.empty()) {
+      int indentPx = line.indent * renderer.getSpaceWidth(fId, EpdFontFamily::REGULAR) * 2;
+      x += indentPx;
+      if (line.spans.empty()) {
+        renderer.drawText(fId, x, y, line.text.c_str(), true, static_cast<EpdFontFamily::Style>(line.style));
+      } else {
+        int spanX = x;
+        for (const auto& span : line.spans) {
+          const auto spanStyle = static_cast<EpdFontFamily::Style>(span.style);
+          renderer.drawText(fId, spanX, y, span.text.c_str(), true, spanStyle);
+          spanX += renderer.getTextAdvanceX(fId, span.text.c_str(), spanStyle);
+        }
+      }
+    }
+    y += lineHeight;
+  }
+}
+
+// ======================================================================
+//  Markdown page loading (whole lines, span-aware wrap)
+// ======================================================================
+bool WikipediaActivity::loadArticlePage(size_t offset, std::vector<MarkdownReader::TextLine>& outLines,
+                                        size_t& nextOffset) {
+  outLines.clear();
+
+  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
+  int hh = UITheme::getInstance().getMetrics().headerHeight;
+  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
+  int ch = ph - hh - bh - 8;
+  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
+  int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
+  int linesPerPage = std::max(1, ch / lineHeight);
+  int tw = pw - readingMarginH * 2;
+
+  // Read a chunk of the article starting at offset.
+  char* buf = ensureBuffer();
+  size_t readLen = 0;
+  if (!g_articleFilePath.empty()) {
+    HalFile f;
+    if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), f)) {
+      f.seek(offset);
+      readLen = f.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
+      f.close();
+    } else {
+      g_articleFilePath.clear();
+      textLength = 0;
+    }
+  } else if (textBuffer) {
+    size_t available = (textLength > offset) ? (textLength - offset) : 0;
+    readLen = std::min(available, TEXT_BUF_SIZE - 1);
+    memcpy(buf, textBuffer.get() + offset, readLen);
+  }
+  buf[readLen] = '\0';
+
+  size_t articleLen = textLength;
+  if (!g_articleFilePath.empty()) {
+    HalFile sf;
+    if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), sf)) {
+      articleLen = sf.size();
+      sf.close();
+    }
+  }
+
+  size_t pos = 0;
+  size_t consumedBytes = 0;
+
+  while (pos < readLen && static_cast<int>(outLines.size()) < linesPerPage) {
+    // Find the end of the current line within the chunk.
+    size_t lineEnd = pos;
+    while (lineEnd < readLen && buf[lineEnd] != '\n') lineEnd++;
+
+    // A line is complete only if we hit '\n' in the chunk or it extends to EOF.
+    if (lineEnd >= readLen && (offset + lineEnd < articleLen)) {
+      // Incomplete trailing line at the chunk boundary: stop the page here so
+      // the reader finishes this line on the next page turn.
+      consumedBytes = pos;
+      break;
+    }
+
+    size_t lineLen = lineEnd - pos;
+    while (lineLen > 0 && buf[pos + lineLen - 1] == '\r') lineLen--;
+
+    const std::string sourceLine(buf + pos, lineLen);
+    MarkdownReader::TextLine lineInfo = MarkdownReader::parseLine(sourceLine);
+
+    // Blank/delimiter lines (e.g. ``` fences) have empty text: skip them and
+    // do not consume a full line of vertical space.
+    if (lineInfo.text.empty()) {
+      pos = (lineEnd < readLen) ? lineEnd + 1 : readLen;
+      consumedBytes = pos;
+      continue;
+    }
+
+    // Word-wrap the whole line into its own span-aware wrapped lines.
+    std::vector<MarkdownReader::TextLine> wrappedLines;
+    {
+      const int indentPx = lineInfo.indent * renderer.getSpaceWidth(fId, EpdFontFamily::REGULAR) * 2;
+      const int usableWidth = std::max(1, tw - indentPx);
+      size_t wrappedStart = 0;
+      const size_t total = lineInfo.text.length();
+      while (wrappedStart < total) {
+        const std::string remain = lineInfo.text.substr(wrappedStart);
+        if (mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, remain.length())) <= usableWidth) {
+          wrappedLines.push_back(sliceMdLine(lineInfo, wrappedStart, remain.length()));
+          wrappedStart = total;
+          break;
+        }
+        size_t breakPos = remain.length();
+        while (breakPos > 0 &&
+               mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, breakPos)) > usableWidth) {
+          const size_t spacePos = remain.rfind(' ', breakPos - 1);
+          if (spacePos != std::string::npos && spacePos > 0) {
+            breakPos = spacePos;
+          } else {
+            breakPos--;
+            while (breakPos > 0 && (remain[breakPos] & 0xC0) == 0x80) breakPos--;
+          }
+        }
+        if (breakPos == 0) breakPos = 1;
+        wrappedLines.push_back(sliceMdLine(lineInfo, wrappedStart, breakPos));
+        size_t skip = breakPos;
+        if (breakPos < remain.length() && remain[breakPos] == ' ') skip++;
+        wrappedStart += skip;
+      }
+    }
+
+    // If this line would overflow the page and the page already has content,
+    // leave it entirely for the next page (never split a logical line).
+    if (!outLines.empty() && outLines.size() + wrappedLines.size() > static_cast<size_t>(linesPerPage)) {
+      consumedBytes = pos;
+      break;
+    }
+    for (auto& w : wrappedLines) {
+      outLines.push_back(std::move(w));
+    }
+
+    // Consume the whole source line (including its newline if present).
+    pos = (lineEnd < readLen) ? lineEnd + 1 : readLen;
+    consumedBytes = pos;
+  }
+
+  nextOffset = offset + consumedBytes;
+  if (nextOffset > articleLen) nextOffset = articleLen;
+  return !outLines.empty();
 }
 
 void WikipediaActivity::renderError() {
@@ -1331,18 +949,18 @@ void WikipediaActivity::fetchFullArticle() {
     return;
   }
 
-  // Build URL-encoded title for Wikipedia API
+  // Build URL-encoded title for Wikipedia wikitext API
   std::string titleForUrl = currentQuery;
   for (auto& c : titleForUrl) { if (c == ' ') c = '_'; }
   std::string encodedTitle = urlEncode(titleForUrl);
 
-  std::string rawPath = std::string(CACHE_DIR) + "/raw_" + sanitizeFilename(currentQuery) + ".html";
+  std::string rawPath = std::string(CACHE_DIR) + "/raw_" + sanitizeFilename(currentQuery) + ".json";
   Storage.mkdir(CACHE_DIR);
-  LOG_DBG("WIKI", "Streaming mobile-html to SD: %s", rawPath.c_str());
+  LOG_DBG("WIKI", "Streaming wikitext JSON to SD: %s", rawPath.c_str());
 
   char url[512];
   snprintf(url, sizeof(url),
-           "https://it.wikipedia.org/api/rest_v1/page/mobile-html/%s",
+           "https://it.wikipedia.org/w/api.php?action=parse&page=%s&prop=wikitext&format=json",
            encodedTitle.c_str());
 
   // Custom streaming download: read from HTTP stream, write chunks to SD file
@@ -1449,11 +1067,11 @@ void WikipediaActivity::fetchFullArticle() {
   http.end();
   LOG_DBG("WIKI", "Streamed %zu bytes to SD, starting conversion...", totalSaved);
 
-  // Convert HTML directly into the final cache file .wiki
-  LOG_DBG("WIKI", "Converting HTML to text...");
+  // Convert wikitext JSON directly into the final cache file .wiki
+  LOG_DBG("WIKI", "Converting wikitext to markdown...");
   HalFile inFile;
   if (!Storage.openFileForRead("WIKI", rawPath, inFile)) {
-    LOG_ERR("WIKI", "Failed to open raw HTML for conversion");
+    LOG_ERR("WIKI", "Failed to open raw JSON for conversion");
     showError(tr(STR_WIKIPEDIA_ERROR));
     return;
   }
@@ -1461,13 +1079,13 @@ void WikipediaActivity::fetchFullArticle() {
   std::string cachePath = cachePathForTitle(currentQuery);
   if (Storage.exists(cachePath.c_str())) Storage.remove(cachePath.c_str());
 
-  HtmlToTxt converter;
-  bool convOk = converter.convert(inFile, cachePath.c_str()); // Converti e salva direttamente in .wiki
+  WikitextToMarkdown converter;
+  bool convOk = converter.convert(inFile, cachePath.c_str()); // wikitext -> markdown cached in .wiki
   inFile.close();
   Storage.remove(rawPath.c_str());
 
   if (!convOk) {
-    LOG_ERR("WIKI", "HTML conversion failed");
+    LOG_ERR("WIKI", "Wikitext conversion failed");
     Storage.remove(cachePath.c_str());
     if (!fallbackText.empty()) {
       char* buf = ensureBuffer();
@@ -1510,6 +1128,12 @@ void WikipediaActivity::fetchFullArticle() {
 
   loadCachedPages();
   LOG_DBG("WIKI", "Full article ready: %zu bytes (streamed from SD)", textLength);
+
+  // Restore the SD card font (and reading stats) that were released for the
+  // network download. Without this the reader font id points to an unloaded
+  // family and the article renders as a blank screen.
+  NetworkMemory::restoreAfterNetwork(renderer, "WIKI", "after_full");
+
   state = State::FULL_ARTICLE;
   requestUpdate();
 }
@@ -1538,114 +1162,40 @@ void WikipediaActivity::showError(const std::string& msg) {
 void WikipediaActivity::advancePage(int dir) {
   if (textLength == 0 && g_articleFilePath.empty()) return;
 
-  int pw = renderer.getScreenWidth(), ph = renderer.getScreenHeight();
-  int hh = UITheme::getInstance().getMetrics().headerHeight;
-  int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  int ct = hh + 4, ch = ph - ct - bh - 4, tw = pw - readingMarginH * 2;
-  int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
-
-  char* buf = ensureBuffer();
-
-  // Lambda per leggere un blocco di testo (da file o da RAM)
-  auto readChunk = [&](size_t offset) -> size_t {
-    if (!g_articleFilePath.empty()) {
-      HalFile f;
-      if (Storage.openFileForRead("WIKI", g_articleFilePath.c_str(), f)) {
-        f.seek(offset);
-        size_t r = f.read((uint8_t*)buf, TEXT_BUF_SIZE - 1);
-        f.close();
-        buf[r] = '\0';
-        return r;
-      }
-      return 0;
-    } else if (textBuffer) {
-      size_t available = (textLength > offset) ? (textLength - offset) : 0;
-      size_t r = std::min(available, TEXT_BUF_SIZE - 1);
-      memcpy(buf, textBuffer.get() + offset, r);
-      buf[r] = '\0';
-      return r;
-    }
-    return 0;
-  };
+  std::vector<MarkdownReader::TextLine> lines;
 
   if (dir > 0) {
-    size_t readLen = readChunk(articlePageOffset);
-    if (readLen == 0) return;
-
-    const char* pos = buf;
-    int y = ct;
-    while (*pos && y + readingLineHeight <= ct + ch) {
-      const char* nl = pos;
-      while (*nl && *nl != '\n') nl++;
-      std::string seg(pos, nl - pos);
-      auto wrapped = renderer.wrappedText(fId, seg.c_str(), tw, 1000);
-      if (wrapped.empty()) y += readingLineHeight / 2;
-      for (const auto& wl : wrapped) {
-        if (y + readingLineHeight > ct + ch) break;
-        y += readingLineHeight;
-      }
-      if (*nl == '\n') nl++;
-      pos = nl;
-    }
-
-    size_t consumed = pos - buf;
-    if (consumed == 0 && readLen > 0) consumed = 1; // Evita blocco se riga lunghissima
-
-    size_t newOffset = articlePageOffset + consumed;
-    if (newOffset < textLength) {
-      articlePageOffset = newOffset;
-      requestUpdate();
-    } else if (articlePageOffset < textLength) {
-      articlePageOffset = textLength;
+    size_t next = articlePageOffset;
+    if (!loadArticlePage(articlePageOffset, lines, next)) return;
+    if (next > articlePageOffset) {
+      articlePageOffset = next;
       requestUpdate();
     }
-  } else {
-    if (articlePageOffset == 0) return;
+    return;
+  }
 
-    int avgCharWidth = (fId == UI_10_FONT_ID) ? 8 : 10;
-    int charsPerLine = tw / avgCharWidth;
-    int linesPerPage = ch / readingLineHeight;
-    int estimatedCharsPerPage = charsPerLine * linesPerPage;
+  // Going backward: walk page boundaries from the start to find the previous
+  // page start (the biggest boundary strictly less than articlePageOffset).
+  if (articlePageOffset == 0) return;
 
-    size_t searchStart = (articlePageOffset > (size_t)(estimatedCharsPerPage * 1.5))
-                         ? articlePageOffset - (size_t)(estimatedCharsPerPage * 1.5) : 0;
+  size_t boundary = 0;
+  size_t walk = 0;
+  int guard = 0;
+  const int maxGuard = 4096;
 
-    size_t lastPageStart = 0;
-    size_t currentPos = searchStart;
+  std::vector<MarkdownReader::TextLine> pageLines;
+  while (walk < articlePageOffset && guard++ < maxGuard) {
+    boundary = walk;
+    size_t pageNext = walk;
+    if (!loadArticlePage(walk, pageLines, pageNext)) break;
+    if (pageNext <= walk) break;  // no forward progress guard
+    walk = pageNext;
+    if (walk >= articlePageOffset) break;
+  }
 
-    while (currentPos < articlePageOffset) {
-      lastPageStart = currentPos;
-      size_t readLen = readChunk(currentPos);
-      if (readLen == 0) break;
-
-      const char* pos = buf;
-      int y = ct;
-      while (*pos && y + readingLineHeight <= ct + ch) {
-        const char* nl = pos;
-        while (*nl && *nl != '\n') nl++;
-        std::string seg(pos, nl - pos);
-        auto wrapped = renderer.wrappedText(fId, seg.c_str(), tw, 1000);
-        if (wrapped.empty()) y += readingLineHeight / 2;
-        for (const auto& wl : wrapped) {
-          if (y + readingLineHeight > ct + ch) break;
-          y += readingLineHeight;
-        }
-        if (*nl == '\n') nl++;
-        pos = nl;
-      }
-
-      size_t consumed = pos - buf;
-      if (consumed == 0) break;
-      size_t newPos = currentPos + consumed;
-
-      if (newPos >= articlePageOffset) break;
-      currentPos = newPos;
-    }
-
-    if (lastPageStart != articlePageOffset) {
-      articlePageOffset = lastPageStart;
-      requestUpdate();
-    }
+  if (boundary != articlePageOffset) {
+    articlePageOffset = boundary;
+    requestUpdate();
   }
 }
 

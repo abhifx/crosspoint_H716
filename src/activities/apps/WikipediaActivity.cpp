@@ -399,7 +399,9 @@ void WikipediaActivity::loop() {
             const std::string& title = cachedPageTitles[selectedIndex];
             if (loadCachedArticle(title)) {
               currentQuery = title; fromCache = true;
-              state = State::FULL_ARTICLE; articlePageOffset = 0; requestUpdate();
+              articlePageOffset = 0;
+              ensureArticleIndex();
+              state = State::FULL_ARTICLE; requestUpdate();
             } else {
               currentQuery = title; searchInput = title; performSearch(title);
             }
@@ -631,16 +633,12 @@ void WikipediaActivity::renderFullArticleMarkdown() {
   // Load the persistent page-index cache (.wiki.bin) if it exists and is valid.
   // This makes subsequent opens of the same article instant. Only when no valid
   // cache exists do we pay the one-time measurement cost to build it.
+  // The page index must be built/loaded before rendering, during the transition
+  // into FULL_ARTICLE (see ensureArticleIndex()). If it somehow isn't, build it
+  // here as a fallback so we never render an empty page.
   if (!indexBuilt) {
-    if (!loadPageIndexCache()) {
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
-      buildArticlePageIndex();
-    }
-    // Clear the "Indicizzazione" popup so it does not linger over the article
-    // on e-ink (black pixels from the popup box would otherwise stay visible).
-    renderer.clearScreen();
-    // Re-validate that currentPage fits after cache load.
-    if (currentPage >= totalPages) currentPage = totalPages - 1;
+    ensureArticleIndex();
+    renderer.clearScreen();  // drop any "Indicizzazione" popup residue
   }
 
   std::vector<MarkdownReader::TextLine> pageLines;
@@ -668,7 +666,12 @@ void WikipediaActivity::renderFullArticleMarkdown() {
     renderArticleLines(pageLines, ct, ch, lineHeight);
   }
 
-  renderer.drawCenteredText(SMALL_FONT_ID, ph - bh - readingLineHeight, "---");
+  // Footer: page-position indicator (current/total) so the reader always knows
+  // how far along the article they are and when they reach the end.
+  char pageInfo[24];
+  snprintf(pageInfo, sizeof(pageInfo), "%d/%d", currentPage + 1, totalPages > 0 ? totalPages : 1);
+  renderer.drawText(SMALL_FONT_ID, readingMarginH, ph - bh - readingLineHeight, pageInfo, true);
+
   auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, lb.btn1, lb.btn2, lb.btn3, lb.btn4);
   renderer.displayBuffer();
@@ -923,7 +926,9 @@ void WikipediaActivity::fetchArticleSummary() {
   if (loadCachedArticle(title)) {
     currentQuery = title;
     cacheReadingSettings();
-    state = State::FULL_ARTICLE; articlePageOffset = 0; requestUpdate();
+    articlePageOffset = 0;
+    ensureArticleIndex();
+    state = State::FULL_ARTICLE; requestUpdate();
     return;
   }
 
@@ -1027,7 +1032,9 @@ void WikipediaActivity::fetchFullArticle() {
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
       cacheArticle(currentQuery);
-      state = State::FULL_ARTICLE; articlePageOffset = 0; requestUpdate();
+      articlePageOffset = 0;
+      ensureArticleIndex();
+      state = State::FULL_ARTICLE; requestUpdate();
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
@@ -1101,7 +1108,9 @@ void WikipediaActivity::fetchFullArticle() {
       size_t len = std::min(fallbackText.size(), static_cast<size_t>(TEXT_BUF_SIZE - 1));
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
-      state = State::FULL_ARTICLE; articlePageOffset = 0; requestUpdate();
+      articlePageOffset = 0;
+      ensureArticleIndex();
+      state = State::FULL_ARTICLE; requestUpdate();
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
@@ -1134,7 +1143,9 @@ void WikipediaActivity::fetchFullArticle() {
       size_t len = std::min(fallbackText.size(), static_cast<size_t>(TEXT_BUF_SIZE - 1));
       memcpy(buf, fallbackText.c_str(), len);
       textLength = len; buf[textLength] = '\0';
-      state = State::FULL_ARTICLE; articlePageOffset = 0; requestUpdate();
+      articlePageOffset = 0;
+      ensureArticleIndex();
+      state = State::FULL_ARTICLE; requestUpdate();
     } else { showError(tr(STR_WIKIPEDIA_ERROR)); }
     return;
   }
@@ -1182,16 +1193,16 @@ void WikipediaActivity::fetchFullArticle() {
   // family and the article renders as a blank screen.
   NetworkMemory::restoreAfterNetwork(renderer, "WIKI", "after_full");
 
-  // Build the page index now (while the user sees a loading message) instead of
-  // blocking the first render. The result is persisted as <title>.wiki.bin, so
-  // this one-time cost is only paid again if the article or reading settings
-  // change.
-  if (!indexBuilt && !loadPageIndexCache()) {
-    // Give the user visible feedback while the (one-time) index is measured.
-    renderer.clearScreen();
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-    renderer.displayBuffer();
-    buildArticlePageIndex();
+  // Prepare the page index now (while the loading state is on screen) instead
+  // of during render. If no <title>.wiki.bin exists yet, measure it once and
+  // persist it; subsequent opens load it in milliseconds.
+  if (!indexBuilt) {
+    if (!loadPageIndexCache()) {
+      renderer.clearScreen();
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+      renderer.displayBuffer();
+      buildArticlePageIndex();
+    }
   }
 
   state = State::FULL_ARTICLE;
@@ -1225,6 +1236,15 @@ void WikipediaActivity::invalidatePageIndex() {
   currentPage = 0;
   indexBuilt = false;
   articlePageOffset = 0;
+}
+
+void WikipediaActivity::ensureArticleIndex() {
+  if (indexBuilt) return;
+  if (loadPageIndexCache()) return;
+  renderer.clearScreen();
+  GUI.drawPopup(renderer, tr(STR_INDEXING));
+  renderer.displayBuffer();
+  buildArticlePageIndex();
 }
 
 void WikipediaActivity::buildArticlePageIndex() {
@@ -1508,10 +1528,20 @@ void WikipediaActivity::loadCachedPages() {
   auto files = Storage.listFiles(CACHE_DIR, 100);
   for (auto& f : files) {
     std::string name = f.c_str();
-    size_t extPos = name.rfind(CACHE_EXT);
-    if (extPos != std::string::npos) {
-      name = name.substr(0, extPos);
+    // Skip the per-article page-index binaries (<title>.wiki.bin); only list
+    // actual article caches whose filename ends in ".wiki".
+    if (name.size() >= 4 && name.compare(name.size() - 4, 4, ".bin") == 0) {
+      continue;
     }
+    // Skip raw JSON/source downloads.
+    if (name.size() >= 4 && name.compare(0, 4, "raw_") == 0) continue;
+
+    const size_t extLen = strlen(CACHE_EXT);  // ".wiki"
+    size_t extPos = name.rfind(CACHE_EXT);
+    size_t lastExtend = 0;
+    if (name.size() >= extLen) lastExtend = name.size() - extLen;
+    if (extPos == std::string::npos || extPos != lastExtend) continue;
+    name = name.substr(0, extPos);
     if (!name.empty()) {
       std::replace(name.begin(), name.end(), '_', ' ');
       cachedPageTitles.push_back(name);

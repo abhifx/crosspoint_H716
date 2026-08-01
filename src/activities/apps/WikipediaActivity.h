@@ -99,6 +99,7 @@ class WikipediaActivity final : public Activity {
   bool loadPageIndexCache();     // load .wiki.bin if valid
   void savePageIndexCache();
   std::string indexCachePathForTitle(const std::string& title);
+  void ensureArticleIndex();     // load .wiki.bin or build+persist it
   void invalidatePageIndex();
 
   // Rendering

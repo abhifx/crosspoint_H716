@@ -6,32 +6,17 @@
 #include <vector>
 
 #include <EpdFontFamily.h>
+#include <HalStorage.h>
 
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 #include "util/MarkdownReader.h"
 
-/**
- * WikipediaActivity — search + cached reading of Wikipedia articles.
- * Uses MediaWiki opensearch API for search, REST v1/page/summary for
- * article extracts. Full article content is cached on SD card to avoid
- * OOM and enable fast re-reads.
- *
- * Article text is rendered using the book reader font/size/line-spacing
- * settings for a consistent reading experience.
- *
- * WiFi is disabled after network operations to free heap and on exit.
- *
- * Memory strategy:
- * - Large text buffers are dynamically allocated (unique_ptr) so they
- *   can be freed before TLS-heavy network operations.
- * - The class object itself stays small (~2KB), avoiding heap fragmentation.
- */
 class WikipediaActivity final : public Activity {
   ButtonNavigator buttonNavigator;
 
   enum class State {
-    SEARCH_INPUT,       // 3 buttons: Search / History / Cached
+    SEARCH_INPUT,       
     SEARCH_HISTORY,
     CACHED_PAGES,
     SEARCH_RESULTS,
@@ -50,29 +35,21 @@ class WikipediaActivity final : public Activity {
   std::string errorMessage;
   std::string searchInput;
 
-  // Single shared text buffer (dynamically allocated to free heap before TLS)
-  static constexpr size_t TEXT_BUF_SIZE = 8192;
+  static constexpr size_t TEXT_BUF_SIZE = 16384;
   std::unique_ptr<char[]> textBuffer;
   size_t textLength = 0;
   size_t articlePageOffset = 0;
 
-  // Summary length is tracked separately; both summary and full article
-  // share the same textBuffer.
+  bool fromCache = false;
 
-  // Navigation tracking
-  bool fromCache = false;  // true when FULL_ARTICLE was opened from Cached Pages
-
-  // Search history
   std::vector<std::string> historyQueries;
   static constexpr const char* HISTORY_FILE = "/.crosspoint/wikipedia-history.txt";
   static constexpr int MAX_HISTORY = 50;
 
-  // Article cache
   std::vector<std::string> cachedPageTitles;
   static constexpr const char* CACHE_DIR = "/.crosspoint/wikipedia-cache";
   static constexpr const char* CACHE_EXT = ".wiki";
 
-  // Reading settings cache
   int readingFontId = 0;
   int readingLineHeight = 20;
   int readingMarginH = 16;
@@ -83,54 +60,51 @@ class WikipediaActivity final : public Activity {
   void cacheReadingSettings();
   void wifiOff();
 
-  // Buffer management: allocate/free to avoid heap fragmentation before TLS
   char* ensureBuffer();
   void freeBuffer();
 
-  // Page index for fast, reliable markdown pagination (mirrors TxtReaderActivity).
+  HalFile openFile;
+  bool isFileOpen = false;
+  void openArticleFile();
+  void closeArticleFile();
+
   std::vector<uint32_t> pageOffsets;
   int totalPages = 0;
   int currentPage = 0;
   bool indexBuilt = false;
-  int indexedWidth = 0;    // viewport width used when the index was built
+  int indexedWidth = 0;
   int indexedLineHeight = 0;
-  size_t indexByteSize = 0;  // .wiki file size the index binary was built for
-  void buildArticlePageIndex();  // measures all page boundaries (slow, one-time)
-  bool loadPageIndexCache();     // load .wiki.bin if valid
+  size_t indexByteSize = 0;
+  int pagesUntilFullRefresh = 0;
+  
+  void buildArticlePageIndex();
+  bool loadPageIndexCache();
   void savePageIndexCache();
   std::string indexCachePathForTitle(const std::string& title);
-  void ensureArticleIndex();     // load .wiki.bin or build+persist it
+  void ensureArticleIndex();
   void invalidatePageIndex();
 
-  // Rendering
   void renderSearchInput();
   void renderSearchHistory();
   void renderCachedPages();
   void renderResults();
-  void renderArticle();       // Summary (extract)
-  void renderFullArticle();   // Full article with reading settings
+  void renderArticle();
+  void renderFullArticle();
   void renderError();
 
-  // Markdown article rendering (styled bold/italic/heading spans)
-  // Loads the current article page as styled TextLines and renders them,
-  // preserving bold/italic/heading markdown formatting.
   bool loadArticlePage(size_t offset, std::vector<MarkdownReader::TextLine>& outLines, size_t& nextOffset);
   void renderFullArticleMarkdown();
-  void renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y, int contentHeight,
-                          int lineHeight);
+  void renderArticleLines(const std::vector<MarkdownReader::TextLine>& lines, int y, int contentHeight, int lineHeight);
 
-  // Actions
   void performSearch(const std::string& query);
   void fetchArticleSummary();
   void fetchFullArticle();
+  void openArticleForReading(const std::string& title);
   void launchSearchKeyboard();
   void onWifiSelectionComplete(bool connected);
 
-  // Search history
   void loadHistory();
   void saveToHistory(const std::string& query);
-
-  // Article cache
   void loadCachedPages();
   std::string sanitizeFilename(const std::string& s);
   std::string cachePathForTitle(const std::string& title);

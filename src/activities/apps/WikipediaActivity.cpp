@@ -36,6 +36,43 @@ namespace {
 
 std::string g_articleFilePath;
 
+// Map the selected UI language to the Wikipedia subdomain language code.
+// See the language table in STEROIDS docs (english/.../vietnamese).
+std::string wikipediaLangCode(Language lang) {
+  switch (lang) {
+    case Language::BE: return "be";   // Bielorusso
+    case Language::CA: return "ca";   // Catalano
+    case Language::CS: return "cs";   // Ceco
+    case Language::DA: return "da";   // Danese
+    case Language::NL: return "nl";   // Olandese
+    case Language::FI: return "fi";   // Finlandese
+    case Language::FR: return "fr";   // Francese
+    case Language::DE: return "de";   // Tedesco
+    case Language::HU: return "hu";   // Ungherese
+    case Language::IT: return "it";   // Italiano
+    case Language::KK: return "kk";   // Kazaco
+    case Language::LT: return "lt";   // Lituano
+    case Language::PL: return "pl";   // Polacco
+    case Language::PT: return "pt";   // Portoghese
+    case Language::RO: return "ro";   // Rumeno
+    case Language::RU: return "ru";   // Russo
+    case Language::SI: return "sl";   // Sloveno (Wikipedia usa "sl")
+    case Language::ES: return "es";   // Spagnolo
+    case Language::SV: return "sv";   // Svedese
+    case Language::TR: return "tr";   // Turco
+    case Language::UK: return "uk";   // Ucraino
+    case Language::VI: return "vi";   // Vietnamita
+    case Language::EN:
+    default: return "en";             // Inglese
+  }
+}
+
+// Base Wikipedia URL per the selected language.
+std::string wikipediaBaseUrl() {
+  return "https://" + wikipediaLangCode(I18N.getLanguage()) + ".wikipedia.org";
+}
+
+
 int fontSizeToPixels(uint8_t fs) {
   switch (fs) {
     case CrossPointSettings::X_SMALL: return 14;
@@ -489,6 +526,31 @@ void WikipediaActivity::renderSearchInput() {
   snprintf(cacheLbl, sizeof(cacheLbl), "%s (%d)", tr(STR_CACHED_PAGES), cacheCount);
   drawPanel(2, margin, ct + 2 * (panelH + gap), panelW, panelH, cacheLbl);
 
+  // Cyberpunk panel in fondo: modalità Wi-Fi (secondo Sync Day) + lingua di ricerca.
+  {
+    const int ph = renderer.getScreenHeight();
+    const int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
+    const int pW = renderer.getScreenWidth() - margin * 2;
+    const int pH = 66;
+    const int pX = margin;
+    const int pY = ph - bh - pH - 8;
+    renderer.fillRect(pX, pY, pW, pH, 1);
+    PanelDrawHelper::drawCyberpunkPanel(renderer, pX, pY, pW, pH, false);
+
+    const char* wifiText = SETTINGS.syncDayWifiChoice == CrossPointSettings::SYNC_DAY_WIFI_MANUAL
+                               ? tr(STR_WIKIPEDIA_WIFI_MANUAL)
+                               : tr(STR_WIKIPEDIA_WIFI_AUTO);
+    std::string langText = std::string(tr(STR_WIKIPEDIA_SEARCH_LANG)) + " " +
+                           I18N.getLanguageName(I18N.getLanguage());
+    const int lh = renderer.getLineHeight(SMALL_FONT_ID);
+    int lineY = pY + 6;
+    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_WIFI_HINT), false, EpdFontFamily::BOLD);
+    lineY += lh;
+    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, wifiText, false);
+    lineY += lh;
+    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, langText.c_str(), false);
+  }
+
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, lb.btn1, lb.btn2, lb.btn3, lb.btn4);
   renderer.displayBuffer();
@@ -585,8 +647,21 @@ void WikipediaActivity::renderArticle() {
     text = nl;
   }
 
-  if (y + readingLineHeight * 3 < ph - bh) {
-    renderer.drawCenteredText(SMALL_FONT_ID, ph - bh - readingLineHeight, tr(STR_PRESS_CONFIRM_FULL_ARTICLE));
+  // Cyberpunk panel in fondo alla pagina: invita a premere Seleziona per
+  // scaricare/convertire l'articolo completo, formattato su due righe.
+  {
+    const int margin = 20;
+    const int pW = pw - margin * 2;
+    const int pH = 48;
+    const int pX = margin;
+    const int pY = ph - bh - pH - 8;
+    renderer.fillRect(pX, pY, pW, pH, 1);
+    PanelDrawHelper::drawCyberpunkPanel(renderer, pX, pY, pW, pH, false);
+    const int lh = renderer.getLineHeight(SMALL_FONT_ID);
+    int lineY = pY + 6;
+    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_DOWNLOAD_NOTE), false, EpdFontFamily::BOLD);
+    lineY += lh;
+    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_DOWNLOAD_NOTE2), false);
   }
 
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
@@ -615,8 +690,8 @@ void WikipediaActivity::performSearch(const std::string& query) {
 
   char url[512];
   snprintf(url, sizeof(url),
-           "https://it.wikipedia.org/w/api.php?action=opensearch&search=%s&limit=10&namespace=0&format=json",
-           encodedQuery.c_str());
+           "%s/w/api.php?action=opensearch&search=%s&limit=10&namespace=0&format=json",
+           wikipediaBaseUrl().c_str(), encodedQuery.c_str());
 
   if (WiFi.status() != WL_CONNECTED) {
     NetworkMemory::restoreAfterNetwork(renderer, "WIKI", "search_wifi_check");
@@ -666,11 +741,18 @@ void WikipediaActivity::openArticleForReading(const std::string& title) {
     return;
   }
 
-  // Quando il reader chiude, si torna qui (alla schermata precedente).
+  // Disattiva il Wi-Fi prima di aprire il reader per liberare heap.
+  if (WiFi.status() == WL_CONNECTED) wifiOff();
+
+  // Quando il reader chiude, si torna SEMPRE al menu principale di Wikipedia.
   startActivityForResult(
       std::make_unique<WikiTxtReaderActivity>(renderer, mappedInput, wikiPath, title),
-      [](const ActivityResult& /*r*/) {
-        // Ritorno alla UI Wikipedia: nessuna azione extra richiesta.
+      [this](const ActivityResult& /*r*/) {
+        freeBuffer();
+        searchResults.clear();
+        state = State::SEARCH_INPUT;
+        selectedIndex = 0;
+        requestUpdate();
       });
 }
 
@@ -690,7 +772,7 @@ void WikipediaActivity::fetchArticleSummary() {
   NetworkMemory::prepareBeforeNetwork(renderer, "WIKI", "before_article");
   std::string encodedTitle = urlEncodeForPath(title);
   char url[512];
-  snprintf(url, sizeof(url), "https://it.wikipedia.org/api/rest_v1/page/summary/%s", encodedTitle.c_str());
+  snprintf(url, sizeof(url), "%s/api/rest_v1/page/summary/%s", wikipediaBaseUrl().c_str(), encodedTitle.c_str());
 
   if (WiFi.status() != WL_CONNECTED) {
     NetworkMemory::restoreAfterNetwork(renderer, "WIKI", "summary_wifi_check");
@@ -755,8 +837,8 @@ void WikipediaActivity::fetchFullArticle() {
 
   char url[512];
   snprintf(url, sizeof(url),
-           "https://it.wikipedia.org/w/api.php?action=parse&page=%s&prop=wikitext&format=json",
-           encodedTitle.c_str());
+           "%s/w/api.php?action=parse&page=%s&prop=wikitext&format=json",
+           wikipediaBaseUrl().c_str(), encodedTitle.c_str());
 
   std::unique_ptr<NetworkClient> httpClient;
   auto* secClient = new NetworkClientSecure();

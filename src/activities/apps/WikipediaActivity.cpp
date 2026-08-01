@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <cctype>
 
+#include <Serialization.h>  // page index cache (.wiki.bin)
+
 #include "CrossPointSettings.h"
 #include "SdCardFontGlobals.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -626,13 +628,17 @@ void WikipediaActivity::renderFullArticleMarkdown() {
   int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
   int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
 
-  // Build the page index once (measured lazily on first page). Subsequent page
-  // turns only look up offsets, so they are fast and never skip content.
+  // Load the persistent page-index cache (.wiki.bin) if it exists and is valid.
+  // This makes subsequent opens of the same article instant. Only when no valid
+  // cache exists do we pay the one-time measurement cost to build it.
   if (!indexBuilt) {
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-    buildArticlePageIndex();
+    if (!loadPageIndexCache()) {
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+      buildArticlePageIndex();
+    }
+    // Re-validate that currentPage fits after cache load.
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
   }
-  if (currentPage >= totalPages) currentPage = totalPages - 1;
 
   std::vector<MarkdownReader::TextLine> pageLines;
   size_t nextOffset = 0;
@@ -792,15 +798,31 @@ bool WikipediaActivity::loadArticlePage(size_t offset, std::vector<MarkdownReade
           break;
         }
         size_t breakPos = remain.length();
+        // Locate a break that fits: prefer the last space, otherwise binary
+        // search for the longest unbroken prefix (fast for long tokens/URLs).
         while (breakPos > 0 &&
                mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, breakPos)) > usableWidth) {
           const size_t spacePos = remain.rfind(' ', breakPos - 1);
           if (spacePos != std::string::npos && spacePos > 0) {
             breakPos = spacePos;
-          } else {
-            breakPos--;
-            while (breakPos > 0 && (remain[breakPos] & 0xC0) == 0x80) breakPos--;
+            // Skip leading spaces in the remaining break candidate.
+            while (breakPos > 0 && remain[breakPos - 1] == ' ') breakPos--;
+            if (breakPos == 0) { breakPos = 1; }
+            continue;
           }
+          // No space: binary search the longest prefix that fits (UTF-8 safe).
+          size_t lo = 1, hi = breakPos, best = 1;
+          while (lo <= hi) {
+            const size_t mid = (lo + hi) / 2;
+            if (mdLineWidth(renderer, fId, sliceMdLine(lineInfo, wrappedStart, mid)) <= usableWidth) {
+              best = mid;
+              lo = mid + 1;
+            } else {
+              hi = mid - 1;
+            }
+          }
+          breakPos = best;
+          break;
         }
         if (breakPos == 0) breakPos = 1;
         wrappedLines.push_back(sliceMdLine(lineInfo, wrappedStart, breakPos));
@@ -1130,6 +1152,11 @@ void WikipediaActivity::fetchFullArticle() {
   textBuffer.reset(); // Libera la RAM
   articlePageOffset = 0;
   invalidatePageIndex();
+  // A re-download may change content even at the same byte size, so drop the
+  // stale page-index cache and rebuild it for the fresh article.
+  if (Storage.exists(indexCachePathForTitle(currentQuery).c_str())) {
+    Storage.remove(indexCachePathForTitle(currentQuery).c_str());
+  }
 
   if (textLength == 0) {
     if (!fallbackText.empty()) {
@@ -1151,6 +1178,18 @@ void WikipediaActivity::fetchFullArticle() {
   // network download. Without this the reader font id points to an unloaded
   // family and the article renders as a blank screen.
   NetworkMemory::restoreAfterNetwork(renderer, "WIKI", "after_full");
+
+  // Build the page index now (while the user sees a loading message) instead of
+  // blocking the first render. The result is persisted as <title>.wiki.bin, so
+  // this one-time cost is only paid again if the article or reading settings
+  // change.
+  if (!indexBuilt && !loadPageIndexCache()) {
+    // Give the user visible feedback while the (one-time) index is measured.
+    renderer.clearScreen();
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    renderer.displayBuffer();
+    buildArticlePageIndex();
+  }
 
   state = State::FULL_ARTICLE;
   requestUpdate();
@@ -1214,10 +1253,107 @@ void WikipediaActivity::buildArticlePageIndex() {
   }
 
   indexBuilt = true;
-  indexedWidth = 0;
-  indexedLineHeight = 0;
+  indexedWidth = renderer.getScreenWidth() - readingMarginH * 2;
+  indexedLineHeight = readingLineHeight > 0 ? readingLineHeight : 0;
+  indexByteSize = textLength;
   if (currentPage >= totalPages) currentPage = totalPages - 1;
   LOG_DBG("WIKI", "Article page index built: %d pages (%zu bytes)", totalPages, textLength);
+
+  // Persist the index so subsequent opens skip the slow measurement entirely.
+  savePageIndexCache();
+}
+
+// ---------------------------------------------------------------------
+// Page index binary cache (.wiki.bin). Mirrors TxtReaderActivity, but stored
+// next to each article:  <title>.wiki.bin
+// ---------------------------------------------------------------------
+std::string WikipediaActivity::indexCachePathForTitle(const std::string& title) {
+  return std::string(CACHE_DIR) + "/" + cachePathForTitle(title) + ".bin";
+}
+
+bool WikipediaActivity::loadPageIndexCache() {
+  pageOffsets.clear();
+  const std::string path = indexCachePathForTitle(currentQuery);
+  FsFile f;
+  if (!Storage.openFileForRead("WIKI", path.c_str(), f)) return false;
+
+  uint32_t magic = 0, version = 0;
+  serialization::readPod(f, magic);
+  serialization::readPod(f, version);
+  if (magic != 0x5749434B /* "WICK" */ || version != 1) {
+    LOG_DBG("WIKI", "Index cache header mismatch, rebuilding");
+    Storage.remove(path.c_str());
+    return false;
+  }
+
+  uint32_t cachedSize = 0;
+  serialization::readPod(f, cachedSize);
+  if (cachedSize != textLength) {
+    LOG_DBG("WIKI", "Index cache article size mismatch, rebuilding");
+    Storage.remove(path.c_str());
+    return false;
+  }
+
+  int32_t cachedWidth = 0;
+  serialization::readPod(f, cachedWidth);
+  const int width = renderer.getScreenWidth() - readingMarginH * 2;
+  if (cachedWidth != width) {
+    LOG_DBG("WIKI", "Index cache width mismatch, rebuilding");
+    Storage.remove(path.c_str());
+    return false;
+  }
+
+  int32_t cachedLineHeight = 0;
+  serialization::readPod(f, cachedLineHeight);
+  const int lh = readingLineHeight > 0 ? readingLineHeight : 0;
+  if (cachedLineHeight != lh) {
+    LOG_DBG("WIKI", "Index cache line height mismatch, rebuilding");
+    Storage.remove(path.c_str());
+    return false;
+  }
+
+  uint32_t numPages = 0;
+  serialization::readPod(f, numPages);
+  if (numPages == 0 || numPages > 100000) {
+    Storage.remove(path.c_str());
+    return false;
+  }
+  pageOffsets.reserve(numPages);
+  for (uint32_t i = 0; i < numPages; i++) {
+    uint32_t off = 0;
+    serialization::readPod(f, off);
+    pageOffsets.push_back(off);
+  }
+  f.close();
+
+  totalPages = static_cast<int>(pageOffsets.size());
+  indexBuilt = true;
+  indexByteSize = textLength;
+  indexedWidth = width;
+  indexedLineHeight = lh;
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  LOG_DBG("WIKI", "Loaded page index cache: %d pages (%s)", totalPages, path.c_str());
+  return true;
+}
+
+void WikipediaActivity::savePageIndexCache() {
+  if (currentQuery.empty() || pageOffsets.empty()) return;
+  const std::string path = indexCachePathForTitle(currentQuery);
+  FsFile f;
+  if (!Storage.openFileForWrite("WIKI", path.c_str(), f)) {
+    LOG_ERR("WIKI", "Failed to save page index cache");
+    return;
+  }
+  serialization::writePod(f, uint32_t(0x5749434B));  // "WICK"
+  serialization::writePod(f, uint32_t(1));
+  serialization::writePod(f, uint32_t(textLength));
+  serialization::writePod(f, int32_t(renderer.getScreenWidth() - readingMarginH * 2));
+  serialization::writePod(f, int32_t(readingLineHeight > 0 ? readingLineHeight : 0));
+  serialization::writePod(f, uint32_t(pageOffsets.size()));
+  for (size_t off : pageOffsets) {
+    serialization::writePod(f, uint32_t(off));
+  }
+  f.close();
 }
 
 void WikipediaActivity::advancePage(int dir) {

@@ -94,7 +94,11 @@ class WikipediaActivity final : public Activity {
   bool indexBuilt = false;
   int indexedWidth = 0;    // viewport width used when the index was built
   int indexedLineHeight = 0;
+  size_t indexByteSize = 0;  // .wiki file size the index binary was built for
   void buildArticlePageIndex();  // measures all page boundaries (slow, one-time)
+  bool loadPageIndexCache();     // load .wiki.bin if valid
+  void savePageIndexCache();
+  std::string indexCachePathForTitle(const std::string& title);
   void invalidatePageIndex();
 
   // Rendering

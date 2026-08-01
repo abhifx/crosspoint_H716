@@ -626,9 +626,17 @@ void WikipediaActivity::renderFullArticleMarkdown() {
   int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
   int lineHeight = readingLineHeight > 0 ? readingLineHeight : renderer.getLineHeight(fId);
 
+  // Build the page index once (measured lazily on first page). Subsequent page
+  // turns only look up offsets, so they are fast and never skip content.
+  if (!indexBuilt) {
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    buildArticlePageIndex();
+  }
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+
   std::vector<MarkdownReader::TextLine> pageLines;
   size_t nextOffset = 0;
-  if (!loadArticlePage(articlePageOffset, pageLines, nextOffset) || pageLines.empty()) {
+  if (!loadArticlePage(pageOffsets[currentPage], pageLines, nextOffset) || pageLines.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, ph / 2, "No content");
     auto lb = mappedInput.mapLabels(tr(STR_BACK), nullptr, nullptr, nullptr);
     GUI.drawButtonHints(renderer, lb.btn1, nullptr, nullptr, nullptr);
@@ -720,6 +728,15 @@ bool WikipediaActivity::loadArticlePage(size_t offset, std::vector<MarkdownReade
     memcpy(buf, textBuffer.get() + offset, readLen);
   }
   buf[readLen] = '\0';
+
+  // Prime the SD-card font metrics for the whole chunk up front. Without this,
+  // every getTextAdvanceX() call during span-aware wrapping triggers an
+  // on-demand glyph decompression, which makes each page turn take many seconds.
+  // A single call over the chunk decompresses all needed glyphs once (matching
+  // TxtReaderActivity::loadPageAtOffset).
+  if (renderer.isSdCardFont(fId)) {
+    renderer.ensureSdCardFontReady(fId, buf, /*styleMask=*/0x0F);
+  }
 
   size_t articleLen = textLength;
   if (!g_articleFilePath.empty()) {
@@ -1112,6 +1129,7 @@ void WikipediaActivity::fetchFullArticle() {
   
   textBuffer.reset(); // Libera la RAM
   articlePageOffset = 0;
+  invalidatePageIndex();
 
   if (textLength == 0) {
     if (!fallbackText.empty()) {
@@ -1159,42 +1177,65 @@ void WikipediaActivity::showError(const std::string& msg) {
   freeBuffer(); errorMessage = msg; state = State::ERROR; requestUpdate();
 }
 
+void WikipediaActivity::invalidatePageIndex() {
+  pageOffsets.clear();
+  totalPages = 0;
+  currentPage = 0;
+  indexBuilt = false;
+  articlePageOffset = 0;
+}
+
+void WikipediaActivity::buildArticlePageIndex() {
+  pageOffsets.clear();
+  pageOffsets.push_back(0);
+  totalPages = 1;
+
+  size_t offset = 0;
+  std::vector<MarkdownReader::TextLine> dummy;
+  int guard = 0;
+  const int maxGuard = 200000;
+  while (guard++ < maxGuard) {
+    size_t next = offset;
+    if (!loadArticlePage(offset, dummy, next)) break;
+    if (next <= offset) break;  // no progress guard
+    offset = next;
+    pageOffsets.push_back(static_cast<uint32_t>(offset));
+    totalPages++;
+    // Yield periodically so other tasks (input, display) stay responsive while
+    // the (one-time) index is built.
+    if ((totalPages & 0x1F) == 0) vTaskDelay(1);
+  }
+
+  // A trailing entry exactly at EOF represents an empty page: drop it so the
+  // last valid page still has content.
+  if (totalPages > 1 && pageOffsets.back() >= textLength && textLength > 0) {
+    pageOffsets.pop_back();
+    totalPages--;
+  }
+
+  indexBuilt = true;
+  indexedWidth = 0;
+  indexedLineHeight = 0;
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  LOG_DBG("WIKI", "Article page index built: %d pages (%zu bytes)", totalPages, textLength);
+}
+
 void WikipediaActivity::advancePage(int dir) {
   if (textLength == 0 && g_articleFilePath.empty()) return;
-
-  std::vector<MarkdownReader::TextLine> lines;
+  if (!indexBuilt) return;  // index is built lazily during the first render
 
   if (dir > 0) {
-    size_t next = articlePageOffset;
-    if (!loadArticlePage(articlePageOffset, lines, next)) return;
-    if (next > articlePageOffset) {
-      articlePageOffset = next;
+    if (currentPage + 1 < totalPages) {
+      currentPage++;
+      articlePageOffset = pageOffsets[currentPage];
       requestUpdate();
     }
     return;
   }
 
-  // Going backward: walk page boundaries from the start to find the previous
-  // page start (the biggest boundary strictly less than articlePageOffset).
-  if (articlePageOffset == 0) return;
-
-  size_t boundary = 0;
-  size_t walk = 0;
-  int guard = 0;
-  const int maxGuard = 4096;
-
-  std::vector<MarkdownReader::TextLine> pageLines;
-  while (walk < articlePageOffset && guard++ < maxGuard) {
-    boundary = walk;
-    size_t pageNext = walk;
-    if (!loadArticlePage(walk, pageLines, pageNext)) break;
-    if (pageNext <= walk) break;  // no forward progress guard
-    walk = pageNext;
-    if (walk >= articlePageOffset) break;
-  }
-
-  if (boundary != articlePageOffset) {
-    articlePageOffset = boundary;
+  if (currentPage > 0) {
+    currentPage--;
+    articlePageOffset = pageOffsets[currentPage];
     requestUpdate();
   }
 }
@@ -1301,6 +1342,7 @@ bool WikipediaActivity::loadCachedArticle(const std::string& title) {
     textLength = fileSize;
     textBuffer.reset(); // Libera la RAM
     articlePageOffset = 0;
+    invalidatePageIndex();
     LOG_DBG("WIKI", "Loaded large cached article: %s (%zu bytes on SD)", path.c_str(), textLength);
     return true;
   }
@@ -1316,6 +1358,7 @@ bool WikipediaActivity::loadCachedArticle(const std::string& title) {
   buf[textLength] = '\0';
   g_articleFilePath.clear();
   articlePageOffset = 0;
+  invalidatePageIndex();
   LOG_DBG("WIKI", "Loaded cached article: %s (%zu bytes in RAM)", path.c_str(), textLength);
   return true;
 }

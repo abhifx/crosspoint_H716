@@ -87,6 +87,16 @@ class WikipediaActivity final : public Activity {
   char* ensureBuffer();
   void freeBuffer();
 
+  // Page index for fast, reliable markdown pagination (mirrors TxtReaderActivity).
+  std::vector<uint32_t> pageOffsets;
+  int totalPages = 0;
+  int currentPage = 0;
+  bool indexBuilt = false;
+  int indexedWidth = 0;    // viewport width used when the index was built
+  int indexedLineHeight = 0;
+  void buildArticlePageIndex();  // measures all page boundaries (slow, one-time)
+  void invalidatePageIndex();
+
   // Rendering
   void renderSearchInput();
   void renderSearchHistory();

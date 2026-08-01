@@ -636,6 +636,9 @@ void WikipediaActivity::renderFullArticleMarkdown() {
       GUI.drawPopup(renderer, tr(STR_INDEXING));
       buildArticlePageIndex();
     }
+    // Clear the "Indicizzazione" popup so it does not linger over the article
+    // on e-ink (black pixels from the popup box would otherwise stay visible).
+    renderer.clearScreen();
     // Re-validate that currentPage fits after cache load.
     if (currentPage >= totalPages) currentPage = totalPages - 1;
   }
@@ -1268,7 +1271,7 @@ void WikipediaActivity::buildArticlePageIndex() {
 // next to each article:  <title>.wiki.bin
 // ---------------------------------------------------------------------
 std::string WikipediaActivity::indexCachePathForTitle(const std::string& title) {
-  return std::string(CACHE_DIR) + "/" + cachePathForTitle(title) + ".bin";
+  return cachePathForTitle(title) + ".bin";
 }
 
 bool WikipediaActivity::loadPageIndexCache() {

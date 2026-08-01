@@ -503,7 +503,7 @@ void WikipediaActivity::renderSearchInput() {
   // --- Header: logo + "Wikipedia" title, shared across all app pages ---
   renderWikipediaHeader(tr(STR_WIKIPEDIA));
 
-  // --- Cyberpunk action panels (pushed down 64px below the shared header) ---
+  // --- Cyberpunk action panels (pushed down 64px below the shared header, fixed) ---
   const int ct = wikipediaHeaderContentTop(renderer) + 64;
   const int panelW = pw - margin * 2;
   const int panelH = 54;
@@ -527,14 +527,18 @@ void WikipediaActivity::renderSearchInput() {
   drawPanel(2, margin, ct + 2 * (panelH + gap), panelW, panelH, cacheLbl);
 
   // Cyberpunk panel in fondo: modalità Wi-Fi (secondo Sync Day) + lingua di ricerca.
+  // Bianco, bordo nero, testo nero, rialzato (parte subito sotto i pulsanti) e
+  // più alto; usa lo stesso font dei pulsanti (UI_10).
   {
     const int ph = renderer.getScreenHeight();
     const int bh = UITheme::getInstance().getMetrics().buttonHintsHeight;
     const int pW = renderer.getScreenWidth() - margin * 2;
-    const int pH = 66;
     const int pX = margin;
-    const int pY = ph - bh - pH - 8;
-    renderer.fillRect(pX, pY, pW, pH, 1);
+    const int actionsBottom = ct + 2 * (panelH + gap) + panelH;
+    const int pY = actionsBottom + 12;              // rialzato: subito sotto i pulsanti
+    const int hintsTop = ph - bh;
+    const int pH = (hintsTop - 12) - pY;             // più alto: fino a sopra gli hint
+    renderer.fillRect(pX, pY, pW, pH, 0);            // sfondo bianco
     PanelDrawHelper::drawCyberpunkPanel(renderer, pX, pY, pW, pH, false);
 
     const char* wifiText = SETTINGS.syncDayWifiChoice == CrossPointSettings::SYNC_DAY_WIFI_MANUAL
@@ -542,13 +546,13 @@ void WikipediaActivity::renderSearchInput() {
                                : tr(STR_WIKIPEDIA_WIFI_AUTO);
     std::string langText = std::string(tr(STR_WIKIPEDIA_SEARCH_LANG)) + " " +
                            I18N.getLanguageName(I18N.getLanguage());
-    const int lh = renderer.getLineHeight(SMALL_FONT_ID);
-    int lineY = pY + 6;
-    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_WIFI_HINT), false, EpdFontFamily::BOLD);
-    lineY += lh;
-    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, wifiText, false);
-    lineY += lh;
-    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, langText.c_str(), false);
+    const int lh = renderer.getLineHeight(UI_10_FONT_ID);
+    int lineY = pY + 16;
+    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, tr(STR_WIKIPEDIA_WIFI_HINT), true, EpdFontFamily::BOLD);
+    lineY += lh + 6;
+    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, wifiText, true);
+    lineY += lh + 6;
+    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, langText.c_str(), true);
   }
 
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

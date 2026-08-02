@@ -371,7 +371,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   if (headerIcon != nullptr) {
     // Custom header with a leading icon (e.g. the Wikipedia logo) before the title.
     HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
-    const int iconSize = 28;
+    const int iconSize = headerIconSize;  // native bitmap size, never crop/scale
     const int headerY = metrics.topPadding;
     const int iconMargin = 20;
     const int iconX = iconMargin;

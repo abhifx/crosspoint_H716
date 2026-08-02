@@ -547,12 +547,26 @@ void WikipediaActivity::renderSearchInput() {
     std::string langText = std::string(tr(STR_WIKIPEDIA_SEARCH_LANG)) + " " +
                            I18N.getLanguageName(I18N.getLanguage());
     const int lh = renderer.getLineHeight(UI_10_FONT_ID);
+    const int textX = pX + 16;
+    const int textW = pW - 32;
+    const int panelBottom = pY + pH;
+
+    // Draw a string inside the panel, wrapping onto several lines when it is
+    // wider than the panel, and stop when the height is exhausted.
+    auto drawWrappedLine = [&](const std::string& str, int& y, const bool bold) {
+      for (const auto& wl : renderer.wrappedText(UI_10_FONT_ID, str.c_str(), textW, 8,
+                                                 bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR)) {
+        if (y + lh > panelBottom) return;
+        renderer.drawText(UI_10_FONT_ID, textX, y, wl.c_str(), true,
+                          bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        y += lh + 6;
+      }
+    };
+
     int lineY = pY + 16;
-    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, tr(STR_WIKIPEDIA_WIFI_HINT), true, EpdFontFamily::BOLD);
-    lineY += lh + 6;
-    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, wifiText, true);
-    lineY += lh + 6;
-    renderer.drawText(UI_10_FONT_ID, pX + 16, lineY, langText.c_str(), true);
+    drawWrappedLine(tr(STR_WIKIPEDIA_WIFI_HINT), lineY, true);
+    drawWrappedLine(wifiText, lineY, false);
+    drawWrappedLine(langText, lineY, false);
   }
 
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
@@ -624,10 +638,23 @@ void WikipediaActivity::renderArticle() {
   int ct = hh + 4, ch = ph - ct - bh - 4, tw = pw - readingMarginH * 2;
   int fId = readingFontId > 0 ? readingFontId : UI_10_FONT_ID;
 
+  // Pannello cyberpunk in basso (stesso stile della prima pagina): bianco,
+  // bordo nero, testo nero, più alto e rialzato (64px). Calcoliamo prima la
+  // geometria per evitare che il testo del summary vada sotto il pannello.
+  const int margin = 20;
+  const int panelH = 80;                     // più alto
+  const int panelX = margin;
+  const int panelW = pw - margin * 2;
+  const int panelY = ph - bh - panelH - 64;  // spostato 64px più in alto
+
   const char* text = buf;
   int y = ct;
 
-  while (*text && y + readingLineHeight <= ct + ch) {
+  const int panelTop = panelY;
+  int textBottomLimit = ct + ch;
+  if (panelTop > ct) textBottomLimit = panelTop - readingLineHeight;  // non sovrapporre il pannello
+
+  while (*text && y + readingLineHeight <= textBottomLimit) {
     const char* nl = text;
     while (*nl && *nl != '\n') nl++;
 
@@ -639,7 +666,7 @@ void WikipediaActivity::renderArticle() {
     }
 
     for (const auto& line : wrapped) {
-      if (y + readingLineHeight > ct + ch) break;
+      if (y + readingLineHeight > textBottomLimit) break;
       if (!line.empty()) {
         bool blank = true; for (char c : line) { if (c != ' ' && c != '\t') { blank = false; break; } }
         if (!blank) renderer.drawText(fId, readingMarginH, y, line.c_str(), true);
@@ -652,20 +679,30 @@ void WikipediaActivity::renderArticle() {
   }
 
   // Cyberpunk panel in fondo alla pagina: invita a premere Seleziona per
-  // scaricare/convertire l'articolo completo, formattato su due righe.
+  // scaricare/convertire l'articolo completo. Stesso stile del pannello info
+  // della homepage: bianco, bordo nero, testo nero, più alto e rialzato (64px).
   {
-    const int margin = 20;
-    const int pW = pw - margin * 2;
-    const int pH = 48;
-    const int pX = margin;
-    const int pY = ph - bh - pH - 8;
-    renderer.fillRect(pX, pY, pW, pH, 1);
-    PanelDrawHelper::drawCyberpunkPanel(renderer, pX, pY, pW, pH, false);
-    const int lh = renderer.getLineHeight(SMALL_FONT_ID);
-    int lineY = pY + 6;
-    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_DOWNLOAD_NOTE), false, EpdFontFamily::BOLD);
-    lineY += lh;
-    renderer.drawText(SMALL_FONT_ID, pX + 14, lineY, tr(STR_WIKIPEDIA_DOWNLOAD_NOTE2), false);
+    renderer.fillRect(panelX, panelY, panelW, panelH, 0);   // sfondo bianco
+    PanelDrawHelper::drawCyberpunkPanel(renderer, panelX, panelY, panelW, panelH, false);
+    const int lh = renderer.getLineHeight(UI_10_FONT_ID);
+    const int textX = panelX + 16;
+    const int textW = panelW - 32;
+    const int panelBottom = panelY + panelH;
+
+    // Wrap each hint line if it is wider than the panel and stop at the bottom.
+    auto drawWrappedLine = [&](const std::string& str, int& y, const bool bold) {
+      for (const auto& wl : renderer.wrappedText(UI_10_FONT_ID, str.c_str(), textW, 4,
+                                                 bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR)) {
+        if (y + lh > panelBottom) return;
+        renderer.drawText(UI_10_FONT_ID, textX, y, wl.c_str(), true,
+                          bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        y += lh + 6;
+      }
+    };
+
+    int lineY = panelY + 16;
+    drawWrappedLine(tr(STR_WIKIPEDIA_DOWNLOAD_NOTE), lineY, true);
+    drawWrappedLine(tr(STR_WIKIPEDIA_DOWNLOAD_NOTE2), lineY, false);
   }
 
   auto lb = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
@@ -1005,7 +1042,7 @@ void WikipediaActivity::launchSearchKeyboard() {
   // (SEARCH_INPUT), not close the app; on confirm we run the search.
   startActivityForResult(
       std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_WIKIPEDIA), searchInput, 128,
-                                              InputType::Text, WikipediaIcon),
+                                              InputType::Text, WikipediaIcon, /*headerIconSize=*/32),
       [this](const ActivityResult& r) {
         if (r.isCancelled) {
           // Stay on the main search page.

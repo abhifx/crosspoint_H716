@@ -26,6 +26,34 @@ This fork builds on top of CPR-vCodex, inheriting **all** upstream features: rea
 
 On top of that, Steroids adds a substantial set of original features developed across multiple releases:
 
+> **Steroids at a glance** — every tangible improvement vs upstream, with a brief
+> description of each (details in the sections below):
+>
+> - **📚 Full E-Book Library** — a scalable grid library (collections/series,
+>   covers, filters, full-text search, incremental sync) reading EPUB/XTC/TXT/MD.
+> - **🖼️ Cover & grayscale rendering** — a shared, contrast-correct 2-bit gray
+>   pipeline (gamma + error-diffusion dithering, `int16_t` safety) for covers,
+>   screensaver/sleep and in-book images.
+> - **🗺️ Lyra Cyber-style Home** — data panels, reading-time ETA badges,
+>   priority ribbons, and the custom LyraMarcoand75 theme.
+> - **🛡️ Screensaver / Sleep** — dual-mode e-ink screensaver (folder picker,
+>   transparent PNG compositing, reader + general), shutdown safe power-button
+>   handling, and a truly random shuffle.
+> - **📊 Reading time in status bar** — pace-based "time left" estimates.
+> - **🔖 Bookmarks & ✂️ Clippings** — layout-independent (absolute word index);
+>   bookmarks highlight the page and jump accurately; an in-app clippings
+>   preview lets you read a highlight without leaving your book.
+> - **📖 Wikipedia app** — search, summarised preview, and full-article reading
+>   (wikitext → markdown, offline cache), in your device language.
+> - **🟢 Guide dots & 📐 EPUB render modes** — optional word guides and
+>   Default/Balanced/Light rendering with isolated caches.
+> - **🕹️ Configurable long-press** — side and front buttons for bookmark/
+>   clipping/chapter/orientation/font actions.
+> - **🌐 Web portal & OTA** — split device/app settings, dynamic fonts, Steroids
+>   branding, fork OTA manifest.
+> - **⚙️ System & i18n** — on-device STRING settings, clock/DS3231 X3 support,
+>   Italian translation overhaul, safety/memory optimizations.
+
 ---
 
 ### 📚 Full E-Book Library v2
@@ -359,6 +387,11 @@ Long-press on both side and front buttons can now be configured for quick bookma
 | **Screensaver Font Sizes** | 🛡️ Screensaver | X-Small and X-Large font sizes added using Bookerly for the reading dashboard overlay |
 | **OTA Fix** | ⚙️ System | OTA update detection fixed for newer dev builds; manifest updated for fork release assets |
 | **Web Portal** | 🌐 Web | Unified navigation with split device/app settings, dynamic fonts, white logo, Steroids branding |
+| **Wikipedia App** | 📖 Apps | Search Wikipedia, summary preview, and full-article reading — wikitext downloaded to a markdown cache (`.wiki`) for offline reading; dedicated `WikiTxtReaderActivity` |
+| **Per-Language Wikipedia** | 📖 Apps | Request base URL follows the selected UI language (`it`, `fr`, `de`, `sl`, …) instead of a hardcoded `it.wikipedia.org` |
+| **Clippings Preview Panel** | ✂️ Reading | Single press on a clipping opens a readable preview (chapter, page, full text); Select again jumps to the book — lets you read a highlight without leaving your place |
+| **Grayscale Image Pipeline** | 🖼️ Rendering | Shared 2-bit gray config: gamma LUT (1.5) + empiric thresholds 50/120/200, error-diffusion dithering (`int16_t`, overflow-safe buffers), better midtone contrast on covers and screensaver/sleep images |
+| **Reader Status Bar Overlap Fix** | 📊 Reading | Centered book/chapter title reserves the battery, percentage, time-left and clock before centering — a long title can no longer overlap the battery |
 
 All CPR-vCodex upstream features (reading stats, heatmaps, achievements, dictionaries, flashcards, bookmarks, SD fonts, KOReader Sync, Bionic Reading, dark mode, sync day, etc.) are **fully included**. This fork only adds the features listed above without removing or degrading any upstream functionality.
 
@@ -377,7 +410,7 @@ The development and feature discussion for CPR-vCodex Steroids takes place in th
 | Project | `CPR-vCodex Steroids` |
 | Device | `Xteink X4`; `Xteink X3` compatibility reported by users, not personally tested |
 | Current upstream base | [`1.5.0.5-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.5.0.5-cpr-vcodex) |
-| Current Steroids build | Synced with upstream `1.5.0` + Steroids features (clippings, bookmarks v4, guide dots, library, carousel, web portal, screensaver, configurable long-press, EPUB render modes, OTA fixes, time/clock X3 support, progressive EPUB indexing, EndOfBook options) |
+| Current Steroids build | Synced with upstream `1.5.0.5` + Steroids features: e-book library, Wikipedia app (per-language), clippings preview, bookmarks v4, guide dots, library, carousel, web portal, screensaver (random shuffle, safe wake), configurable long-press, EPUB render modes, reworked 2-bit grayscale image pipeline, OTA fixes, time/clock X3 support, EndOfBook options |
 | Latest SD font package | [`sd-fonts-m1-b4`](https://github.com/franssjz/cpr-vcodex/releases/tag/sd-fonts-m1-b4) |
 | Changelog | [CHANGELOG.md](./CHANGELOG.md) |
 | GitHub Releases | [Releases page](https://github.com/marcoand75/cpr-vcodex-steroids/releases) |

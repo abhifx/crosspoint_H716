@@ -878,24 +878,31 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                         showBatteryPercentage);
   }
 
-  // Draw Time Left label (left of title, CrossInk-style)
-  int timeLeftWidth = 0;
-  int timeLeftEndX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
-  if (timeLeftLabel != nullptr && timeLeftLabel[0] != '\0') {
-    timeLeftWidth = renderer.getTextWidth(SMALL_FONT_ID, timeLeftLabel);
-    // Position after battery area if battery is visible (with spacing)
-    int timeLeftX = timeLeftEndX;
+  // Left-side reserved area (battery + percentage + time-left + left clock).
+  // This ALWAYS reserves the battery and its percentage, even when there is no
+  // time-left label, so a centered chapter title can never overlap the battery.
+  int leftContentEndX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;  // where title content begins
+  {
     if (SETTINGS.statusBarBattery) {
-      timeLeftX += metrics.batteryWidth + BaseTheme::batteryPercentSpacing;
+      leftContentEndX += metrics.batteryWidth;
       if (showBatteryPercentage) {
         const uint16_t percentage = powerManager.getBatteryPercentage();
         const auto percentageText = std::to_string(percentage) + "%";
-        timeLeftX += renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
+        leftContentEndX += renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
       }
-      timeLeftX += 5;  // spacing between battery and time-left
+      leftContentEndX += 5;  // spacing between battery and next element
     }
-    renderer.drawText(SMALL_FONT_ID, timeLeftX, textY, timeLeftLabel);
-    timeLeftEndX = timeLeftX + timeLeftWidth;
+  }
+
+  // Draw Time Left label (left of title, CrossInk-style)
+  int timeLeftWidth = 0;
+  int timeLeftX = leftContentEndX;
+  if (timeLeftLabel != nullptr && timeLeftLabel[0] != '\0') {
+    timeLeftWidth = renderer.getTextWidth(SMALL_FONT_ID, timeLeftLabel);
+    if (timeLeftWidth > 0 && timeLeftX + 6 <= renderer.getScreenWidth() - 40) {
+      renderer.drawText(SMALL_FONT_ID, timeLeftX, textY, timeLeftLabel);
+      leftContentEndX = timeLeftX + timeLeftWidth;
+    }
   }
 
   // Draw Clock (X3 only — DS3231 RTC)
@@ -910,13 +917,13 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
       int clockX;
       if (clockOnLeft) {
-        clockX = timeLeftEndX + (timeLeftWidth > 0 ? 6 : 0);
+        clockX = leftContentEndX + (leftContentEndX > metrics.statusBarHorizontalMargin + orientedMarginLeft + 1 ? 6 : 0);
       } else {
         clockX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight -
                  progressTextWidth - (progressTextWidth > 0 ? 10 : 0) - clockTextWidth;
       }
       renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
-      if (clockOnLeft) timeLeftEndX = clockX + clockTextWidth;
+      if (clockOnLeft) leftContentEndX = clockX + clockTextWidth;
     }
   }
 
@@ -928,7 +935,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int rendererableScreenWidth =
         renderer.getScreenWidth() - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
 
-    const int leftContentWidth = timeLeftEndX - metrics.statusBarHorizontalMargin - orientedMarginLeft;
+    // Reserve the full left-side content (battery + % + time-left + left clock).
+    const int leftContentWidth = leftContentEndX - metrics.statusBarHorizontalMargin - orientedMarginLeft;
     int titleMarginLeft = leftContentWidth + 15;
     // Reserve space for progress text AND clock on the right
     int titleMarginRight = progressTextWidth + 30;
@@ -936,8 +944,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       titleMarginRight += clockTextWidth + 10;
     }
 
-    // Ensure the left margin is never smaller than the battery+time-left area
-    // plus a safety gap, even when the centering logic tries to shrink it.
+    // Ensure the left margin is never smaller than the reserved area plus a
+    // safety gap, even when the centering logic tries to shrink it.
     const int minTitleLeft = leftContentWidth + 8;
     if (titleMarginLeft < minTitleLeft) titleMarginLeft = minTitleLeft;
 

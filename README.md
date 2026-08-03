@@ -2,6 +2,9 @@
 
 <img width="1023" height="644" alt="e5b50277-04b1-4c62-9f23-3b51c947ef0b" src="https://github.com/user-attachments/assets/f93e6962-332f-4d47-9d58-cbf81428ce19" />
 
+<img width="1684" height="390" alt="Screenshot 2026-08-01 221426" src="https://github.com/user-attachments/assets/80641a63-ed4a-48d9-af12-69ad6038d76e" />
+
+
 > **CPR-vCodex Steroids is a personal fork of [CPR-vCodex](https://github.com/franssjz/cpr-vcodex)** (itself a fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)), focused on enriching the reading experience with a feature-rich library manager, enhanced visual themes, productivity tools, and deeper device customization — while inheriting all the reading analytics, statistics, and stability work from upstream CPR-vCodex.
 >
 > Think of it as CPR-vCodex on overdrive: same solid reading foundation, but with a full e-book library browser, cyber-style carousel data panels, dual-mode e-ink screensaver, contextual book menus, reading pace tracking in the status bar, and a collection of quality-of-life improvements designed for daily use on the Xteink X4.

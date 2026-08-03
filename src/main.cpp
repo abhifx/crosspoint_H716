@@ -881,8 +881,11 @@ void loop() {
    // TOGGLE_STATUS_BAR and PAGE_TURN in the reader activity loop).
    // If the press started while a screen saver was active, suppress the
    // release-edge shortPwrBtn action so the wake-key event stays
-   // consumed entirely by the screen saver logic.
-   if (powerBtnInScreensaver) {
+   // consumed entirely by the screen saver logic. We also suppress when a
+   // screen saver is still the current activity at release, so launches from
+   // Home/Apps (which can push the activity slightly later than the press
+   // edge is sampled) never trigger the short-press action on wake.
+   if (powerBtnInScreensaver || activityManager.isScreenSaverActive()) {
      powerBtnInScreensaver = false;
      powerBtnDownMs = 0;
    } else {

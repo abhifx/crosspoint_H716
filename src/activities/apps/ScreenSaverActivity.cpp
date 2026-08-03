@@ -44,12 +44,27 @@ void ScreenSaverActivity::loadImages() {
   if (dirPath.empty()) return;
   images_ = SleepImageUtils::listImageFiles(dirPath);
 
-  // Extract the first image path, then free the vector to reclaim heap
-  // for the PNG decoder (~38 KB).  Only the current image path is needed
-  // for rendering; the next image is resolved lazily in pickNextImage().
+  // Determine the first image. Sequential order starts at images_[0]; shuffle
+  // picks a random image (anti-repetition) so the first shown image differs
+  // between sessions instead of always being the same file.
   if (!images_.empty()) {
-    currentIndex_ = 0;
-    currentImagePath_ = images_[0];
+    const uint8_t order = returnToCaller_ ? SETTINGS.screenSaverReaderOrder : SETTINGS.screenSaverOrder;
+    if (order == CrossPointSettings::SCREENSAVER_SHUFFLE && images_.size() > 1) {
+      const size_t count = images_.size();
+      const uint8_t window = static_cast<uint8_t>(std::min(static_cast<size_t>(APP_STATE.recentScreensaverFill), count - 1));
+      size_t next = static_cast<size_t>(random(static_cast<int>(count)));
+      for (uint8_t attempt = 0; attempt < 20 && APP_STATE.isRecentScreensaver(static_cast<uint16_t>(next), window);
+           attempt++) {
+        next = static_cast<size_t>(random(static_cast<int>(count)));
+      }
+      currentIndex_ = static_cast<int>(next);
+      currentImagePath_ = images_[next];
+      APP_STATE.pushRecentScreensaver(static_cast<uint16_t>(next));
+      APP_STATE.saveToFile();
+    } else {
+      currentIndex_ = 0;
+      currentImagePath_ = images_[0];
+    }
   }
   freeImageList();
 }

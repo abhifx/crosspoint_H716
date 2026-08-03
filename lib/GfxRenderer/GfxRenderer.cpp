@@ -1495,16 +1495,22 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
       return lines;
     }
 
-    // Find next word
-    size_t spacePos = remaining.find(' ');
-    std::string word;
+    // Skip any leading spaces (collapse consecutive spaces to the single
+    // separator used between words, so we never emit empty words or trailing
+    // spaces on a line).
+    size_t start = remaining.find_first_not_of(' ');
+    if (start == std::string::npos) {
+      break;  // only spaces left
+    }
 
+    std::string word;
+    size_t spacePos = remaining.find(' ', start);
     if (spacePos == std::string::npos) {
-      word = remaining;
+      word = remaining.substr(start);
       remaining.clear();
     } else {
-      word = remaining.substr(0, spacePos);
-      remaining.erase(0, spacePos + 1);
+      word = remaining.substr(start, spacePos - start);
+      remaining.erase(0, spacePos);
     }
 
     std::string testLine = currentLine.empty() ? word : currentLine + " " + word;

@@ -1388,10 +1388,15 @@ void EpubReaderActivity::createClippingFromSelection() {
       }
       if (lineHasSelectedWord) {
         if (!firstLine) {
-          // Se la riga corrente ha un gap verticale significativo rispetto
-          // alla precedente, inserisci \n (nuovo paragrafo), altrimenti spazio.
+          // Continua il testo selezionato: tra due righe adiacenti inserisci un
+          // SINGOLO spazio (la spaziatura corretta tra l'ultima parola della
+          // riga precedente e la prima della successiva). Usa un capoverso
+          // (`\n`) solo per un vero blocco di paragrafo (gap verticale ben
+          // superiore a un'interlinea), non per il semplice andare a capo.
           const int gap = std::abs(line.yPos - prevLineY);
-          if (gap > renderer.getFontAscenderSize(SETTINGS.getReaderFontId()) + 4) {
+          const int lineHeight = renderer.getLineHeight(SETTINGS.getReaderFontId());
+          const bool paragraphBreak = gap > static_cast<int>(lineHeight * 1.5f);
+          if (paragraphBreak) {
             selectedText.push_back('\n');
           } else {
             selectedText.push_back(' ');

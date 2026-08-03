@@ -244,44 +244,53 @@ void ClippingsActivity::renderPreview() {
 
   const int textX = pX + textSize;
   const int textW = pW - textSize * 2;
+
+  // Use UI_10/UI_12 (full accent coverage) instead of SMALL_FONT so accented
+  // letters and other glyphs render correctly.
+  const int headerFont = UI_12_FONT_ID;
+  const int bodyFont = UI_12_FONT_ID;
+  const int bodyLh = renderer.getLineHeight(bodyFont);
+
   int y = pY + 12;
 
-  const int lh = renderer.getLineHeight(SMALL_FONT_ID);
-
-  // Header: page position + chapter title.
+  // Header: page position + chapter title (large, bold).
   char head[96];
   if (clipping.chapterTitle[0] != '\0') {
     snprintf(head, sizeof(head), "%s  (p. %d)", clipping.chapterTitle, clipping.startPage + 1);
   } else {
     snprintf(head, sizeof(head), "%s (p. %d)", tr(STR_CLIPPING_PREVIEW), clipping.startPage + 1);
   }
-  const std::string headTrunc = renderer.truncatedText(SMALL_FONT_ID, head, textW, EpdFontFamily::BOLD);
-  renderer.drawText(SMALL_FONT_ID, textX, y, headTrunc.c_str(), true, EpdFontFamily::BOLD);
-  y += lh + 4;
+  const int headLh = renderer.getLineHeight(headerFont);
+  const std::string headTrunc = renderer.truncatedText(headerFont, head, textW, EpdFontFamily::BOLD);
+  renderer.drawText(headerFont, textX, y, headTrunc.c_str(), true, EpdFontFamily::BOLD);
+  y += headLh + 6;
   renderer.drawLine(textX, y, textX + textW, y, 1, true);
-  y += 8;
+  y += 10;
+
+  // Reserve the bottom hint area inside the panel (two lines).
+  const int hintFont = UI_10_FONT_ID;
+  const int hintLh = renderer.getLineHeight(hintFont);
+  const int hintAreaHeight = hintLh * 2 + 16;             // 2 lines + padding
+  const int hintY = pY + pHeight - hintAreaHeight + 6;    // fully inside the panel
+  const int bodyBottom = hintY - 8;                       // body stops above the hints
 
   // Body: full clipping text, wrapped, scrollable with Up/Down.
   if (clipping.selectedText.empty()) {
-    renderer.drawText(SMALL_FONT_ID, textX, y, tr(STR_UNNAMED), true);
+    renderer.drawText(bodyFont, textX, y, tr(STR_UNNAMED), true);
   } else {
-    const int bodyBottom = pY + pHeight - textSize;
     int drawLine = 0;
     int lineY = y;
-    for (const auto& wl : renderer.wrappedText(SMALL_FONT_ID, clipping.selectedText.c_str(), textW, 64)) {
+    for (const auto& wl : renderer.wrappedText(bodyFont, clipping.selectedText.c_str(), textW, 128)) {
       if (drawLine++ < previewLineOffset) continue;
-      if (lineY + lh > bodyBottom) break;
-      renderer.drawText(SMALL_FONT_ID, textX, lineY, wl.c_str(), true);
-      lineY += lh + 2;
+      if (lineY + bodyLh > bodyBottom) break;
+      renderer.drawText(bodyFont, textX, lineY, wl.c_str(), true);
+      lineY += bodyLh + 3;
     }
   }
 
-  // Bottom hint inside the panel: press Select to go to the clipping in the book.
-  const int hintLh = renderer.getLineHeight(UI_10_FONT_ID);
-  const int hintY = pY + pHeight - hintLh - 10;
-  renderer.drawText(UI_10_FONT_ID, textX, hintY, tr(STR_CLIPPING_READ_FULL), true, EpdFontFamily::BOLD);
-  const int hint2Y = hintY + hintLh;
-  renderer.drawText(UI_10_FONT_ID, textX, hint2Y, tr(STR_CLIPPING_GO_TO), true);
+  // Bottom hints, aligned left, fully inside the panel.
+  renderer.drawText(hintFont, textX, hintY, tr(STR_CLIPPING_READ_FULL), true, EpdFontFamily::BOLD);
+  renderer.drawText(hintFont, textX, hintY + hintLh, tr(STR_CLIPPING_GO_TO), true);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

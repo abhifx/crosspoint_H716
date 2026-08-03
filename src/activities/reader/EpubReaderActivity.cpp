@@ -2233,6 +2233,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // Costs ~N page-loads × 0.1ms but runs once per section open.
     section->buildCumulativeWordCounts();
 
+    // Set when an exact bookmark/clipping jump (absolute word index -> page)
+    // was resolved, so the cached-progress remap below cannot overwrite it.
+    bool exactPageJumpOccurred = false;
+
     // Resolve absolute clipping word index to page number when jumping from View Clippings.
     // The saved page number may be wrong after layout changes (font, dots, alignment).
     if (pendingClippingAbsoluteStart != UINT32_MAX && section->cumulativeWordCounts.size() > 1) {
@@ -2248,6 +2252,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (resolvedPage < section->pageCount) {
         nextPageNumber = resolvedPage;
         pendingPageJump.reset();
+        exactPageJumpOccurred = true;
       }
       pendingClippingAbsoluteStart = UINT32_MAX;
     }
@@ -2266,6 +2271,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (resolvedPage < section->pageCount) {
         nextPageNumber = resolvedPage;
         pendingPageJump.reset();
+        exactPageJumpOccurred = true;
       }
       pendingBookmarkAbsoluteStart = UINT32_MAX;
     }
@@ -2376,9 +2382,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     pendingParagraphLookup = false;
 
     // handles changes in reader settings and reset to approximate position based on cached progress
+    // Skip When an exact bookmark/clipping jump was resolved so the precise page
+    // is not overwritten by this relative remap.
     if (cachedChapterTotalPageCount > 0) {
-      // only goes to relative position if spine index matches cached value
-      if (currentSpineIndex == cachedSpineIndex && section->pageCount != cachedChapterTotalPageCount) {
+      if (!exactPageJumpOccurred && currentSpineIndex == cachedSpineIndex &&
+          section->pageCount != cachedChapterTotalPageCount) {
         float progress = static_cast<float>(section->currentPage) / static_cast<float>(cachedChapterTotalPageCount);
         int newPage = static_cast<int>(progress * section->pageCount);
         section->currentPage = newPage;

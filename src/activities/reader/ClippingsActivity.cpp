@@ -9,8 +9,10 @@
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/PanelDrawHelper.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HeaderDateUtils.h"
 
 namespace {
 constexpr unsigned long DELETE_CLIPPING_HOLD_MS = 1000;
@@ -84,8 +86,37 @@ void ClippingsActivity::confirmDeleteSelectedClipping() {
 
 void ClippingsActivity::loop() {
   const int totalItems = static_cast<int>(clippings.size());
-  const int pageItems = getPageItems();
 
+  if (previewOpen) {
+    // ---- Preview mode ----
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      // Single click again: return to the reader positioned on the clipping.
+      const auto& selected = clippings[selectorIndex];
+      setResult(BookmarkResult{selected.spineIndex, selected.startPage});
+      finish();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      // Back: close the preview and return to the clippings list.
+      previewOpen = false;
+      previewLineOffset = 0;
+      requestUpdate();
+      return;
+    }
+
+    // Scroll the full wrapped clipping text.
+    buttonNavigator.onNext([this] {
+      previewLineOffset++;
+      requestUpdate();
+    });
+    buttonNavigator.onPrevious([this] {
+      if (previewLineOffset > 0) previewLineOffset--;
+      requestUpdate();
+    });
+    return;
+  }
+
+  // ---- List mode ----
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (mappedInput.getHeldTime() >= DELETE_CLIPPING_HOLD_MS) {
       confirmDeleteSelectedClipping();
@@ -93,9 +124,10 @@ void ClippingsActivity::loop() {
     }
 
     if (!clippings.empty() && selectorIndex >= 0 && selectorIndex < static_cast<int>(clippings.size())) {
-      const auto& selected = clippings[selectorIndex];
-      setResult(BookmarkResult{selected.spineIndex, selected.startPage});
-      finish();
+      // Single click: open the clipping preview panel (does NOT jump to the book).
+      previewOpen = true;
+      previewLineOffset = 0;
+      requestUpdate();
     }
     return;
   }
@@ -108,6 +140,7 @@ void ClippingsActivity::loop() {
     return;
   }
 
+  const int pageItems = getPageItems();
   buttonNavigator.onNextRelease([this, totalItems] {
     selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);
     requestUpdate();
@@ -131,7 +164,14 @@ void ClippingsActivity::loop() {
 
 void ClippingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
+  if (previewOpen) {
+    renderPreview();
+  } else {
+    renderList();
+  }
+}
 
+void ClippingsActivity::renderList() {
   const int totalItems = static_cast<int>(clippings.size());
   if (totalItems == 0) {
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_NO_CLIPPINGS), true, EpdFontFamily::BOLD);
@@ -174,6 +214,74 @@ void ClippingsActivity::render(RenderLock&&) {
         renderer.truncatedText(UI_10_FONT_ID, getItemLabel(itemIndex).c_str(), contentWidth - 40);
     renderer.drawText(UI_10_FONT_ID, contentX + 20, displayY, label.c_str(), !isSelected);
   }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer();
+}
+
+void ClippingsActivity::renderPreview() {
+  if (clippings.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(clippings.size())) {
+    renderList();
+    return;
+  }
+
+  const auto& clipping = clippings[selectorIndex];
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const int margin = 20;
+  const int pX = margin;
+  const int pW = pageWidth - margin * 2;
+  const int topPad = 8 + UITheme::getInstance().getMetrics().topPadding;
+  const int pY = topPad;
+  const int bottomPad = UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const int pHeight = pageHeight - pY - bottomPad - 12;
+  const int textSize = 16;  // inner padding of the panel
+
+  // Wikipedia-style cyberpunk panel: white bg, black border, black text.
+  renderer.fillRect(pX, pY, pW, pHeight, 0);
+  PanelDrawHelper::drawCyberpunkPanel(renderer, pX, pY, pW, pHeight, false);
+
+  const int textX = pX + textSize;
+  const int textW = pW - textSize * 2;
+  int y = pY + 12;
+
+  const int lh = renderer.getLineHeight(SMALL_FONT_ID);
+
+  // Header: page position + chapter title.
+  char head[96];
+  if (clipping.chapterTitle[0] != '\0') {
+    snprintf(head, sizeof(head), "%s  (p. %d)", clipping.chapterTitle, clipping.startPage + 1);
+  } else {
+    snprintf(head, sizeof(head), "%s (p. %d)", tr(STR_CLIPPING_PREVIEW), clipping.startPage + 1);
+  }
+  const std::string headTrunc = renderer.truncatedText(SMALL_FONT_ID, head, textW, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, textX, y, headTrunc.c_str(), true, EpdFontFamily::BOLD);
+  y += lh + 4;
+  renderer.drawLine(textX, y, textX + textW, y, 1, true);
+  y += 8;
+
+  // Body: full clipping text, wrapped, scrollable with Up/Down.
+  if (clipping.selectedText.empty()) {
+    renderer.drawText(SMALL_FONT_ID, textX, y, tr(STR_UNNAMED), true);
+  } else {
+    const int bodyBottom = pY + pHeight - textSize;
+    int drawLine = 0;
+    int lineY = y;
+    for (const auto& wl : renderer.wrappedText(SMALL_FONT_ID, clipping.selectedText.c_str(), textW, 64)) {
+      if (drawLine++ < previewLineOffset) continue;
+      if (lineY + lh > bodyBottom) break;
+      renderer.drawText(SMALL_FONT_ID, textX, lineY, wl.c_str(), true);
+      lineY += lh + 2;
+    }
+  }
+
+  // Bottom hint inside the panel: press Select to go to the clipping in the book.
+  const int hintLh = renderer.getLineHeight(UI_10_FONT_ID);
+  const int hintY = pY + pHeight - hintLh - 10;
+  renderer.drawText(UI_10_FONT_ID, textX, hintY, tr(STR_CLIPPING_READ_FULL), true, EpdFontFamily::BOLD);
+  const int hint2Y = hintY + hintLh;
+  renderer.drawText(UI_10_FONT_ID, textX, hint2Y, tr(STR_CLIPPING_GO_TO), true);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

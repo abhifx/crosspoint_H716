@@ -30,7 +30,13 @@ class ClippingsActivity final : public Activity {
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
 
+  // Preview panel (read a clipping without leaving the clippings list).
+  bool previewOpen = false;
+  int previewLineOffset = 0;  // scrolled line within the full wrapped clipping text
+
   int getPageItems() const;
   std::string getItemLabel(int index) const;
   void confirmDeleteSelectedClipping();
+  void renderList();
+  void renderPreview();
 };

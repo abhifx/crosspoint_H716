@@ -3,14 +3,16 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "BitmapHelpers.h"
+#include "DitheringConfig.h"
+
 // ============================================================================
-// IMAGE PROCESSING OPTIONS
+// IMAGE PROCESSING OPTIONS (see DitheringConfig.h for dithering selection)
 // ============================================================================
 // Dithering is applied when converting high-color BMPs to the display's native
 // 2-bit (4-level) grayscale. Images whose palette entries all map to native
 // gray levels (0, 85, 170, 255 ±21) are mapped directly without dithering.
 // For cover images, dithering is done in JpegToBmpConverter.cpp instead.
-constexpr bool USE_ATKINSON = true;  // Use Atkinson dithering instead of Floyd-Steinberg
 // ============================================================================
 
 Bitmap::~Bitmap() {

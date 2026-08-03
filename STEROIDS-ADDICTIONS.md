@@ -483,6 +483,71 @@ words from chapter start to the beginning of `page`. Bookmarks store
   library background memory release, lower cover-gen heap guards, full CPU during cover gen.
 - **Power button / deep-sleep state machine** (see §4.3).
 
+## 8A. Grayscale Image Rendering (BMP, covers, screensaver/sleep)
+
+Steroids-specific rework of the image → 2-bit (4-level grayscale) pipeline. This
+is **different from upstream** and must be preserved on any merge (see
+`STEROIDS-ALIGN-TO-UPSTREAM.md`). Target hardware: **Xteink X4 / X3 e-ink**,
+ESP32-C3, monochrome panels with a 2-bit (4-gray-level) drive.
+
+### Shared configuration — `lib/GfxRenderer/DitheringConfig.h` (new)
+Single source of truth for every grayscale path, replacing per-file local
+constants:
+- `USE_ATKINSON = true`, `USE_FLOYD_STEINBERG = false` (dither method).
+- `GRAY_LEVEL_0..3 = 0 / 85 / 170 / 255` (the 4 reconstructed panel levels).
+- `GAMMA_VALUE = 1.5f` (input-luminance gamma before dithering).
+- `extern uint8_t gammaLUT[256]` + `initGammaLUT()` (8-bit → gamma-corrected).
+
+Consumers now all share it: `Bitmap.cpp` (BMP reader), `JpegToBmpConverter.cpp`
+(JPEG covers), `PngToBmpConverter.cpp` (PNG/cover), and via `adjustPixel` the
+**screensaver/sleep BMP rendering**.
+
+### Pipeline (per pixel), in the ditherers — `lib/GfxRenderer/BitmapHelpers.{h,cpp}`
+1. **Gamma LUT** applied to the original input luminance before any error is
+   added (`adjustPixel(gray)` → `gammaLUT[gray]`), correcting midtones on e-ink
+   where the panel paints light tones too bright.
+2. `int16_t accumulated = gammaGray + errorBuffer[offset]` — pre-clamp value.
+3. **Clamp** to `[0,255]` only for quantization / reconstructable panel values.
+4. `uint8_t q_idx = quantizeSimple(gray)` with **empiric thresholds 50 / 120 / 200**
+   (vs upstream 43/128/213) tuned for the X4 panel.
+5. `uint8_t reconstructed = unquantize(q_idx)` → `0/85/170/255`.
+6. `int16_t error = accumulated - reconstructed` — computed on the **pre-clamp**
+   value so clamped overflow is not silently lost.
+7. **Diffuse error using pure integers** (no float/double in the hot loop):
+   - Atkinson: `error >> 3` (÷8) to 6 neighbors.
+   - Floyd-Steinberg (serpentine): `(error*7)>>4`, `(error*3)>>4`, `(error*5)>>4`,
+     `(error)>>4` (7/16, 3/16, 5/16, 1/16).
+8. **Horizontal error dropped at the last pixel of a row** (and right/R+1 in the
+   serpentine left-neighbor direction guarded by `x > 0`) to avoid streak
+   artifacts on the panel.
+
+### Overflow protection & buffer safety
+- All per-pixel math is `int16_t` (`accumulated`, `gray`, `reconstructed`,
+  `error`, `diffused`) — far within the -32768..32767 range for X4-sized rows.
+- Error buffers are **`int16_t *` allocated once** in each ditherer constructor:
+  - `AtkinsonDitherer` / `Atkinson1BitDitherer`: `new int16_t[width + 4]()` × 3 rows.
+  - `FloydSteinbergDitherer`: `new int16_t[width + 2]()` × 2 rows.
+  (≈ `(width + pad) × 2 bytes`; for an 800 px screen ≈ 1.6 KB, reused across rows —
+  never re-allocated per row.)
+- **No negative index access**: buffers are read at `+2`/`+1` and written at
+  `+1..+4` (base-offset convention). The "bottom-left" neighbor is `errorRow1[x+1]`,
+  never `x-1`; when `x = 0` the index is `1`, never negative. All writes stay
+  within `[width + 4]`. Audited: no `x-1`/`x-2` indexing in any of the three
+  ditherers.
+- No global ditherer object: each is `new`-allocated **once per image decode**
+  (stored as an object member) and freed with it — no per-row allocation.
+
+### Boot init
+`main.cpp` calls `initGammaLUT()` once after `randomSeed(esp_random())`, building
+the 256-entry LUT before any decode. `adjustPixel()` also hosts a **lazy-init
+guard** so a forgotten boot call can never yield an all-black image.
+
+### Visual outcome
+Higher perceived contrast and correct midtones on BMP-based screensaver/sleep
+images and covers: dark tones stay dark, midtones separate clearly into the
+4 available panel levels, and highlights are not washed out — versus the flat,
+pale result from the upstream disabled/no-adjustment pipeline.
+
 ---
 
 ## 9. Build & Merge Reference

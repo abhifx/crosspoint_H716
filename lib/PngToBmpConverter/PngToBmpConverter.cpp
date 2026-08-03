@@ -9,13 +9,14 @@
 #include <cstring>
 
 #include "BitmapHelpers.h"
+#include "DitheringConfig.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
+// Dithering method selection uses DitheringConfig.h (USE_ATKINSON /
+// USE_FLOYD_STEINBERG).
 // ============================================================================
 constexpr bool USE_8BIT_OUTPUT = false;
-constexpr bool USE_ATKINSON = true;
-constexpr bool USE_FLOYD_STEINBERG = false;
 constexpr bool USE_PRESCALE = true;
 // ============================================================================
 

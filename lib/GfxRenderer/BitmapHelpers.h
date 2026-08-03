@@ -3,11 +3,14 @@
 #include <cstdint>
 #include <cstring>
 
+#include "DitheringConfig.h"
+
 struct BmpHeader;
 
 // Helper functions
 uint8_t quantize(int gray, int x, int y);
 uint8_t quantizeSimple(int gray);
+uint8_t unquantize(uint8_t level);
 uint8_t quantize1bit(int gray, int x, int y);
 int adjustPixel(int gray);
 
@@ -121,57 +124,38 @@ class AtkinsonDitherer {
   // **2. EXPLICITLY DELETE THE COPY ASSIGNMENT OPERATOR**
   AtkinsonDitherer& operator=(const AtkinsonDitherer& other) = delete;
 
-  uint8_t processPixel(int gray, int x) {
-    // Add accumulated error
-    int adjusted = gray + errorRow0[x + 2];
-    if (adjusted < 0) adjusted = 0;
-    if (adjusted > 255) adjusted = 255;
+  uint8_t processPixel(int grayIn, int x) {
+    // Pre-clamp accumulated value (original gray + propagated error). The error
+    // is computed against this value so clamped overflow isn't silently lost.
+    const int16_t accumulated = static_cast<int16_t>(grayIn) + errorRow0[x + 2];
 
-    // Quantize to 4 levels
-    uint8_t quantized;
-    int quantizedValue;
-    if (false) {  // original thresholds
-      if (adjusted < 43) {
-        quantized = 0;
-        quantizedValue = 0;
-      } else if (adjusted < 128) {
-        quantized = 1;
-        quantizedValue = 85;
-      } else if (adjusted < 213) {
-        quantized = 2;
-        quantizedValue = 170;
-      } else {
-        quantized = 3;
-        quantizedValue = 255;
-      }
-    } else {  // fine-tuned to X4 eink display
-      if (adjusted < 30) {
-        quantized = 0;
-        quantizedValue = 15;
-      } else if (adjusted < 50) {
-        quantized = 1;
-        quantizedValue = 30;
-      } else if (adjusted < 140) {
-        quantized = 2;
-        quantizedValue = 80;
-      } else {
-        quantized = 3;
-        quantizedValue = 210;
-      }
+    // Clamp only for quantization / the reconstructable panel value.
+    int16_t gray = accumulated;
+    if (gray < 0) gray = 0;
+    if (gray > 255) gray = 255;
+
+    // Quantize to the nearest 2-bit level and reconstruct the panel gray
+    // (no float: unquantize is a pure integer table lookup).
+    const uint8_t qIndex = quantizeSimple(static_cast<uint8_t>(gray));
+    const int16_t reconstructed = static_cast<int16_t>(unquantize(qIndex));
+
+    // Real error: pre-clamp accumulated value minus the reconstructed panel gray.
+    const int16_t error = accumulated - reconstructed;
+
+    // Atkinson: diffuse 6/8 of the error (1/8 each) to 6 neighbors.
+    const int16_t diffused = error >> 3;
+    const bool lastPixel = (x + 1 >= width);
+    // Horizontal neighbors only exist on this row; drop right/R+1 on the last pixel.
+    if (!lastPixel) {
+      errorRow0[x + 3] += diffused;  // Right
+      errorRow0[x + 4] += diffused;  // Right+1
     }
+    errorRow1[x + 1] += diffused;  // Bottom-left
+    errorRow1[x + 2] += diffused;  // Bottom
+    errorRow1[x + 3] += diffused;  // Bottom-right
+    errorRow2[x + 2] += diffused;  // Two rows down
 
-    // Calculate error (only distribute 6/8 = 75%)
-    int error = (adjusted - quantizedValue) >> 3;  // error/8
-
-    // Distribute 1/8 to each of 6 neighbors
-    errorRow0[x + 3] += error;  // Right
-    errorRow0[x + 4] += error;  // Right+1
-    errorRow1[x + 1] += error;  // Bottom-left
-    errorRow1[x + 2] += error;  // Bottom
-    errorRow1[x + 3] += error;  // Bottom-right
-    errorRow2[x + 2] += error;  // Two rows down
-
-    return quantized;
+    return qIndex;
   }
 
   void nextRow() {
@@ -223,74 +207,41 @@ class FloydSteinbergDitherer {
 
   // Process a single pixel and return quantized 2-bit value
   // x is the logical x position (0 to width-1), direction handled internally
-  uint8_t processPixel(int gray, int x) {
-    // Add accumulated error to this pixel
-    int adjusted = gray + errorCurRow[x + 1];
+  uint8_t processPixel(int grayIn, int x) {
+    // Pre-clamp accumulated value; error is computed from it so clamped
+    // overflow isn't silently lost. All arithmetic in int16_t, no float.
+    const int16_t accumulated = static_cast<int16_t>(grayIn) + errorCurRow[x + 1];
 
-    // Clamp to valid range
-    if (adjusted < 0) adjusted = 0;
-    if (adjusted > 255) adjusted = 255;
+    // Clamp only for quantization / the reconstructable panel value.
+    int16_t gray = accumulated;
+    if (gray < 0) gray = 0;
+    if (gray > 255) gray = 255;
 
-    // Quantize to 4 levels (0, 85, 170, 255)
-    uint8_t quantized;
-    int quantizedValue;
-    if (false) {  // original thresholds
-      if (adjusted < 43) {
-        quantized = 0;
-        quantizedValue = 0;
-      } else if (adjusted < 128) {
-        quantized = 1;
-        quantizedValue = 85;
-      } else if (adjusted < 213) {
-        quantized = 2;
-        quantizedValue = 170;
-      } else {
-        quantized = 3;
-        quantizedValue = 255;
-      }
-    } else {  // fine-tuned to X4 eink display
-      if (adjusted < 30) {
-        quantized = 0;
-        quantizedValue = 15;
-      } else if (adjusted < 50) {
-        quantized = 1;
-        quantizedValue = 30;
-      } else if (adjusted < 140) {
-        quantized = 2;
-        quantizedValue = 80;
-      } else {
-        quantized = 3;
-        quantizedValue = 210;
-      }
-    }
+    // Quantize and reconstruct (pure integer).
+    const uint8_t qIndex = quantizeSimple(static_cast<uint8_t>(gray));
+    const int16_t reconstructed = static_cast<int16_t>(unquantize(qIndex));
 
-    // Calculate error
-    int error = adjusted - quantizedValue;
+    // Real error: pre-clamp accumulated minus the reconstructed panel gray.
+    const int16_t error = accumulated - reconstructed;
+    const bool lastPixel = (x + 1 >= width);
 
-    // Distribute error to neighbors (serpentine: direction-aware)
+    // Serpentine: direction-aware 7/16, 3/16, 5/16, 1/16 diffusion.
     if (!isReverseRow()) {
-      // Left to right: standard distribution
-      // Right: 7/16
-      errorCurRow[x + 2] += (error * 7) >> 4;
-      // Bottom-left: 3/16
-      errorNextRow[x] += (error * 3) >> 4;
-      // Bottom: 5/16
-      errorNextRow[x + 1] += (error * 5) >> 4;
-      // Bottom-right: 1/16
-      errorNextRow[x + 2] += (error) >> 4;
+      // Left to right.
+      if (!lastPixel) errorCurRow[x + 2] += (error * 7) >> 4;  // Right (drop on last pixel)
+      errorNextRow[x] += (error * 3) >> 4;                     // Bottom-left
+      errorNextRow[x + 1] += (error * 5) >> 4;                 // Bottom
+      errorNextRow[x + 2] += (error) >> 4;                     // Bottom-right
     } else {
-      // Right to left: mirrored distribution
-      // Left: 7/16
-      errorCurRow[x] += (error * 7) >> 4;
-      // Bottom-right: 3/16
-      errorNextRow[x + 2] += (error * 3) >> 4;
-      // Bottom: 5/16
-      errorNextRow[x + 1] += (error * 5) >> 4;
-      // Bottom-left: 1/16
-      errorNextRow[x] += (error) >> 4;
+      // Right to left: the "left" horizontal neighbor is x-1, and there is no
+      // left neighbor when x == 0 (first pixel) — drop its 7/16 contribution.
+      if (x > 0) errorCurRow[x] += (error * 7) >> 4;           // Left
+      errorNextRow[x + 2] += (error * 3) >> 4;                 // Bottom-right
+      errorNextRow[x + 1] += (error * 5) >> 4;                 // Bottom
+      errorNextRow[x] += (error) >> 4;                         // Bottom-left
     }
 
-    return quantized;
+    return qIndex;
   }
 
   // Call at the end of each row to swap buffers

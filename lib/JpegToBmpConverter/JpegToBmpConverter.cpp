@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "BitmapHelpers.h"
+#include "DitheringConfig.h"
 #include <Logging.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,9 +126,9 @@ ExifThumbInfo findExifThumbnail(FsFile& file) {
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
 // ============================================================================
 constexpr bool USE_8BIT_OUTPUT = false;  // true: 8-bit grayscale (no quantization), false: 2-bit (4 levels)
-// Dithering method selection (only one should be true, or all false for simple quantization):
-constexpr bool USE_ATKINSON = true;          // Atkinson dithering (cleaner than F-S, less error diffusion)
-constexpr bool USE_FLOYD_STEINBERG = false;  // Floyd-Steinberg error diffusion (can cause "worm" artifacts)
+// Dithering method selection comes from DitheringConfig.h:
+//   USE_ATKINSON / USE_FLOYD_STEINBERG (only one should be true, or all false
+//   for simple quantization).
 // ============================================================================
 
 inline void write16(Print& out, const uint16_t value) {

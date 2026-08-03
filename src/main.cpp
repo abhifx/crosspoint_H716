@@ -3,6 +3,8 @@
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <GfxRenderer.h>
+#include <BitmapHelpers.h>
+#include <DitheringConfig.h>
 #include <HalDisplay.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
@@ -543,6 +545,11 @@ void setup() {
   // Seed the PRNG from ESP32 hardware entropy (RF ADC noise).
   // Without this, random() produces a deterministic sequence on each cold boot.
   randomSeed(esp_random());
+
+  // Build the shared grayscale gamma LUT once so every image decoder (BMP
+  // reader, JPEG/PNG cover converters, screensaver/sleep) uses the same
+  // correction without a per-pixel pow().
+  initGammaLUT();
 
   // Disable Arduino core's NVS auto-persist of Wi-Fi credentials. WifiSelectionActivity
   // always scans first and uses WifiCredentialStore (SD card JSON) as the source of

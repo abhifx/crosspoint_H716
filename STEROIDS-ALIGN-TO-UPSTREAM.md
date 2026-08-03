@@ -33,6 +33,12 @@ these files during a merge — always keep the local Steroids version:
 | `src/network/html/AppSettingsPage.html` | Browser stats/settings editor |
 | `src/util/CoverRibbonBaker.cpp/h` | Cover ribbon baker |
 | `src/util/BookStoreUtils.h` | Book store utilities |
+| `lib/GfxRenderer/DitheringConfig.h` | Steroids-only shared grayscale config (dither method, gray levels, gamma, `gammaLUT`) |
+| `lib/GfxRenderer/BitmapHelpers.h` | Ditherers reworked with `int16_t`, pre-clamp error, safe +2 buffer indexing |
+| `lib/GfxRenderer/BitmapHelpers.cpp` | `quantizeSimple` (50/120/200), `unquantize`, `adjustPixel` gamma-LUT |
+| `lib/GfxRenderer/Bitmap.cpp` | Uses shared `DitheringConfig.h` (removed local `USE_ATKINSON`) |
+| `lib/JpegToBmpConverter/JpegToBmpConverter.cpp` | Uses shared `DitheringConfig.h` (removed local dither consts) |
+| `lib/PngToBmpConverter/PngToBmpConverter.cpp` | Uses shared `DitheringConfig.h` (removed local dither consts) |
 | `src/util/ListInputMapper.h` | List input mapper (may need upstream refactoring) |
 | `src/util/ListLayout.h` | List layout calculator |
 | `src/util/ListRenderHelper.h` | List render helper |
@@ -762,4 +768,39 @@ and `powerBtnInScreensaver` flags.
 
 ---
 
-*Last updated: 2026-07-31 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix*
+## Grayscale Image Pipeline (2-bit, 4-level) divergence
+
+**Divergence from upstream:** upstream's BMP/cover/screensaver grayscale pipeline
+is flat and pale on X4/X3 e-ink because its image-adjustment path is disabled
+(`USE_BRIGHTNESS = false`) and each converter carries its own local constants.
+Steroids reworks this into a shared, contrast-correct, overflow-safe pipeline.
+
+### What changed (Steroids-only)
+- **New `lib/GfxRenderer/DitheringConfig.h`** — single shared config: dither method
+  (`USE_ATKINSON=true`, `USE_FLOYD_STEINBERG=false`), the 4 gray levels
+  (0/85/170/255), `GAMMA_VALUE=1.5`, and the shared `gammaLUT[256]` +
+  `initGammaLUT()`.
+- **`Bitmap.cpp`, `JpegToBmpConverter.cpp`, `PngToBmpConverter.cpp`** — use the
+  shared config (their local `USE_ATKINSON`/`USE_FLOYD_STEINBERG`/dither consts
+  removed) and apply `adjustPixel()` (gamma LUT) before any error diffusion.
+- **`BitmapHelpers.cpp`** — `adjustPixel()` maps input luminance through the
+  gamma `gammaLUT`; `quantizeSimple()` uses empiric thresholds **50/120/200**
+  (upstream 43/128/213); adds `unquantize()` (0/85/170/255).
+- **`BitmapHelpers.h`** (ditherers) — `AtkinsonDitherer`, `Atkinson1BitDitherer`,
+  `FloydSteinbergDitherer`: per-pixel math in `int16_t` (`accumulated`, `gray`,
+  `reconstructed`, `error`); **error computed on the pre-clamp value**; pure-integer
+  diffusion (`error >> 3`, and `(error*7)>>4 / (error*3)>>4 / (error*5)>>4 / (error)>>4`);
+  horizontal error dropped at the last pixel of a row; buffers `int16_t[width+pad]`
+  allocated once with a **+2 base offset** (no negative index, safe at `x = 0`).
+- **`src/main.cpp`** — calls `initGammaLUT()` at boot; `adjustPixel()` also has a
+  lazy-init guard so an uninitialized LUT can never produce an all-black image.
+
+### On merge
+If upstream touches any of these files (`lib/GfxRenderer/Bitmap*.cpp/h`,
+`lib/JpegToBmpConverter/*`, `lib/PngToBmpConverter/*`), **keep the local Steroids
+version** and manually re-add only genuinely new upstream logic. See the detailed
+section in `STEROIDS-ADDICTIONS.md` §8A for the full design rationale.
+
+---
+
+*Last updated: 2026-08-03 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix and grayscale pipeline divergence*

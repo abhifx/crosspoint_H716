@@ -180,9 +180,19 @@ bool RecentBooksStore::loadFromFile() {
 
   // Try JSON first
   if (Storage.exists(RECENT_BOOKS_FILE_JSON)) {
+    const int startFree = static_cast<int>(ESP.getFreeHeap());
+    const int startMax = static_cast<int>(ESP.getMaxAllocHeap());
     String json = Storage.readFile(RECENT_BOOKS_FILE_JSON);
+    LOG_DBG("HCR-FRAG", "RBS json read: json=%d free=%d->%d maxA=%d->%d frag=%d",
+            static_cast<int>(json.length()), startFree, static_cast<int>(ESP.getFreeHeap()), startMax,
+            static_cast<int>(ESP.getMaxAllocHeap()),
+            static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
     if (!json.isEmpty()) {
-      return JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      const bool ok = JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      LOG_DBG("HCR-FRAG", "RBS loadRecentBooks: free=%d maxA=%d frag=%d ok=%d",
+              static_cast<int>(ESP.getFreeHeap()), static_cast<int>(ESP.getMaxAllocHeap()),
+              static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()), ok ? 1 : 0);
+      return ok;
     }
   }
 

@@ -683,6 +683,11 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   ctx.scaleY_fp = scaleY_fp;
   ctx.error = false;
 
+  // FRAGMENTATION DIAGNOSTIC: record the free/maxAlloc before and after each
+  // large allocation so we can see how much the heap fragments during cover
+  // decode (a drop in maxAlloc with little change in free = fragmentation).
+  LOG_DBG("HCR-FRAG", "Jpeg convert allocs start: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
   // MCU row buffer: MAX_MCU_HEIGHT rows × decoded srcWidth columns of grayscale
   ctx.mcuBuf = makeUniqueNoThrow<uint8_t[]>(MAX_MCU_HEIGHT * ctx.srcWidth);
   if (!ctx.mcuBuf) {
@@ -692,6 +697,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
   memset(ctx.mcuBuf.get(), 0, MAX_MCU_HEIGHT * ctx.srcWidth);
+  LOG_DBG("HCR-FRAG", "Jpeg MCU buf (%d): free=%u maxA=%u", MAX_MCU_HEIGHT * ctx.srcWidth,
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   ctx.bmpRow = makeUniqueNoThrow<uint8_t[]>(bytesPerRow);
   if (!ctx.bmpRow) {
@@ -744,6 +751,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   }
   ctx.writeBufMaxRows = writeBufRows;
   ctx.writeBufUsedRows = 0;
+  LOG_DBG("HCR-FRAG", "Jpeg writeBuf (%d rows): free=%u maxA=%u", writeBufRows,
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   if (oneBit) {
     ctx.atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
@@ -774,7 +783,10 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
         LOG_ERR("JPG", "OOM: FloydSteinbergDitherer — simple-2bit quantization fallback");
       }
     }
+    LOG_DBG("HCR-FRAG", "Jpeg ditherers done: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   }
+
+  LOG_DBG("HCR-FRAG", "Jpeg convert allocs end: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
   jpeg->setUserPointer(&ctx);

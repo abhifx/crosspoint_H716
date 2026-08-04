@@ -413,6 +413,8 @@ void SdCardFont::computeStyleFileOffsets(PerStyle& s, uint32_t baseOffset) {
 // --- Load ---
 
 bool SdCardFont::load(const char* path) {
+  LOG_DBG("HCR-FRAG", "SDCF load start: free=%u maxA=%u frag=%d", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
   freeAll();
   if (strlen(path) >= sizeof(filePath_)) {
     LOG_ERR("SDCF", "Path too long (%zu bytes, max %zu)", strlen(path), sizeof(filePath_) - 1);
@@ -589,6 +591,8 @@ bool SdCardFont::load(const char* path) {
             h.intervalCount, h.glyphCount, h.advanceY, h.ascender, h.descender, h.kernLeftEntryCount,
             h.kernRightEntryCount, h.ligaturePairCount);
   }
+  LOG_DBG("HCR-FRAG", "SDCF load done: free=%u maxA=%u frag=%d", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
   return true;
 }
 

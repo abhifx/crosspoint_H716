@@ -1924,6 +1924,7 @@ void GfxRenderer::freeBwBufferChunks() {
  * Returns true if buffer was stored successfully, false if allocation failed.
  */
 bool GfxRenderer::storeBwBuffer() {
+  LOG_DBG("HCR-FRAG", "storeBwBuffer: before free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   // Allocate and copy each chunk
   for (size_t i = 0; i < bwBufferChunks.size(); i++) {
     // Check if any chunks are already allocated
@@ -1981,6 +1982,7 @@ void GfxRenderer::restoreBwBuffer() {
 
   freeBwBufferChunks();
   LOG_DBG("GFX", "Restored and freed BW buffer chunks");
+  LOG_DBG("HCR-FRAG", "restoreBwBuffer: after free free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 /**

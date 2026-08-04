@@ -491,6 +491,9 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.setDarkMode(SETTINGS.darkMode);
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
+  LOG_DBG("HCR-FRAG", "fonts pre-begin: free=%d maxA=%d frag=%d", static_cast<int>(ESP.getFreeHeap()),
+          static_cast<int>(ESP.getMaxAllocHeap()),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
 
   // Font decompressor is initialised lazily on first use (decompressGroup).
   // This avoids allocating the 48 KB pool (page buffers + inflate ring buffer)
@@ -520,9 +523,15 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
 #endif  // OMIT_FONTS
   refreshUiFontsForCurrentLanguage();
+  LOG_DBG("HCR-FRAG", "fonts builtin done: free=%d maxA=%d frag=%d", static_cast<int>(ESP.getFreeHeap()),
+          static_cast<int>(ESP.getMaxAllocHeap()),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
   if (Storage.ready()) {
     sdFontSystem.begin(renderer);
   }
+  LOG_DBG("HCR-FRAG", "fonts SD begin done: free=%d maxA=%d frag=%d", static_cast<int>(ESP.getFreeHeap()),
+          static_cast<int>(ESP.getMaxAllocHeap()),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
   LOG_DBG("MAIN", "Fonts setup");
 }
 

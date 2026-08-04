@@ -1514,17 +1514,25 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
 }
 
 bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) {
+  const int js0Free = static_cast<int>(ESP.getFreeHeap());
+  const int js0Max = static_cast<int>(ESP.getMaxAllocHeap());
   JsonDocument doc;
   auto error = deserializeJson(doc, json);
+  LOG_DBG("HCR-FRAG", "JsonDocument deserialize: free=%d->%d maxA=%d->%d frag=%d", js0Free,
+          static_cast<int>(ESP.getFreeHeap()), js0Max, static_cast<int>(ESP.getMaxAllocHeap()),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
   if (error) {
     LOG_ERR("RBS", "JSON parse error: %s", error.c_str());
     CPR_VCODEX_LOG_EVENT("RBS", std::string("Recent books JSON parse error: ") + error.c_str());
     return false;
   }
+  const int js1Free = static_cast<int>(ESP.getFreeHeap());
+  const int js1Max = static_cast<int>(ESP.getMaxAllocHeap());
 
   store.recentBooks.clear();
   const uint32_t formatVersion = doc["formatVersion"] | static_cast<uint32_t>(1);
   JsonArray arr = doc["books"].as<JsonArray>();
+  int count = 0;
   for (JsonObject obj : arr) {
     if (store.getCount() >= 10) break;
     RecentBook book;
@@ -1537,7 +1545,16 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
       book.bookId.clear();
     }
     store.recentBooks.push_back(book);
+    count++;
+    if ((count & 0x3) == 0) {
+      LOG_DBG("HCR-FRAG", "  RBS after %d books: free=%d maxA=%d frag=%d", count,
+              static_cast<int>(ESP.getFreeHeap()), static_cast<int>(ESP.getMaxAllocHeap()),
+              static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
+    }
   }
+  LOG_DBG("HCR-FRAG", "RBS %d books: free=%d->%d maxA=%d->%d frag=%d", count, js1Free,
+          static_cast<int>(ESP.getFreeHeap()), js1Max, static_cast<int>(ESP.getMaxAllocHeap()),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
 
   store.normalizeBooks();
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", store.getCount());
@@ -1735,6 +1752,14 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
   store.sessionLog.clear();
   store.dirty = missingCurrentArray;
 
+  // FRAGMENTATION FIX: reserve the top-level containers for the actual number
+  // of parsed elements so each vector grows once (contiguously) instead of
+  // reallocating repeatedly in the middle of the heap and fragmenting it.
+  store.books.reserve(doc["books"].size());
+  store.readingDays.reserve(doc["readingDays"].size());
+  store.legacyReadingDays.reserve(doc["legacyReadingDays"].size());
+  store.sessionLog.reserve(doc["sessionLog"].size());
+
   auto appendReadingDays = [](std::vector<ReadingDayStats>& destination, JsonArrayConst source) {
     for (JsonVariantConst value : source) {
       ReadingDayStats day;
@@ -1778,6 +1803,7 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
   }
 
   JsonArrayConst books = doc["books"].as<JsonArrayConst>();
+  int loadedBookCount = 0;
   for (JsonObjectConst obj : books) {
     ReadingBookStats book;
     book.bookId = obj["bookId"] | std::string("");
@@ -1785,6 +1811,7 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     if (book.path.empty()) {
       continue;
     }
+    book.knownPaths.reserve(obj["knownPaths"].size());  // avoid realloc churn in the hot path
     for (JsonVariantConst value : obj["knownPaths"].as<JsonArrayConst>()) {
       const std::string knownPath = value | std::string("");
       if (!knownPath.empty()) {
@@ -1813,6 +1840,13 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
       store.dirty = true;
     }
     store.books.push_back(std::move(book));
+    ++loadedBookCount;
+    if ((loadedBookCount & 0x5) == 0) {
+      LOG_DBG("HCR-FRAG", "  RST %d/%d books: free=%d maxA=%d frag=%d", loadedBookCount,
+              static_cast<int>(store.books.capacity()), static_cast<int>(ESP.getFreeHeap()),
+              static_cast<int>(ESP.getMaxAllocHeap()),
+              static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
+    }
   }
 
   if (formatVersion < 6) {

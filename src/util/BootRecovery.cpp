@@ -180,7 +180,16 @@ void initialize() {
   recordedStageRaw = static_cast<uint8_t>(BootStage::None);
 }
 
-void enterStage(const BootStage stage) { recordedStageRaw = static_cast<uint8_t>(stage); }
+void enterStage(const BootStage stage) {
+  recordedStageRaw = static_cast<uint8_t>(stage);
+  // FRAGMENTATION DIAGNOSTIC (boot): after each stage load, log free + largest
+  // contiguous block + loss, so we can see exactly where maxAlloc drops and the
+  // heap fragments during startup. free - maxA = fragmentation in bytes.
+  const int freeH = static_cast<int>(ESP.getFreeHeap());
+  const int maxA  = static_cast<int>(ESP.getMaxAllocHeap());
+  LOG_DBG("HCR-FRAG", "boot stage %-18s Free=%d MaxAlloc=%d frag=%d", getStageName(stage), freeH, maxA,
+          freeH - maxA);
+}
 
 void markBootCompleted() {
   recordedStageRaw = static_cast<uint8_t>(BootStage::Completed);

@@ -1772,10 +1772,17 @@ bool ReadingStatsStore::loadFromFile() {
   }
 
   auto loadMainFile = [this]() -> bool {
+    const int ls0Free = static_cast<int>(ESP.getFreeHeap());
+    const int ls0Max = static_cast<int>(ESP.getMaxAllocHeap());
     const bool loaded = JsonSettingsIO::loadReadingStatsFromFile(*this, READING_STATS_FILE_JSON);
+    LOG_DBG("HCR-FRAG", "RST loadReadingStatsFromFile: loaded=%d free=%d->%d maxA=%d->%d frag=%d", loaded ? 1 : 0,
+            ls0Free, static_cast<int>(ESP.getFreeHeap()), ls0Max, static_cast<int>(ESP.getMaxAllocHeap()),
+            static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
     if (!loaded) {
       return false;
     }
+    const int ls1Free = static_cast<int>(ESP.getFreeHeap());
+    const int ls1Max = static_cast<int>(ESP.getMaxAllocHeap());
 
     const bool needsSave = dirty;
     normalizeReadingDays(readingDays);
@@ -1804,6 +1811,9 @@ bool ReadingStatsStore::loadFromFile() {
     persistenceSuspended = false;
     skippedSaveLogged = false;
     prepareInternalBackup();
+    LOG_DBG("HCR-FRAG", "RST loadMainFile done: free=%d maxA=%d frag=%d",
+            static_cast<int>(ESP.getFreeHeap()), static_cast<int>(ESP.getMaxAllocHeap()),
+            static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()));
     return true;
   };
 

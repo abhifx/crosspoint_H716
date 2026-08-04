@@ -745,7 +745,9 @@ void HomeActivity::onEnter() {
     pruneCarouselFrameCache();
   }
 
-  LOG_DBG("HOME", "onEnter: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG_DBG("HOME", "onEnter: end heap=%u maxA=%u frag=%u(%u+%u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+          static_cast<int>(ESP.getFreeHeap()) - static_cast<int>(ESP.getMaxAllocHeap()),
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   // One-time heap compaction before the cover-generation loop (loadRecentCovers)
   // frees renderer temp buffers so the EPUB/JPEG/PNG decoders have the largest
@@ -823,15 +825,18 @@ bool HomeActivity::loadCarouselFrameFromStorage(int bookIndex) {
   const int safeBookIndex = wrapBookIndex(bookIndex, bookCount);
   const size_t bufferSize = renderer.getBufferSize();
   const std::string cachePath = getCarouselFrameCachePathFromHash(getCachedCarouselFrameHash(safeBookIndex));
+  const unsigned long dbgRead0 = millis();
 
   FsFile file;
   if (!Storage.openFileForRead("HCR", cachePath, file)) {
+    LOG_DBG("HCR", "loadCarouselFrameFromStorage: MISS idx=%d (no file)", safeBookIndex);
     return false;
   }
 
   if (file.size() != bufferSize) {
     file.close();
     Storage.remove(cachePath.c_str());
+    LOG_DBG("HCR", "loadCarouselFrameFromStorage: MISS idx=%d (size mismatch)", safeBookIndex);
     return false;
   }
 
@@ -854,11 +859,15 @@ bool HomeActivity::loadCarouselFrameFromStorage(int bookIndex) {
   if (totalRead != bufferSize) {
     Storage.remove(cachePath.c_str());
     invalidateResidentCarouselFrame();
+    LOG_DBG("HCR", "loadCarouselFrameFromStorage: MISS idx=%d (short read %zu/%zu)",
+            safeBookIndex, totalRead, bufferSize);
     return false;
   }
 
   invalidateResidentCarouselFrame();
   carouselFramesReady = true;
+  LOG_DBG("HCR", "loadCarouselFrameFromStorage: HIT idx=%d (%zu bytes, read=%ums)",
+          safeBookIndex, bufferSize, static_cast<int>(millis() - dbgRead0));
   return true;
 }
 
@@ -901,6 +910,7 @@ bool HomeActivity::renderCarouselFrame(int bookIndex) {
     return false;
   }
 
+  const unsigned long dbgT0 = millis();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   renderer.clearScreen();
@@ -925,6 +935,8 @@ bool HomeActivity::renderCarouselFrame(int bookIndex) {
   GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                           recentBooks, bookCount, localCoverRendered, localCoverBufferStored, localBufferRestored,
                           [] { return false; });
+  LOG_DBG("HCR", "renderCarouselFrame: idx=%d drawRecentBookCover=%ums", safeBookIndex,
+          static_cast<int>(millis() - dbgT0));
 
   if (!renderer.getFrameBuffer()) {
     invalidateResidentCarouselFrame();
@@ -933,6 +945,8 @@ bool HomeActivity::renderCarouselFrame(int bookIndex) {
   invalidateResidentCarouselFrame();
   carouselFramesReady = true;
   saveCarouselFrameToStorage(safeBookIndex);
+  LOG_DBG("HCR", "renderCarouselFrame: idx=%d total=%ums", safeBookIndex,
+          static_cast<int>(millis() - dbgT0));
   return true;
 }
 
@@ -1372,6 +1386,7 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  const unsigned long dbgRender0 = millis();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -1387,7 +1402,10 @@ void HomeActivity::render(RenderLock&&) {
   bool usedCarouselFrame = false;
   if (carouselTheme && !recentBooks.empty()) {
     const int centerIdx = wrapBookIndex(lastCarouselBookIndex, recentCount);
+    const unsigned long dbgHash0 = millis();
     const uint32_t frameHash = getCachedCarouselFrameHash(centerIdx);
+    LOG_DBG("HCR", "render getCarouselFrameHash: idx=%d hash=%08x %ums",
+            centerIdx, frameHash, static_cast<int>(millis() - dbgHash0));
     const bool residentFrameMatches = residentCarouselFrameValid && residentCarouselFrameIndex == centerIdx &&
                                       residentCarouselSelectorIndex == selectorIndex &&
                                       residentCarouselFrameHash == frameHash;
@@ -1399,6 +1417,7 @@ void HomeActivity::render(RenderLock&&) {
       }
     }
 
+    const unsigned long dbgHIT0 = millis();
     uint8_t* frameBuffer = renderer.getFrameBuffer();
     if (frameBuffer) {
       renderer.fillRect(0, 0, pageWidth, metrics.homeTopPadding, false);
@@ -1406,6 +1425,8 @@ void HomeActivity::render(RenderLock&&) {
       HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
       GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                              inCarouselRow);
+      LOG_DBG("HCR", "live render carousel frame overlay: %ums (fillRect+header+border)",
+              static_cast<int>(millis() - dbgHIT0));
       usedCarouselFrame = true;
       residentCarouselFrameIndex = centerIdx;
       residentCarouselSelectorIndex = selectorIndex;
@@ -1444,6 +1465,7 @@ void HomeActivity::render(RenderLock&&) {
   const int shortcutDisplayCount = static_cast<int>(homeEntries.size());
   const int shortcutPageSize = getHomeShortcutPageSize();
 
+  const unsigned long dbgMenu0 = millis();
   if (carouselTheme || shortcutDisplayCount <= shortcutPageSize) {
     GUI.drawButtonMenu(
         renderer, shortcutsRect, shortcutDisplayCount, selectedHomeIndex,
@@ -1480,12 +1502,18 @@ void HomeActivity::render(RenderLock&&) {
           return showHomeShortcutAccessory(homeEntries[pageStart + index]);
         });
   }
+  LOG_DBG("HCR", "render drawButtonMenu/icons: %ums", static_cast<int>(millis() - dbgMenu0));
 
   const auto labels = carouselTheme ? mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
                                     : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  LOG_DBG("HCR", "render pre-displayBuffer cumulative (post-carousel): %ums total=%ums",
+          static_cast<int>(millis() - dbgMenu0), static_cast<int>(millis() - dbgRender0));
 
+  const unsigned long dbgDisp0 = millis();
   renderer.displayBuffer();
+  LOG_DBG("HCR", "render displayBuffer: %ums (cumulative in-render=%ums)",
+          static_cast<int>(millis() - dbgDisp0), static_cast<int>(millis() - dbgRender0));
 
   if (wasFirstRenderDone && carouselTheme && recentsLoaded && !carouselFramesReady && !recentBooks.empty()) {
     preRenderCarouselFrames();

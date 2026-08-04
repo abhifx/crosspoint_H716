@@ -2273,23 +2273,31 @@ void CrossPointWebServer::handleGetSteroidsSettings() const {
   {
     JsonObject obj = arr.add<JsonObject>();
     obj["key"] = "longPressButtonBehavior";
-    obj["name"] = "Side Button Long Press";
-    obj["category"] = "Controls";
+    obj["name"] = I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR);
+    obj["category"] = I18N.get(StrId::STR_CAT_CONTROLS);
     obj["type"] = "enum";
     JsonArray opts = obj["options"].to<JsonArray>();
-    opts.add("Off"); opts.add("Bookmark"); opts.add("Clipping"); opts.add("Chapter Skip");
-    opts.add("Orientation"); opts.add("Font Size");
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_OFF));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_SKIP));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_FONTSIZE));
     obj["value"] = s.longPressButtonBehavior;
   }
   {
     JsonObject obj = arr.add<JsonObject>();
     obj["key"] = "frontLongPressBehavior";
-    obj["name"] = "Front Button Long Press";
-    obj["category"] = "Controls";
+    obj["name"] = I18N.get(StrId::STR_FRONT_LONG_PRESS_BEHAVIOR);
+    obj["category"] = I18N.get(StrId::STR_CAT_CONTROLS);
     obj["type"] = "enum";
     JsonArray opts = obj["options"].to<JsonArray>();
-    opts.add("Off"); opts.add("Bookmark"); opts.add("Clipping"); opts.add("Chapter Skip");
-    opts.add("Orientation"); opts.add("Font Size");
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_OFF));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARK));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_CLIPPING));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_SKIP));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION));
+    opts.add(I18N.get(StrId::STR_LONG_PRESS_BEHAVIOR_FONTSIZE));
     obj["value"] = s.frontLongPressBehavior;
   }
   {

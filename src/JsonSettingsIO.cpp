@@ -1685,7 +1685,10 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     CPR_VCODEX_LOG_EVENT("RST", std::string("Reading stats JSON parse error: ") + message);
     return false;
   }
+  return loadReadingStatsDocument(store, doc);
+}
 
+bool JsonSettingsIO::loadReadingStatsDocument(ReadingStatsStore& store, const JsonDocument& doc) {
   // Validate document structure (upstream 1.5.0.3: JsonObjectConst/JsonArrayConst checks)
   if (!doc.is<JsonObjectConst>()) {
     CPR_VCODEX_LOG_EVENT("RST", "Reading stats root is not a JSON object");
@@ -1778,6 +1781,7 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
   };
 
   appendReadingDays(store.readingDays, doc["readingDays"].as<JsonArrayConst>());
+  std::vector<ReadingDayStats> declaredReadingDays = store.readingDays;
   if (formatVersion >= 2) {
     appendReadingDays(store.legacyReadingDays, doc["legacyReadingDays"].as<JsonArrayConst>());
     if (formatVersion < 6 && store.legacyReadingDays.empty()) {
@@ -1854,6 +1858,60 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     store.dirty = true;
   }
   store.rebuildAggregatedReadingDays();
+
+  // Upstream reconciliation: detect and recover aggregate mismatches without
+  // discarding stored data. Surplus from declared days is forwarded to
+  // legacyReadingDays so it remains visible for manual correction tools.
+  if (formatVersion >= 6) {
+    auto normalizeDays = [](std::vector<ReadingDayStats>& days) {
+      std::sort(days.begin(), days.end(), [](const ReadingDayStats& left, const ReadingDayStats& right) {
+        return left.dayOrdinal < right.dayOrdinal;
+      });
+      size_t writeIndex = 0;
+      for (const auto& day : days) {
+        if (day.dayOrdinal == 0 || day.readingMs == 0) {
+          continue;
+        }
+        if (writeIndex > 0 && days[writeIndex - 1].dayOrdinal == day.dayOrdinal) {
+          days[writeIndex - 1].readingMs += day.readingMs;
+        } else {
+          days[writeIndex++] = day;
+        }
+      }
+      days.resize(writeIndex);
+    };
+    normalizeDays(declaredReadingDays);
+
+    bool aggregateMismatch = declaredReadingDays.size() != store.readingDays.size();
+    for (const auto& declaredDay : declaredReadingDays) {
+      const auto rebuiltIt =
+          std::lower_bound(store.readingDays.begin(), store.readingDays.end(), declaredDay.dayOrdinal,
+                           [](const ReadingDayStats& day, const uint32_t ordinal) { return day.dayOrdinal < ordinal; });
+      const bool hasRebuiltDay =
+          rebuiltIt != store.readingDays.end() && rebuiltIt->dayOrdinal == declaredDay.dayOrdinal;
+      const uint64_t rebuiltMs = hasRebuiltDay ? rebuiltIt->readingMs : 0;
+      if (rebuiltMs != declaredDay.readingMs) {
+        aggregateMismatch = true;
+      }
+      if (declaredDay.readingMs > rebuiltMs) {
+        store.legacyReadingDays.push_back(
+            ReadingDayStats{declaredDay.dayOrdinal, declaredDay.readingMs - rebuiltMs});
+      }
+    }
+
+    if (aggregateMismatch) {
+      normalizeDays(store.legacyReadingDays);
+      store.rebuildAggregatedReadingDays();
+      store.dirty = true;
+      CPR_VCODEX_LOG_EVENT("RST", "Reconciled reading stats aggregate totals without discarding stored data");
+    }
+  }
+
+  // Sort sessionLog by day ordinal for consistent iteration order (upstream 1.5.0.3)
+  std::stable_sort(store.sessionLog.begin(), store.sessionLog.end(),
+                   [](const ReadingSessionLogEntry& left, const ReadingSessionLogEntry& right) {
+                     return left.dayOrdinal < right.dayOrdinal;
+                   });
   LOG_DBG("RST", "Reading stats loaded from file (%d books)", static_cast<int>(store.books.size()));
   return true;
 }
@@ -1862,12 +1920,9 @@ bool JsonSettingsIO::loadReadingStatsFromFile(ReadingStatsStore& store, const ch
   if (!Storage.exists(path)) {
     return false;
   }
-  const String json = Storage.readFile(path);
-  if (json.isEmpty()) {
-    CPR_VCODEX_LOG_EVENT("RST", std::string("Reading stats file empty or unreadable: ") + path);
-    return false;
-  }
-  const bool loaded = loadReadingStats(store, json.c_str());
+  JsonDocument doc;
+  const bool parsed = loadJsonDocumentFromFile("RST", path, doc);
+  const bool loaded = parsed && !doc.overflowed() && loadReadingStatsDocument(store, doc);
   if (!loaded) {
     CPR_VCODEX_LOG_EVENT("RST", std::string("Failed to load reading stats from ") + path);
   }

@@ -67,6 +67,65 @@ for reading pace estimation and "time left" status bar. If upstream
 ReadingStatsStore.h is taken, `JsonSettingsIO.cpp` fails to compile because
 it references these fields in import/export functions.
 
+**2026-08-04 full alignment audit:** Steroids ReadingStatsStore was compared
+line-by-line against upstream 1.5.0.5. The following upstream features were
+found missing in Steroids and have been restored:
+
+- **`loadReadingStatsDocument` function:** upstream splits JSON parsing
+  (`loadReadingStats`) from document validation/deserialization
+  (`loadReadingStatsDocument`). Steroids had inlined the deserialization body
+  into `loadReadingStats`, which worked but broke the friend-declaration
+  pattern. Restored with the upstream split.
+- **Aggregate reconciliation block:** upstream's `loadReadingStatsDocument`
+  contains a `formatVersion >= 6` block that detects and reconciles
+  mismatches between declared reading-day aggregates and rebuilt totals,
+  forwarding surplus to `legacyReadingDays`. Steroids had removed this
+  entirely. Restored for data integrity.
+- **`std::stable_sort` of `sessionLog`:** upstream sorts session log entries
+  by `dayOrdinal` after loading. Steroids had removed this. Restored.
+- **`importFromFile` rollback path:** upstream creates a pre-import backup
+  via `refreshInternalBackupFromMain()`, rejects empty imports, and rolls
+  back on save failure via `reloadOriginalStats()`. Steroids had none of
+  these, so a corrupted import could destroy live stats. Restored.
+- **`loadFromFile` persistence suspension:** upstream calls
+  `markLoadSkippedForRecovery()` on load failure to suspend saves and prevent
+  overwriting the backup. Steroids had removed this call. Restored.
+- **`normalizeBook` `clampPercent` calls:** upstream clamps
+  `lastProgressPercent` and `chapterProgressPercent` in `normalizeBook`.
+  Steroids had removed these. Restored.
+- **`loadReadingStatsFromFile` uses `loadJsonDocumentFromFile`:** upstream
+  loads directly into a `JsonDocument` instead of reading the file as a
+  string and then parsing it (which doubled memory usage). Steroids was
+  using `Storage.readFile()` + `loadReadingStats()`. Aligned to upstream.
+- **`maybeCreateAutoBackup` pre-removal:** Steroids was removing an existing
+  backup file before saving a new one, which could cause data loss if the
+  new save failed. Aligned to upstream behavior (no pre-removal;
+  `saveJsonDocumentToFile` handles its own temp-then-rename).
+
+**Steroids-only features preserved in all changes:**
+- `avgSecondsPerForwardPage` / `paceSampleCount` serialization (save + load)
+- `recordForwardPageRead()` weighted average implementation
+- `mergeBookInto()` pace-data merge
+- `beginSession()` / `updateProgress()` mark-as-unread logic
+- `.reserve()` fragmentation fixes with `HCR-FRAG` diagnostics
+- `knownPaths.reserve()` in per-book loop
+- `loadedBookCount` counter with periodic heap logging
+- Meyers' Singleton pattern (inline `getInstance()`)
+- `#include <ArduinoJson.h>` in `ReadingStatsStore.h` (upstream already had it)
+
+**Files modified in this alignment:**
+- `src/ReadingStatsStore.h`: added `#include <ArduinoJson.h>`, friend
+  declaration for `loadReadingStatsDocument`
+- `src/ReadingStatsStore.cpp`: restored `importFromFile` rollback, restored
+  `markLoadSkippedForRecovery()` in `loadFromFile`, restored `clampPercent`
+  in `normalizeBook`, aligned `maybeCreateAutoBackup`
+- `src/JsonSettingsIO.h`: added `#include <ArduinoJson.h>`, added
+  `loadReadingStatsDocument` declaration
+- `src/JsonSettingsIO.cpp`: extracted `loadReadingStatsDocument` from
+  `loadReadingStats`, added upstream reconciliation block, added
+  `std::stable_sort`, aligned `loadReadingStatsFromFile` to use
+  `loadJsonDocumentFromFile`
+
 ### Why JsonSettingsIO.cpp is critical
 
 The local Steroids `JsonSettingsIO.cpp` contains serialization for **147+ settings**
@@ -803,4 +862,4 @@ section in `STEROIDS-ADDICTIONS.md` §8A for the full design rationale.
 
 ---
 
-*Last updated: 2026-08-03 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix and grayscale pipeline divergence*
+*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, and ReadingStatsStore full alignment audit*

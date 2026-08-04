@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ArduinoJson.h>
+
 class CrossPointSettings;
 class CrossPointState;
 class WifiCredentialStore;
@@ -44,6 +46,7 @@ bool loadFavorites(FavoritesStore& store, const char* json);
 // ReadingStatsStore
 bool saveReadingStats(const ReadingStatsStore& store, const char* path);
 bool loadReadingStats(ReadingStatsStore& store, const char* json);
+bool loadReadingStatsDocument(ReadingStatsStore& store, const JsonDocument& doc);
 bool loadReadingStatsFromFile(ReadingStatsStore& store, const char* path);
 bool saveAchievements(const AchievementsStore& store, const char* path);
 bool loadAchievements(AchievementsStore& store, const char* json);

@@ -587,6 +587,8 @@ void ReadingStatsStore::normalizeBook(ReadingBookStats& book) {
   }
   rememberBookPath(book, book.path);
   normalizeReadingDays(book.readingDays);
+  book.lastProgressPercent = clampPercent(book.lastProgressPercent);
+  book.chapterProgressPercent = clampPercent(book.chapterProgressPercent);
 }
 
 void ReadingStatsStore::normalizeBooks() {
@@ -1001,10 +1003,6 @@ bool ReadingStatsStore::maybeCreateAutoBackup(const bool force) const {
   }
 
   Storage.mkdir(READING_STATS_EXPORT_DIR);
-  if (Storage.exists(backupPath.c_str())) {
-    Storage.remove(backupPath.c_str());
-  }
-
   const bool saved = JsonSettingsIO::saveReadingStats(*this, backupPath.c_str());
   if (saved) {
     pruneAutoBackupsToLimit(MAX_READING_STATS_AUTO_BACKUPS);
@@ -1713,9 +1711,40 @@ bool ReadingStatsStore::importFromFile(const std::string& path) {
     return false;
   }
 
+  if (!refreshInternalBackupFromMain()) {
+    LOG_ERR("RST", "Could not prepare rollback backup before stats import");
+    CPR_VCODEX_LOG_EVENT("RST", "Reading stats import aborted because rollback backup failed");
+    return false;
+  }
+
+  auto reloadOriginalStats = [this]() {
+    books.clear();
+    books.shrink_to_fit();
+    legacyReadingDays.clear();
+    legacyReadingDays.shrink_to_fit();
+    readingDays.clear();
+    readingDays.shrink_to_fit();
+    sessionLog.clear();
+    sessionLog.shrink_to_fit();
+    activeSession = {};
+    lastSessionSnapshot = {};
+    sessionSerialCounter = 0;
+    dirty = false;
+    invalidateSummaryCache();
+    return loadFromFile();
+  };
+
+  LOG_DBG("RST", "Before stats import: free=%u largest=%u", ESP.getFreeHeap(),
+          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
   const bool loaded = JsonSettingsIO::loadReadingStatsFromFile(*this, path.c_str());
   if (!loaded) {
     CPR_VCODEX_LOG_EVENT("RST", std::string("Reading stats import source was rejected: ") + path);
+    return false;
+  }
+
+  if (!hasAnyStats()) {
+    CPR_VCODEX_LOG_EVENT("RST", "Rejected empty reading stats import");
+    reloadOriginalStats();
     return false;
   }
 
@@ -1740,10 +1769,16 @@ bool ReadingStatsStore::importFromFile(const std::string& path) {
   }
   markDirty();
   const bool saved = saveToFile();
-  if (saved) {
-    refreshInternalBackupFromMain();
+  if (!saved) {
+    LOG_ERR("RST", "Reading stats import save failed; restoring previous stats");
+    CPR_VCODEX_LOG_EVENT("RST", "Reading stats import rolled back after save failure");
+    reloadOriginalStats();
+    return false;
   }
-  return saved;
+
+  LOG_DBG("RST", "After stats import: free=%u largest=%u", ESP.getFreeHeap(),
+          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  return true;
 }
 
 bool ReadingStatsStore::saveToFile() const {
@@ -1824,6 +1859,10 @@ bool ReadingStatsStore::loadFromFile() {
   } else if (loaded && !hasAnyStats() && statsFileAppearsToHaveData(READING_STATS_BACKUP_FILE_JSON) &&
              restoreInternalBackupToMain("empty main file")) {
     loaded = loadMainFile();
+  }
+  if (!loaded) {
+    markLoadSkippedForRecovery();
+    CPR_VCODEX_LOG_EVENT("RST", "Reading stats persistence suspended after load failure");
   }
   return loaded;
 }

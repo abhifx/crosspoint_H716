@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ArduinoJson.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -60,6 +61,7 @@ class ReadingStatsStore;
 namespace JsonSettingsIO {
 bool saveReadingStats(const ReadingStatsStore& store, const char* path);
 bool loadReadingStats(ReadingStatsStore& store, const char* json);
+bool loadReadingStatsDocument(ReadingStatsStore& store, const JsonDocument& doc);
 bool loadReadingStatsFromFile(ReadingStatsStore& store, const char* path);
 }  // namespace JsonSettingsIO
 
@@ -106,6 +108,7 @@ class ReadingStatsStore {
 
   friend bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore&, const char*);
   friend bool JsonSettingsIO::loadReadingStats(ReadingStatsStore&, const char*);
+  friend bool JsonSettingsIO::loadReadingStatsDocument(ReadingStatsStore&, const JsonDocument&);
   friend bool JsonSettingsIO::loadReadingStatsFromFile(ReadingStatsStore&, const char*);
 
   size_t findBookIndexByPath(const std::string& path) const;

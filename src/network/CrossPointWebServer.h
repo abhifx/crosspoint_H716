@@ -111,9 +111,12 @@ class CrossPointWebServer {
   // Settings handlers
   void handleSettingsPage() const;
   void handleAppSettingsPage() const;
+  void handleSteroidsSettingsPage() const;
   void handleLogo() const;
   void handleGetSettings() const;
   void handlePostSettings();
+  void handleGetSteroidsSettings() const;
+  void handlePostSteroidsSettings();
 
   // Font management handlers
   void handleFontsPage() const;

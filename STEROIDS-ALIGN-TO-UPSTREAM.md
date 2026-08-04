@@ -126,27 +126,40 @@ found missing in Steroids and have been restored:
   `std::stable_sort`, aligned `loadReadingStatsFromFile` to use
   `loadJsonDocumentFromFile`
 
-### 2026-08-04: Steroids Settings JSON Split
+### 2026-08-04: Steroids Settings JSON Split (v2 — complete separation)
 
 **Key architectural change:** Steroids settings are now stored in a separate JSON file
 (`/.crosspoint/settings-steroids.json`) instead of being mixed into
-`/.crosspoint/settings.json`. This makes `JsonSettingsIO.cpp` save/load functions
-byte-identical to upstream, eliminating merge conflicts in the largest conflict
-zone of the codebase.
+`/.crosspoint/settings.json`. All steroids I/O code is also extracted to
+`JsonSettingsIOSteroids.cpp` so that `JsonSettingsIO.cpp` stays **byte-identical
+to upstream** — zero merge conflicts in the entire file.
 
 **How it works:**
-- `settings.json` (~131 fields): upstream-only settings, byte-identical to upstream
-- `settings-steroids.json` (~40 fields): Steroids-only settings with `formatVersion: 1`
+- `settings.json` (~122 fields): upstream-only, byte-identical to upstream
+- `settings-steroids.json` (~37 fields): Steroids-only with `formatVersion: 1`
 - `CrossPointSettings::saveToFile()` saves to BOTH files transparently
 - `CrossPointSettings::loadFromFile()` loads upstream first, then Steroids
 - One-shot migration: on first boot after upgrade, if `settings-steroids.json` doesn't
   exist, Steroids fields are extracted from the old unified `settings.json`, saved to
-  the new file, and `settings.json` is re-saved without them. Subsequent boots skip this.
+  the new file, and `settings.json` is re-saved without them.
 
-**The 40 Steroids-only fields in `settings-steroids.json`:**
-- Reader: `dotsSpacing`, `epubRenderMode`, `guideReadingEnabled`
+**Fields moved from upstream to Steroids file (2026-08-04 v2):**
+These fields exist in upstream but have been moved to `settings-steroids.json`
+because Steroids uses different enum values, counts, or defaults:
+
+| Field | Reason for move |
+|---|---|
+| `longPressButtonBehavior` | Steroids adds BOOKMARK=1, CLIPPING=2, FONTSIZE=5 (6 values vs upstream's 3) |
+| `clockFormat` | Steroids inverts meaning: 0=24h/1=12h (upstream had 0=12h/1=24h → now aligned) |
+| `fontFamily` | Steroids adds LEXEND=2 (upstream has 2 values, Steroids has 3) |
+| `uiTheme` | Steroids adds LYRA_MARCOAND75=3 (upstream has 3 values, Steroids has 4) |
+| `displayDay` | Steroids changes default from 1 (DATE_ONLY) to 2 (TIME_ONLY) |
+
+**All Steroids-only fields in `settings-steroids.json`:**
+- Display/Theme: `uiTheme`, `darkMode`, `antiGhostingExperimental`, `displayDay`, `clockFormat`
+- Font/Rendering: `fontFamily`, `guideReadingEnabled`, `dotsSpacing`, `epubRenderMode`
+- Controls: `longPressButtonBehavior`, `frontLongPressBehavior`, `cycleScreensaverOnTap`
 - Status bar: `statusBarTimeLeft`
-- Controls: `frontLongPressBehavior`, `cycleScreensaverOnTap`
 - Library: `libraryLayout`, `libraryFilter`, `librarySort`, `librarySearchText`,
   `libraryRootDir`, `libraryUpdateMode`, `libraryLastCleanupDay`
 - Screensaver: `screenSaverDirectory`, `screenSaverOrder`, `screenSaverInterval`,
@@ -157,15 +170,25 @@ zone of the codebase.
 - Shortcuts: `libraryShortcut*`, `screenSaverShortcut*`, `clippingsShortcut*`,
   `wikipediaShortcut*`
 
-**Files changed:**
-- `src/JsonSettingsIO.h`: added `saveSettingsSteroids`, `loadSettingsSteroids`
-- `src/JsonSettingsIO.cpp`: removed steroids fields from `saveSettings`/`loadSettingsDirect`,
-  added `writeSteroidsSettingsDoc`/`readSteroidsSettingsDoc` helpers,
-  added `saveSettingsSteroids`/`loadSettingsSteroids` public functions,
-  removed unreachable dead code block (~230 lines)
-- `src/CrossPointSettings.cpp`: added `SETTINGS_STEROIDS_FILE_JSON` constant,
-  wired `saveToFile()` to save both files, wired `loadFromFile()` with
-  one-shot migration logic
+**Web interface:**
+A new `/steroids-settings` page is available in the web UI, accessible from the
+nav bar on all pages. It uses dedicated `/api/steroids-settings` GET/POST endpoints
+that read/write `settings-steroids.json` directly.
+
+**File architecture:**
+- `src/JsonSettingsIO.h` / `.cpp`: upstream-only, byte-identical to upstream
+- `src/JsonSettingsIOSteroids.h` / `.cpp`: steroids-only serialization
+- `src/JsonSettingsIOShared.inc`: shared internal helpers (saveJsonDocumentToFile, etc.)
+- `src/CrossPointSettings.cpp`: unified facade (saveToFile/loadFromFile)
+- `src/network/CrossPointWebServer.cpp`: steroids settings API endpoints
+- `src/network/html/SteroidsSettingsPage.html`: steroids settings web page
+- `src/network/html/SteroidsSettingsPageHtml.generated.h`: gzipped HTML header
+
+**Upstream merge workflow (updated):**
+1. `JsonSettingsIO.cpp`: **zero conflicts** — byte-identical to upstream
+2. `CrossPointSettings.h`: only needs manual merge of the POD struct (add new fields)
+3. `JsonSettingsIOSteroids.cpp`: never touched by upstream — no conflicts
+4. All other files: same as before
 
 **Migration safety:** If the Steroids file save fails during migration, the old
 `settings.json` (still containing Steroids fields) is preserved and migration
@@ -908,4 +931,4 @@ section in `STEROIDS-ADDICTIONS.md` §8A for the full design rationale.
 
 ---
 
-*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, ReadingStatsStore full alignment audit, and Steroids settings JSON split*
+*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, ReadingStatsStore full alignment audit, Steroids settings JSON split (v2 with C++ file separation), and web UI steroids page*

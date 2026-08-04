@@ -29,6 +29,7 @@
 #include "html/IfFoundPageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/AppSettingsPageHtml.generated.h"
+#include "html/SteroidsSettingsPageHtml.generated.h"
 #include "html/LogoPng.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
@@ -619,9 +620,12 @@ void CrossPointWebServer::begin() {
   // Settings endpoints
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/app-settings", HTTP_GET, [this] { handleAppSettingsPage(); });
+  server->on("/steroids-settings", HTTP_GET, [this] { handleSteroidsSettingsPage(); });
   server->on("/logo.png", HTTP_GET, [this] { handleLogo(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  server->on("/api/steroids-settings", HTTP_GET, [this] { handleGetSteroidsSettings(); });
+  server->on("/api/steroids-settings", HTTP_POST, [this] { handlePostSteroidsSettings(); });
 
   // Font management endpoints
   server->on("/fonts", HTTP_GET, [this] { handleFontsPage(); });
@@ -1898,6 +1902,11 @@ void CrossPointWebServer::handleAppSettingsPage() const {
   LOG_DBG("WEB", "Served app settings page");
 }
 
+void CrossPointWebServer::handleSteroidsSettingsPage() const {
+  sendHtmlContent(server.get(), SteroidsSettingsPageHtml, sizeof(SteroidsSettingsPageHtml));
+  LOG_DBG("WEB", "Served steroids settings page");
+}
+
 void CrossPointWebServer::handleLogo() const {
   server->sendHeader("Cache-Control", "public, max-age=86400");
   server->send_P(200, "image/png", LogoPng, LogoPngSize);
@@ -2174,6 +2183,480 @@ void CrossPointWebServer::handlePostSettings() {
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
+}
+
+// ---- Steroids Settings API ----
+
+void CrossPointWebServer::handleGetSteroidsSettings() const {
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+
+  // Map all steroids fields to JSON for the web UI.
+  // This mirrors the WEB_SETTINGS pattern but for steroids-only fields.
+  const auto& s = CrossPointSettings::getInstance();
+
+  // Display & Theme
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "uiTheme";
+    obj["name"] = "UI Theme";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Lyra"); opts.add("Lyra Custom"); opts.add("Lyra Carousel"); opts.add("MarcoAnd75");
+    obj["value"] = s.uiTheme;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "darkMode";
+    obj["name"] = "Dark Mode";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "toggle";
+    obj["value"] = s.darkMode;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "displayDay";
+    obj["name"] = "Header Display";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Off"); opts.add("Date"); opts.add("Time"); opts.add("Date & Time");
+    obj["value"] = s.displayDay;
+  }
+
+  // Font & Rendering
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "fontFamily";
+    obj["name"] = "Font Family";
+    obj["category"] = "Font & Rendering";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Bookerly"); opts.add("Noto Sans");
+#ifdef LEXEND_AVAILABLE
+    opts.add("Lexend");
+#endif
+    obj["value"] = s.fontFamily;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "guideReadingEnabled";
+    obj["name"] = "Guide Reading";
+    obj["category"] = "Font & Rendering";
+    obj["type"] = "toggle";
+    obj["value"] = s.guideReadingEnabled;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "dotsSpacing";
+    obj["name"] = "Dots Spacing";
+    obj["category"] = "Font & Rendering";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Standard"); opts.add("Large");
+    obj["value"] = s.dotsSpacing;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "epubRenderMode";
+    obj["name"] = "EPUB Render Mode";
+    obj["category"] = "Font & Rendering";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Default"); opts.add("Balanced"); opts.add("Light");
+    obj["value"] = s.epubRenderMode;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "antiGhostingExperimental";
+    obj["name"] = "Anti-Ghosting (Experimental)";
+    obj["category"] = "Font & Rendering";
+    obj["type"] = "toggle";
+    obj["value"] = s.antiGhostingExperimental;
+  }
+
+  // Controls
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "longPressButtonBehavior";
+    obj["name"] = "Side Button Long Press";
+    obj["category"] = "Controls";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Off"); opts.add("Bookmark"); opts.add("Clipping"); opts.add("Chapter Skip");
+    opts.add("Orientation"); opts.add("Font Size");
+    obj["value"] = s.longPressButtonBehavior;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "frontLongPressBehavior";
+    obj["name"] = "Front Button Long Press";
+    obj["category"] = "Controls";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Off"); opts.add("Bookmark"); opts.add("Clipping"); opts.add("Chapter Skip");
+    opts.add("Orientation"); opts.add("Font Size");
+    obj["value"] = s.frontLongPressBehavior;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "cycleScreensaverOnTap";
+    obj["name"] = "Cycle Screensaver on Tap";
+    obj["category"] = "Controls";
+    obj["type"] = "toggle";
+    obj["value"] = s.cycleScreensaverOnTap;
+  }
+
+  // Status Bar Extras
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "statusBarTimeLeft";
+    obj["name"] = "Time Left Estimate";
+    obj["category"] = "Status Bar Extras";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Hide"); opts.add("Chapter"); opts.add("Book");
+    obj["value"] = s.statusBarTimeLeft;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "clockFormat";
+    obj["name"] = "Clock Format";
+    obj["category"] = "Status Bar Extras";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("24-hour"); opts.add("12-hour");
+    obj["value"] = s.clockFormat;
+  }
+
+  // Library
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "libraryLayout";
+    obj["name"] = "Library Layout";
+    obj["category"] = "Library";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("4x4"); opts.add("3x3"); opts.add("2x2");
+    obj["value"] = s.libraryLayout;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "libraryFilter";
+    obj["name"] = "Library Filter";
+    obj["category"] = "Library";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("All"); opts.add("Favorites"); opts.add("Latest Read"); opts.add("Unread"); opts.add("Completed");
+    obj["value"] = s.libraryFilter;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "librarySort";
+    obj["name"] = "Library Sort";
+    obj["category"] = "Library";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Title A-Z"); opts.add("Title Z-A"); opts.add("Author A-Z"); opts.add("Author Z-A");
+    opts.add("Recent"); opts.add("Progress"); opts.add("Collections");
+    obj["value"] = s.librarySort;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "libraryUpdateMode";
+    obj["name"] = "Library Update";
+    obj["category"] = "Library";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Manual"); opts.add("Auto");
+    obj["value"] = s.libraryUpdateMode;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "libraryRootDir";
+    obj["name"] = "Library Root Directory";
+    obj["category"] = "Library";
+    obj["type"] = "string";
+    obj["value"] = s.libraryRootDir;
+  }
+
+  // Screensaver
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverDirectory";
+    obj["name"] = "Screensaver Directory";
+    obj["category"] = "Screensaver";
+    obj["type"] = "string";
+    obj["value"] = s.screenSaverDirectory;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverOrder";
+    obj["name"] = "Screensaver Order";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Shuffle"); opts.add("Sequential");
+    obj["value"] = s.screenSaverOrder;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverInterval";
+    obj["name"] = "Screensaver Interval";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("1 min"); opts.add("5 min"); opts.add("15 min"); opts.add("30 min");
+    opts.add("1 hour"); opts.add("2 hours"); opts.add("4 hours"); opts.add("8 hours");
+    obj["value"] = s.screenSaverInterval;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverWakeButton";
+    obj["name"] = "Screensaver Wake Button";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Any"); opts.add("Back"); opts.add("Confirm"); opts.add("Left"); opts.add("Right");
+    opts.add("Up"); opts.add("Down"); opts.add("Power"); opts.add("Page Back"); opts.add("Page Forward");
+    obj["value"] = s.screenSaverWakeButton;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverReplaceSleep";
+    obj["name"] = "Replace Sleep with Screensaver";
+    obj["category"] = "Screensaver";
+    obj["type"] = "toggle";
+    obj["value"] = s.screenSaverReplaceSleep;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverText";
+    obj["name"] = "Screensaver Text";
+    obj["category"] = "Screensaver";
+    obj["type"] = "string";
+    obj["value"] = s.screenSaverText;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverFontSize";
+    obj["name"] = "Screensaver Font Size";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("X-Small"); opts.add("Small"); opts.add("Medium"); opts.add("Large"); opts.add("X-Large");
+    obj["value"] = s.screenSaverFontSize;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverTextPosition";
+    obj["name"] = "Screensaver Text Position";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Top Left"); opts.add("Top Right"); opts.add("Bottom Left");
+    opts.add("Bottom Right"); opts.add("Center"); opts.add("Random");
+    obj["value"] = s.screenSaverTextPosition;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverTextStyle";
+    obj["name"] = "Screensaver Text Style";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("White"); opts.add("Black"); opts.add("White Outlined"); opts.add("Black Outlined");
+    obj["value"] = s.screenSaverTextStyle;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverShowPanel";
+    obj["name"] = "Screensaver Show Panel";
+    obj["category"] = "Screensaver";
+    obj["type"] = "toggle";
+    obj["value"] = s.screenSaverShowPanel;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverPanelColor";
+    obj["name"] = "Screensaver Panel Color";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Black"); opts.add("White");
+    obj["value"] = s.screenSaverPanelColor;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverPanelOpacity";
+    obj["name"] = "Screensaver Panel Opacity";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("None"); opts.add("25%"); opts.add("50%"); opts.add("75%");
+    obj["value"] = s.screenSaverPanelOpacity;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverMinBattery";
+    obj["name"] = "Screensaver Min Battery";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    for (int i = 10; i <= 90; i += 10) {
+      char buf[8];
+      snprintf(buf, sizeof(buf), "%d%%", i);
+      opts.add(buf);
+    }
+    obj["value"] = s.screenSaverMinBattery;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverReaderDir";
+    obj["name"] = "Reader Screensaver Directory";
+    obj["category"] = "Screensaver";
+    obj["type"] = "string";
+    obj["value"] = s.screenSaverReaderDir;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "screenSaverReaderOrder";
+    obj["name"] = "Reader Screensaver Order";
+    obj["category"] = "Screensaver";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Shuffle"); opts.add("Sequential");
+    obj["value"] = s.screenSaverReaderOrder;
+  }
+
+  // Shortcuts
+  auto addShortcut = [&](const char* key, const char* name, uint8_t location, uint8_t order, uint8_t visible) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = key;
+    obj["name"] = name;
+    obj["category"] = "Shortcuts";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Home"); opts.add("Apps"); opts.add("None");
+    obj["value"] = location;
+    // Also expose order and visible as separate settings
+    JsonObject obj2 = arr.add<JsonObject>();
+    obj2["key"] = (std::string(key) + "Order").c_str();
+    obj2["name"] = (std::string(name) + " Order").c_str();
+    obj2["category"] = "Shortcuts";
+    obj2["type"] = "value";
+    obj2["min"] = 0;
+    obj2["max"] = 50;
+    obj2["step"] = 1;
+    obj2["value"] = order;
+    JsonObject obj3 = arr.add<JsonObject>();
+    obj3["key"] = (std::string(key) + "Visible").c_str();
+    obj3["name"] = (std::string(name) + " Visible").c_str();
+    obj3["category"] = "Shortcuts";
+    obj3["type"] = "toggle";
+    obj3["value"] = visible;
+  };
+  addShortcut("libraryShortcut", "Library Shortcut", s.libraryShortcut, s.libraryShortcutOrder, s.libraryShortcutVisible);
+  addShortcut("screenSaverShortcut", "Screensaver Shortcut", s.screenSaverShortcut, s.screenSaverShortcutOrder, s.screenSaverShortcutVisible);
+  addShortcut("clippingsShortcut", "Clippings Shortcut", s.clippingsShortcut, s.clippingsShortcutOrder, s.clippingsShortcutVisible);
+  addShortcut("wikipediaShortcut", "Wikipedia Shortcut", s.wikipediaShortcut, s.wikipediaShortcutOrder, s.wikipediaShortcutVisible);
+
+  String jsonStr;
+  serializeJson(doc, jsonStr);
+  server->send(200, "application/json", jsonStr);
+}
+
+void CrossPointWebServer::handlePostSteroidsSettings() {
+  String body = server->arg("plain");
+  if (body.isEmpty()) {
+    server->send(400, "text/plain", "Empty body");
+    return;
+  }
+
+  JsonDocument doc;
+  auto error = deserializeJson(doc, body);
+  if (error) {
+    server->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+
+  auto& s = CrossPointSettings::getInstance();
+  int applied = 0;
+
+  auto applyToggle = [&](const char* key, uint8_t& field) {
+    if (doc[key].is<int>()) { field = doc[key].as<int>() ? 1 : 0; applied++; }
+  };
+  auto applyEnum = [&](const char* key, uint8_t& field, uint8_t maxVal) {
+    if (doc[key].is<int>()) {
+      int v = doc[key].as<int>();
+      if (v >= 0 && v < static_cast<int>(maxVal)) { field = static_cast<uint8_t>(v); applied++; }
+    }
+  };
+  auto applyString = [&](const char* key, char* dest, size_t maxLen) {
+    if (doc[key].is<const char*>()) {
+      const char* val = doc[key].as<const char*>();
+      strncpy(dest, val, maxLen - 1);
+      dest[maxLen - 1] = '\0';
+      applied++;
+    }
+  };
+  auto applyValue = [&](const char* key, uint8_t& field, uint8_t minVal, uint8_t maxVal) {
+    if (doc[key].is<int>()) {
+      int v = doc[key].as<int>();
+      if (v >= minVal && v <= maxVal) { field = static_cast<uint8_t>(v); applied++; }
+    }
+  };
+
+  applyEnum("uiTheme", s.uiTheme, CrossPointSettings::UI_THEME_COUNT);
+  applyToggle("darkMode", s.darkMode);
+  applyEnum("displayDay", s.displayDay, CrossPointSettings::DISPLAY_HEADER_MODE_COUNT);
+  applyEnum("fontFamily", s.fontFamily, CrossPointSettings::FONT_FAMILY_COUNT);
+  applyToggle("guideReadingEnabled", s.guideReadingEnabled);
+  applyEnum("dotsSpacing", s.dotsSpacing, CrossPointSettings::DOTS_SPACING_COUNT);
+  applyEnum("epubRenderMode", s.epubRenderMode, CrossPointSettings::EPUB_RENDER_MODE_COUNT);
+  applyToggle("antiGhostingExperimental", s.antiGhostingExperimental);
+  applyEnum("longPressButtonBehavior", s.longPressButtonBehavior, CrossPointSettings::LONG_PRESS_BUTTON_BEHAVIOR_COUNT);
+  applyEnum("frontLongPressBehavior", s.frontLongPressBehavior, CrossPointSettings::FRONT_LONG_PRESS_BEHAVIOR_COUNT);
+  applyToggle("cycleScreensaverOnTap", s.cycleScreensaverOnTap);
+  applyEnum("statusBarTimeLeft", s.statusBarTimeLeft, CrossPointSettings::STATUS_BAR_TIME_LEFT_COUNT);
+  applyEnum("clockFormat", s.clockFormat, static_cast<uint8_t>(2));
+  applyEnum("libraryLayout", s.libraryLayout, CrossPointSettings::LIBRARY_LAYOUT_COUNT);
+  applyEnum("libraryFilter", s.libraryFilter, CrossPointSettings::LIBRARY_FILTER_COUNT);
+  applyEnum("librarySort", s.librarySort, CrossPointSettings::LIBRARY_SORT_COUNT);
+  applyEnum("libraryUpdateMode", s.libraryUpdateMode, CrossPointSettings::LIBRARY_UPDATE_MODE_COUNT);
+  applyString("libraryRootDir", s.libraryRootDir, sizeof(s.libraryRootDir));
+  applyString("screenSaverDirectory", s.screenSaverDirectory, sizeof(s.screenSaverDirectory));
+  applyEnum("screenSaverOrder", s.screenSaverOrder, CrossPointSettings::SCREENSAVER_ORDER_COUNT);
+  applyEnum("screenSaverInterval", s.screenSaverInterval, CrossPointSettings::SCREENSAVER_INTERVAL_COUNT);
+  applyEnum("screenSaverWakeButton", s.screenSaverWakeButton, CrossPointSettings::SCREENSAVER_WAKE_BUTTON_COUNT);
+  applyToggle("screenSaverReplaceSleep", s.screenSaverReplaceSleep);
+  applyString("screenSaverText", s.screenSaverText, sizeof(s.screenSaverText));
+  applyEnum("screenSaverFontSize", s.screenSaverFontSize, CrossPointSettings::SCREENSAVER_FONT_SIZE_COUNT);
+  applyEnum("screenSaverTextPosition", s.screenSaverTextPosition, CrossPointSettings::SCREENSAVER_TEXT_POSITION_COUNT);
+  applyEnum("screenSaverTextStyle", s.screenSaverTextStyle, CrossPointSettings::SCREENSAVER_TEXT_STYLE_COUNT);
+  applyToggle("screenSaverShowPanel", s.screenSaverShowPanel);
+  applyEnum("screenSaverPanelColor", s.screenSaverPanelColor, static_cast<uint8_t>(2));
+  applyEnum("screenSaverPanelOpacity", s.screenSaverPanelOpacity, static_cast<uint8_t>(4));
+  applyEnum("screenSaverMinBattery", s.screenSaverMinBattery, static_cast<uint8_t>(9));
+  applyString("screenSaverReaderDir", s.screenSaverReaderDir, sizeof(s.screenSaverReaderDir));
+  applyEnum("screenSaverReaderOrder", s.screenSaverReaderOrder, CrossPointSettings::SCREENSAVER_ORDER_COUNT);
+  applyEnum("libraryShortcut", s.libraryShortcut, CrossPointSettings::SHORTCUT_LOCATION_COUNT);
+  applyValue("libraryShortcutOrder", s.libraryShortcutOrder, 0, 50);
+  applyToggle("libraryShortcutVisible", s.libraryShortcutVisible);
+  applyEnum("screenSaverShortcut", s.screenSaverShortcut, CrossPointSettings::SHORTCUT_LOCATION_COUNT);
+  applyValue("screenSaverShortcutOrder", s.screenSaverShortcutOrder, 0, 50);
+  applyToggle("screenSaverShortcutVisible", s.screenSaverShortcutVisible);
+  applyEnum("clippingsShortcut", s.clippingsShortcut, CrossPointSettings::SHORTCUT_LOCATION_COUNT);
+  applyValue("clippingsShortcutOrder", s.clippingsShortcutOrder, 0, 50);
+  applyToggle("clippingsShortcutVisible", s.clippingsShortcutVisible);
+  applyEnum("wikipediaShortcut", s.wikipediaShortcut, CrossPointSettings::SHORTCUT_LOCATION_COUNT);
+  applyValue("wikipediaShortcutOrder", s.wikipediaShortcutOrder, 0, 50);
+  applyToggle("wikipediaShortcutVisible", s.wikipediaShortcutVisible);
+
+  SETTINGS.saveToFile();
+  LOG_DBG("WEB", "Applied %d steroids setting(s)", applied);
+  server->send(200, "text/plain", String("Applied ") + String(applied) + " steroid setting(s)");
 }
 
 // ---- OPDS Server API ----

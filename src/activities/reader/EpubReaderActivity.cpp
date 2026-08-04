@@ -2710,11 +2710,6 @@ void EpubReaderActivity::renderStatusBar() const {
     return;
   }
 
-void EpubReaderActivity::renderStatusBar() const {
-  if (statusBarTemporarilyHidden || !section || !epub) {
-    return;
-  }
-
   // Calculate progress in book
   const int currentPage = section->currentPage + 1;
   const float pageCount = section->pageCount;

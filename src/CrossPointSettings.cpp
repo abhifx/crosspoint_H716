@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
+#include <JsonSettingsIOSteroids.h>
 #include <Logging.h>
 #include <Serialization.h>
 

@@ -364,7 +364,7 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   uint8_t statusBarTimeLeft = TIME_LEFT_HIDE;
   uint8_t statusBarClock = STATUS_BAR_CLOCK_HIDE;
-  uint8_t clockFormat = 0;   // 0=12h, 1=24h
+  uint8_t clockFormat = 0;   // 0=24h, 1=12h
   uint8_t clockHasBeenSynced = 0;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
   // Text rendering settings

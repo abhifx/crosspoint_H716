@@ -52,10 +52,6 @@ bool saveAchievements(const AchievementsStore& store, const char* path);
 bool loadAchievements(AchievementsStore& store, const char* json);
 bool loadAchievementsFromFile(AchievementsStore& store, const char* path);
 
-// Steroids-only settings (separate JSON file)
-bool saveSettingsSteroids(const CrossPointSettings& s, const char* path);
-bool loadSettingsSteroids(CrossPointSettings& s, const char* json, bool* needsResave = nullptr);
-
 // OpdsServerStore
 bool saveOpds(const OpdsServerStore& store, const char* path);
 bool loadOpds(OpdsServerStore& store, const char* json, bool* needsResave = nullptr);

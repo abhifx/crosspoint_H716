@@ -46,6 +46,17 @@ inline void readString(std::istream& is, std::string& s) {
 inline void readString(FsFile& file, std::string& s) {
   uint32_t len;
   readPod(file, len);
+  // Guard against corrupt/truncated cache files: never resize to a length
+  // larger than the bytes that actually remain in the file. With exceptions
+  // disabled (-fno-exceptions) a bogus huge length would call
+  // std::__throw_length_error() and abort; capping keeps it crash-free and a
+  // truncated read is handled by the caller's cache-version/integrity checks.
+  const size_t filePos = file.position();
+  const size_t fileSize = file.size();
+  const size_t remaining = filePos <= fileSize ? fileSize - filePos : 0;
+  if (len > remaining) {
+    len = static_cast<uint32_t>(remaining);
+  }
   s.resize(len);
   file.read(&s[0], len);
 }

@@ -1,7 +1,9 @@
 #include "Bitmap.h"
 
+#include <Logging.h>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 #include "BitmapHelpers.h"
 #include "DitheringConfig.h"
@@ -167,12 +169,32 @@ BmpReaderError Bitmap::parseHeaders() {
   //  - Native palette → direct mapping, no processing needed
   //  - High-color + dithering enabled → error-diffusion dithering (Atkinson or Floyd-Steinberg)
   //  - High-color + dithering disabled → simple quantization (no error diffusion)
+  //
+  // All ditherers are allocated with std::nothrow so an out-of-memory during
+  // cover regeneration never aborts the device (with -fno-exceptions a raw new
+  // would throw std::bad_alloc -> abort). On allocation failure we simply fall
+  // back to simple quantization: a slightly less smooth cover is preferable to
+  // a crash.
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(width);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
+      if (atkinsonDitherer && !atkinsonDitherer->valid()) {
+        delete atkinsonDitherer;
+        atkinsonDitherer = nullptr;
+      }
+      if (!atkinsonDitherer) {
+        LOG_DBG("BMP", "OOM: Atkinson ditherer (w=%d) — falling back to simple quantization", width);
+      }
     } else {
-      fsDitherer = new FloydSteinbergDitherer(width);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
+      if (fsDitherer && !fsDitherer->valid()) {
+        delete fsDitherer;
+        fsDitherer = nullptr;
+      }
+      if (!fsDitherer) {
+        LOG_DBG("BMP", "OOM: Floyd-Steinberg ditherer (w=%d) — falling back to simple quantization", width);
+      }
     }
   }
 

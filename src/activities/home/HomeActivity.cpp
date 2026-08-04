@@ -122,9 +122,31 @@ bool isValidBmpFile(const std::string& path) {
   if (!Storage.openFileForRead("HOME", path, file)) {
     return false;
   }
+  const size_t fileSize = file.size();
 
-  Bitmap bitmap(file);
-  const bool valid = bitmap.parseHeaders() == BmpReaderError::Ok;
+  // Lightweight header validation: read only the small BMP headers and check
+  // consistency with the on-disk size, WITHOUT allocating a Bitmap (and so
+  // without ever creating a ditherer). Detects truncated/corrupt covers while
+  // costing a few bytes instead of a full parse.
+  auto readLE32 = [](const uint8_t* p) {
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  };
+  bool valid = false;
+  if (fileSize >= 26) {
+    uint8_t hdr[54];
+    const size_t readHdr = file.read(hdr, sizeof(hdr));
+    if (readHdr >= 26 && hdr[0] == 'B' && hdr[1] == 'M') {
+      const uint32_t bfSize = readLE32(hdr + 2);       // total file size declared
+      const uint32_t bfOffBits = readLE32(hdr + 10);   // byte offset of pixel data
+      const uint32_t biSizeImage = (readHdr >= 38) ? readLE32(hdr + 34) : 0;
+      const bool headerConsistent = (bfSize == 0 || bfSize <= fileSize);
+      const bool pixelStartsInFile = bfOffBits <= fileSize;
+      const bool pixelExtentOk = (biSizeImage == 0 ||
+                                  (uint64_t)bfOffBits + biSizeImage <= fileSize);
+      valid = headerConsistent && pixelStartsInFile && pixelExtentOk;
+    }
+  }
   file.close();
   return valid;
 }
@@ -549,11 +571,17 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         if (epub.load(isLyraCarouselTheme(), true)) {
           LOG_DBG("HOME", "EPUB load ok: path=%s free=%u maxA=%u",
                     book.path.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-          if (!epub.getTitle().empty()) {
-            book.title = epub.getTitle();
+          // Epub::getTitle()/getAuthor() return const std::string& (member refs),
+          // so a plain copy is the correct, coherent choice here (std::move on a
+          // const-ref would just copy anyway). The Epub object is a local that
+          // goes out of scope right after this block.
+          const std::string epubTitle = epub.getTitle();
+          if (!epubTitle.empty()) {
+            book.title = epubTitle;
           }
-          if (!epub.getAuthor().empty()) {
-            book.author = epub.getAuthor();
+          const std::string epubAuthor = epub.getAuthor();
+          if (!epubAuthor.empty()) {
+            book.author = epubAuthor;
           }
           book.coverBmpPath = epub.getThumbBmpPath();
 
@@ -588,13 +616,13 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       } else if (FsHelpers::hasXtcExtension(book.path)) {
         Xtc xtc(book.path, "/.crosspoint");
         if (xtc.load()) {
-          const std::string title = xtc.getTitle();
-          const std::string author = xtc.getAuthor();
+          std::string title = std::move(xtc.getTitle());
+          std::string author = std::move(xtc.getAuthor());
           if (!title.empty()) {
-            book.title = title;
+            book.title = std::move(title);
           }
           if (!author.empty()) {
-            book.author = author;
+            book.author = std::move(author);
           }
           book.coverBmpPath = xtc.getThumbBmpPath();
           const bool success =
@@ -613,9 +641,9 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
         Txt txt(book.path, "/.crosspoint");
         if (txt.load()) {
-          const std::string title = txt.getTitle();
+          std::string title = std::move(txt.getTitle());
           if (!title.empty()) {
-            book.title = title;
+            book.title = std::move(title);
           }
           book.coverBmpPath = txt.getCoverBmpPath();
           removeInvalidHomeCoverTarget(book.coverBmpPath, coverHeight);
@@ -698,6 +726,13 @@ void HomeActivity::onEnter() {
   }
 
   LOG_DBG("HOME", "onEnter: end heap=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
+  // One-time heap compaction before the cover-generation loop (loadRecentCovers)
+  // frees renderer temp buffers so the EPUB/JPEG/PNG decoders have the largest
+  // possible contiguous block, reducing OOM skips on the Lyra/Marcoand75 paths.
+  LOG_DBG("HOME", "freeUnusedRenderMemory: maxA before=%u", ESP.getMaxAllocHeap());
+  renderer.freeUnusedRenderMemory();
+  LOG_DBG("HOME", "freeUnusedRenderMemory: maxA after=%u", ESP.getMaxAllocHeap());
 
   requestUpdate();
 }

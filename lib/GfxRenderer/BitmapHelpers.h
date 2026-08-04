@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <new>
 
 #include "DitheringConfig.h"
 
@@ -27,10 +28,25 @@ void createBmpHeader(BmpHeader* bmpHeader, int width, int height, BmpRowOrder ro
 class Atkinson1BitDitherer {
  public:
   explicit Atkinson1BitDitherer(int width) : width(width) {
-    errorRow0 = new int16_t[width + 4]();  // Current row
-    errorRow1 = new int16_t[width + 4]();  // Next row
-    errorRow2 = new int16_t[width + 4]();  // Row after next
+    errorRow0 = nullptr;
+    errorRow1 = nullptr;
+    errorRow2 = nullptr;
+    // Nothrow-safe: an OOM during cover regeneration must never abort the
+    // device (with -fno-exceptions a raw new would throw std::bad_alloc -> abort).
+    errorRow0 = new (std::nothrow) int16_t[width + 4]();
+    errorRow1 = new (std::nothrow) int16_t[width + 4]();
+    errorRow2 = new (std::nothrow) int16_t[width + 4]();
+    if (!errorRow0 || !errorRow1 || !errorRow2) {
+      delete[] errorRow0;
+      delete[] errorRow1;
+      delete[] errorRow2;
+      errorRow0 = nullptr; errorRow1 = nullptr; errorRow2 = nullptr;
+    }
   }
+
+  // True only when all error buffers were allocated; callers must check this
+  // before using the ditherer.
+  bool valid() const { return errorRow0 != nullptr && errorRow1 != nullptr && errorRow2 != nullptr; }
 
   ~Atkinson1BitDitherer() {
     delete[] errorRow0;
@@ -108,10 +124,19 @@ class Atkinson1BitDitherer {
 class AtkinsonDitherer {
  public:
   explicit AtkinsonDitherer(int width) : width(width) {
-    errorRow0 = new int16_t[width + 4]();  // Current row
-    errorRow1 = new int16_t[width + 4]();  // Next row
-    errorRow2 = new int16_t[width + 4]();  // Row after next
+    errorRow0 = nullptr; errorRow1 = nullptr; errorRow2 = nullptr;
+    errorRow0 = new (std::nothrow) int16_t[width + 4]();  // Current row
+    errorRow1 = new (std::nothrow) int16_t[width + 4]();  // Next row
+    errorRow2 = new (std::nothrow) int16_t[width + 4]();  // Row after next
+    if (!errorRow0 || !errorRow1 || !errorRow2) {
+      delete[] errorRow0;
+      delete[] errorRow1;
+      delete[] errorRow2;
+      errorRow0 = nullptr; errorRow1 = nullptr; errorRow2 = nullptr;
+    }
   }
+
+  bool valid() const { return errorRow0 != nullptr && errorRow1 != nullptr && errorRow2 != nullptr; }
 
   ~AtkinsonDitherer() {
     delete[] errorRow0;
@@ -190,9 +215,17 @@ class AtkinsonDitherer {
 class FloydSteinbergDitherer {
  public:
   explicit FloydSteinbergDitherer(int width) : width(width), rowCount(0) {
-    errorCurRow = new int16_t[width + 2]();  // +2 for boundary handling
-    errorNextRow = new int16_t[width + 2]();
+    errorCurRow = nullptr; errorNextRow = nullptr;
+    errorCurRow = new (std::nothrow) int16_t[width + 2]();  // +2 for boundary handling
+    errorNextRow = new (std::nothrow) int16_t[width + 2]();
+    if (!errorCurRow || !errorNextRow) {
+      delete[] errorCurRow;
+      delete[] errorNextRow;
+      errorCurRow = nullptr; errorNextRow = nullptr;
+    }
   }
+
+  bool valid() const { return errorCurRow != nullptr && errorNextRow != nullptr; }
 
   ~FloydSteinbergDitherer() {
     delete[] errorCurRow;

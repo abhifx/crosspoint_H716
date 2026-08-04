@@ -747,25 +747,31 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
 
   if (oneBit) {
     ctx.atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
+    if (ctx.atkinson1BitDitherer && !ctx.atkinson1BitDitherer->valid()) {
+      ctx.atkinson1BitDitherer.reset();
+    }
     if (!ctx.atkinson1BitDitherer) {
-      LOG_ERR("JPG", "OOM: Atkinson1BitDitherer");
-      setPermanent(false);
-      return false;
+      // OOM: fall back to hash 1-bit quantization for this image (no ditherer).
+      LOG_ERR("JPG", "OOM: Atkinson1BitDitherer — 1-bit quantization fallback");
     }
   } else if (!USE_8BIT_OUTPUT) {
     if (USE_ATKINSON) {
       ctx.atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
+      if (ctx.atkinsonDitherer && !ctx.atkinsonDitherer->valid()) {
+        ctx.atkinsonDitherer.reset();
+      }
       if (!ctx.atkinsonDitherer) {
-        LOG_ERR("JPG", "OOM: AtkinsonDitherer");
-        setPermanent(false);
-        return false;
+        // OOM: fall back to simple 2-bit quantization for this image (no ditherer).
+        LOG_ERR("JPG", "OOM: AtkinsonDitherer — simple-2bit quantization fallback");
       }
     } else if (USE_FLOYD_STEINBERG) {
       ctx.fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth);
+      if (ctx.fsDitherer && !ctx.fsDitherer->valid()) {
+        ctx.fsDitherer.reset();
+      }
       if (!ctx.fsDitherer) {
-        LOG_ERR("JPG", "OOM: FloydSteinbergDitherer");
-        setPermanent(false);
-        return false;
+        // OOM: fall back to simple 2-bit quantization for this image (no ditherer).
+        LOG_ERR("JPG", "OOM: FloydSteinbergDitherer — simple-2bit quantization fallback");
       }
     }
   }

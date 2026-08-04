@@ -161,8 +161,11 @@ class SdCardFont {
     // Mini EpdFontData built during prewarm
     EpdFontData miniData{};
     EpdUnicodeInterval* miniIntervals = nullptr;
+    uint32_t miniIntervalsCap = 0;
     EpdGlyph* miniGlyphs = nullptr;
+    uint32_t miniGlyphsCap = 0;
     uint8_t* miniBitmap = nullptr;
+    uint32_t miniBitmapCap = 0;
     uint32_t miniIntervalCount = 0;
     uint32_t miniGlyphCount = 0;
 
@@ -173,12 +176,15 @@ class SdCardFont {
     // flat matrix. Typical Latin page: ~25×25 matrix = ~625 bytes per style vs
     // ~36KB for the full Literata matrix — ~50× reduction.
     EpdKernClassEntry* miniKernLeftClasses = nullptr;
+    uint16_t miniKernLeftClassesCap = 0;
     EpdKernClassEntry* miniKernRightClasses = nullptr;
+    uint16_t miniKernRightClassesCap = 0;
     uint16_t miniKernLeftEntryCount = 0;
     uint16_t miniKernRightEntryCount = 0;
     uint8_t miniKernLeftClassCount = 0;
     uint8_t miniKernRightClassCount = 0;
     int8_t* miniKernMatrix = nullptr;
+    uint32_t miniKernMatrixCap = 0;
 
     // The EpdFont whose data pointer we manage
     EpdFont epdFont{&stubData};
@@ -203,6 +209,7 @@ class SdCardFont {
   struct OverflowEntry {
     EpdGlyph glyph;
     uint8_t* bitmap = nullptr;
+    uint32_t bitmapCap = 0;
     uint32_t codepoint = 0;
     uint8_t styleIdx = 0;
   };
@@ -231,15 +238,36 @@ class SdCardFont {
   template <typename Iter>
   int buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, bool includeHyphen, uint8_t styleMask);
 
+  // Reusable temporary buffers to eliminate heap fragmentation across pages and passes.
+  // Capacities are tracked to only reallocate when growing.
+  uint32_t* tmpCodepoints = nullptr;
+  uint32_t tmpCodepointsCap = 0;
+
+  struct TmpMapping {
+    uint32_t codepoint;
+    int32_t globalIndex;
+  };
+  TmpMapping* tmpMappings = nullptr;
+  uint32_t tmpMappingsCap = 0;
+
+  uint32_t* tmpReadOrder = nullptr;
+  uint32_t tmpReadOrderCap = 0;
+
+  AdvanceEntry* tmpAdvStaged = nullptr;
+  uint32_t tmpAdvStagedCap = 0;
+
+  int8_t* tmpKernRowBuf = nullptr;
+  uint16_t tmpKernRowBufCap = 0;
+
   Stats stats_;
   uint32_t contentHash_ = 0;
   bool loaded_ = false;
 
   // Per-style helpers
-  void freeStyleMiniData(PerStyle& s);
+  void freeStyleMiniData(PerStyle& s, bool freeMemory = true);
   void freeStyleAll(PerStyle& s);
   void freeStyleKernLigatureData(PerStyle& s);
-  void freeStyleMiniKern(PerStyle& s);
+  void freeStyleMiniKern(PerStyle& s, bool freeMemory = true);
   bool loadStyleKernLigatureData(PerStyle& s);
   bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;

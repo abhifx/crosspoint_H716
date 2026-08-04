@@ -64,7 +64,9 @@ bool loadReadingStatsFromFile(ReadingStatsStore& store, const char* path);
 }  // namespace JsonSettingsIO
 
 class ReadingStatsStore {
-  static ReadingStatsStore instance;
+  // RIMOSSO: static ReadingStatsStore instance;
+  // Non c'è più alcun membro statico a livello di classe che richieda 
+  // allocazione esplicita nel file .cpp.
 
   struct SummaryCache {
     bool valid = false;
@@ -144,7 +146,11 @@ class ReadingStatsStore {
  public:
   ~ReadingStatsStore() = default;
 
-  static ReadingStatsStore& getInstance() { return instance; }
+  // Meyers' Singleton
+  static ReadingStatsStore& getInstance() {
+    static ReadingStatsStore instance;
+    return instance;
+  }
 
   void beginSession(const std::string& path, const std::string& title, const std::string& author,
                     const std::string& coverBmpPath, uint8_t progressPercent = 0, const std::string& chapterTitle = "",

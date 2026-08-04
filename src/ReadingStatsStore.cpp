@@ -410,7 +410,8 @@ void dedupeStrings(std::vector<std::string>& values) {
 }
 }  // namespace
 
-ReadingStatsStore ReadingStatsStore::instance;
+// RIMOSSO: L'istanza ora è un Meyers Singleton definito inline nell'header
+// ReadingStatsStore ReadingStatsStore::instance;
 
 size_t ReadingStatsStore::findBookIndexByPath(const std::string& path) const {
   if (path.empty()) {

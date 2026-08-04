@@ -32,6 +32,9 @@ void writeSteroidsSettingsDoc(JsonDocument& doc, const CrossPointSettings& s) {
   doc["uiThemeSchemaVersion"] = UI_THEME_SCHEMA_VERSION;
   doc["fontFamily"] = s.fontFamily;
   doc["fontFamilySchemaVersion"] = FONT_FAMILY_SCHEMA_VERSION;
+  if (s.sdFontFamilyName[0] != '\0') {
+    doc["sdFontFamilyName"] = s.sdFontFamilyName;
+  }
   doc["longPressButtonBehavior"] = s.longPressButtonBehavior;
   doc["longPressChapterSkip"] = s.longPressButtonBehavior == CrossPointSettings::LONG_PRESS_CHAPTER_SKIP;
   doc["displayDay"] = s.displayDay;
@@ -139,6 +142,7 @@ void readSteroidsSettingsDoc(const JsonDocument& doc, CrossPointSettings& s, boo
       s.fontFamily = rawFontFamily;
     }
   }
+  loadString("sdFontFamilyName", s.sdFontFamilyName, sizeof(s.sdFontFamilyName));
   if (!doc["longPressButtonBehavior"].isNull()) {
     loadEnum("longPressButtonBehavior", s.longPressButtonBehavior, S::LONG_PRESS_BUTTON_BEHAVIOR_COUNT);
   } else {

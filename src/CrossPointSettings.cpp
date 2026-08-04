@@ -148,6 +148,20 @@ bool CrossPointSettings::loadFromFile() {
   if (!steroidsLoaded && upstreamOk && Storage.exists(SETTINGS_FILE_JSON)) {
     LOG_DBG("CPS", "One-shot migration: extracting steroids settings from old settings.json");
 
+    // Create a backup of the original settings.json BEFORE migration,
+    // so the user can restore it if something goes wrong.
+    const std::string backupPath = std::string(SETTINGS_STEROIDS_FILE_JSON) + ".bak";
+    if (!Storage.exists(backupPath.c_str())) {
+      String originalSettings = Storage.readFile(SETTINGS_FILE_JSON);
+      if (!originalSettings.isEmpty() && Storage.writeFile(backupPath.c_str(), originalSettings)) {
+        LOG_DBG("CPS", "Pre-migration backup saved: %s (keep for rollback)", backupPath.c_str());
+      } else {
+        LOG_ERR("CPS", "Failed to create pre-migration backup — proceeding without safety net");
+      }
+    } else {
+      LOG_DBG("CPS", "Pre-migration backup already exists, skipping copy");
+    }
+
     // Re-read the old settings.json to pick up steroids fields that were
     // loaded by the upstream loadSettings (which included them before the split)
     String oldJson = Storage.readFile(SETTINGS_FILE_JSON);

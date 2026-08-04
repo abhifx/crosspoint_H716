@@ -382,8 +382,13 @@ uint8_t getCarouselBookProgressPercent(const RecentBook& recentBook) {
   return std::min<uint8_t>(stats->lastProgressPercent, 100);
 }
 
-uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int centerIdx, const int screenWidth,
-                              const int screenHeight, const size_t bufferSize, const bool darkMode) {
+// The portion of the frame hash that is shared by every book index: all params
+// plus the full per-book loop (includes the two per-book Storage.exists
+// thumb-state checks and the progress percent). This is the expensive O(N)
+// work. FNV-1a is not commutative, so this prefix must be folded first and
+// centerIdx appended LAST (see getCarouselFrameHash).
+uint32_t getCarouselFramePrefixHash(const std::vector<RecentBook>& books, const int screenWidth,
+                                    const int screenHeight, const size_t bufferSize, const bool darkMode) {
   uint32_t hash = FNV1A_OFFSET;
   hash = fnv1aString(hash, "lyra-carousel-frame-v7-progress-badge");
   hash = fnv1aU32(hash, static_cast<uint32_t>(screenWidth));
@@ -392,7 +397,6 @@ uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int ce
   hash = fnv1aU32(hash, darkMode ? 1U : 0U);
   hash = fnv1aU32(hash, static_cast<uint32_t>(SETTINGS.homeBookSource));
   hash = fnv1aU32(hash, static_cast<uint32_t>(books.size()));
-  hash = fnv1aU32(hash, static_cast<uint32_t>(centerIdx));
 
   for (const RecentBook& book : books) {
     hash = fnv1aString(hash, book.bookId);
@@ -405,6 +409,22 @@ uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int ce
   }
 
   return hash;
+}
+
+uint32_t getCarouselFrameHash(const std::vector<RecentBook>& books, const int centerIdx, const int screenWidth,
+                              const int screenHeight, const size_t bufferSize, const bool darkMode) {
+  // IMPORTANT: the per-book loop MUST come BEFORE centerIdx. FNV-1a is not
+  // commutative/associative, so this ordering lets pruneCarouselFrameCache
+  // compute the (expensive) per-book prefix ONCE per pass instead of for every
+  // index — O(N^2) -> O(N) SD accesses, the startup bottleneck. Do NOT move
+  // centerIdx ahead of the book loop for "cosmetic" ordering: it would re-bake
+  // the per-book work into every index, reintroduce the O(N^2) startup stall,
+  // and silently break the cached-frame keys. This ordering also changed the
+  // hash key vs. the previous ordering, intentionally invalidating the old .bin
+  // frames once (they are regenerated on first render after the update).
+  return fnv1aU32(
+      getCarouselFramePrefixHash(books, screenWidth, screenHeight, bufferSize, darkMode),
+      static_cast<uint32_t>(centerIdx));
 }
 
 std::string getCarouselFrameCachePathFromHash(const uint32_t hash) {
@@ -980,9 +1000,17 @@ void HomeActivity::pruneCarouselFrameCache() {
   // set. The frame hash already folds in progress/last-read stats, so a frame
   // cached with stale statistics produces a different hash and is dropped here
   // — this both bounds cache growth and guarantees a fresh frame after reading.
+  //
+  // O(N): compute the expensive per-book prefix (thumb-state Storage.exists +
+  // progress % for every book) ONCE, then derive each frame key by hashing the
+  // center index. The previous single-entry cache re-ran the whole per-book
+  // loop for every index (O(N^2) SD accesses on startup).
+  const uint32_t prefix =
+      getCarouselFramePrefixHash(recentBooks, renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                 renderer.getBufferSize(), renderer.isDarkMode());
   std::set<uint32_t> validHashes;
   for (int i = 0; i < static_cast<int>(recentBooks.size()); ++i) {
-    validHashes.insert(getCachedCarouselFrameHash(i));
+    validHashes.insert(fnv1aU32(prefix, static_cast<uint32_t>(i)));
   }
   invalidateCarouselFrameHash();
 

@@ -2710,6 +2710,11 @@ void EpubReaderActivity::renderStatusBar() const {
     return;
   }
 
+void EpubReaderActivity::renderStatusBar() const {
+  if (statusBarTemporarilyHidden || !section || !epub) {
+    return;
+  }
+
   // Calculate progress in book
   const int currentPage = section->currentPage + 1;
   const float pageCount = section->pageCount;
@@ -2743,10 +2748,17 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  // Time-left estimate based on per-book reading pace
+  // Time-left estimate based on per-book reading pace.
+  // Guard against OOM: the findBook/findMatchingBookForPath path can allocate
+  // std::string temporaries (isIgnoredStatsPath → FsHelpers::normalisePath),
+  // and the render pipeline runs in a tight heap after page rendering.
+  // If the largest free block is too small for safe std::string operations,
+  // skip the estimate rather than risking a bad_alloc → abort crash.
   const char* timeLeftLabel = nullptr;
   char timeLeftBuf[32];
-  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::STATUS_BAR_TIME_LEFT::TIME_LEFT_HIDE) {
+  static constexpr size_t kMinSafeAllocForTimeLeft = 16384;  // 16 KB headroom
+  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::STATUS_BAR_TIME_LEFT::TIME_LEFT_HIDE &&
+      ESP.getMaxAllocHeap() >= kMinSafeAllocForTimeLeft) {
     const auto* statsBook = READING_STATS.findBook(!stableBookId.empty() ? stableBookId : epub->getPath());
     if (!statsBook && !stableBookId.empty()) {
       statsBook = READING_STATS.findMatchingBookForPath(epub->getPath());

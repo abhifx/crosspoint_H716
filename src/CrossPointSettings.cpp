@@ -100,6 +100,8 @@ bool CrossPointSettings::saveToFile() const {
   Storage.mkdir("/.crosspoint");
   const bool upstreamOk = JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
   const bool steroidsOk = JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON);
+  if (!upstreamOk) LOG_ERR("CPS", "Failed to save upstream settings.json");
+  if (!steroidsOk) LOG_ERR("CPS", "Failed to save steroids settings-steroids.json");
   return upstreamOk && steroidsOk;
 }
 
@@ -152,18 +154,31 @@ bool CrossPointSettings::loadFromFile() {
     if (!oldJson.isEmpty()) {
       bool stzResave = false;
       if (JsonSettingsIO::loadSettingsSteroids(*this, oldJson.c_str(), &stzResave)) {
-        // Save steroids to the new dedicated file
-        JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON);
+        // Save steroids to the new dedicated file — check return value
+        // so we don't lose data if the SD card write fails.
+        if (JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON)) {
+          LOG_DBG("CPS", "Steroids settings saved to new file during migration");
 
-        // Re-save settings.json without steroids fields
-        // (saveSettings no longer writes them since the split)
-        if (JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON)) {
-          LOG_DBG("CPS", "Cleaned steroids fields from settings.json after migration");
+          // Re-save settings.json without steroids fields
+          // (saveSettings no longer writes them since the split)
+          if (JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON)) {
+            LOG_DBG("CPS", "Cleaned steroids fields from settings.json after migration");
+          } else {
+            LOG_ERR("CPS", "Failed to clean steroids fields from settings.json — will retry next boot");
+          }
+          steroidsLoaded = true;
         } else {
-          LOG_ERR("CPS", "Failed to clean steroids fields from settings.json — will retry next boot");
+          LOG_ERR("CPS", "Failed to save steroids settings file during migration — will retry next boot");
+          // Leave steroidsLoaded = false so migration retries on next boot
         }
-        steroidsLoaded = true;
+        if (stzResave) {
+          LOG_DBG("CPS", "Steroids settings format was updated during migration");
+        }
+      } else {
+        LOG_ERR("CPS", "Failed to parse steroids settings from old settings.json during migration — will retry next boot");
       }
+    } else {
+      LOG_ERR("CPS", "Empty settings.json file during steroids migration — will retry next boot");
     }
   }
 

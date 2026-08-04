@@ -377,7 +377,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_ENUM(StrId::STR_HIDE_BATTERY, hideBatteryPercentage, OPT_HIDE_BATTERY, "hideBatteryPercentage",
              StrId::STR_CAT_DISPLAY),
     WEB_ENUM(StrId::STR_REFRESH_FREQ, refreshFrequency, OPT_REFRESH_FREQ, "refreshFrequency", StrId::STR_CAT_DISPLAY),
-    WEB_ENUM(StrId::STR_UI_THEME, uiTheme, OPT_UI_THEME, "uiTheme", StrId::STR_CAT_DISPLAY),
     WEB_ENUM(StrId::STR_HOME_BOOK_SOURCE, homeBookSource, OPT_HOME_BOOK_SOURCE, "homeBookSource",
              StrId::STR_CAT_DISPLAY),
     WEB_TOGGLE(StrId::STR_ANTI_GHOSTING_EXPERIMENTAL, antiGhostingExperimental, "antiGhostingExperimental",
@@ -410,8 +409,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
              StrId::STR_CAT_CONTROLS),
     WEB_TOGGLE(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, frontButtonFollowOrientation, "frontButtonFollowOrientation",
                StrId::STR_CAT_CONTROLS),
-    WEB_ENUM(StrId::STR_LONG_PRESS_BEHAVIOR, longPressButtonBehavior, OPT_LONG_PRESS_BEHAVIOR,
-             "longPressButtonBehavior", StrId::STR_CAT_CONTROLS),
     WEB_ENUM(StrId::STR_FRONT_LONG_PRESS_BEHAVIOR, frontLongPressBehavior, OPT_FRONT_LONG_PRESS_BEHAVIOR,
              "frontLongPressBehavior", StrId::STR_CAT_CONTROLS),
     WEB_ENUM(StrId::STR_SHORT_PWR_BTN, shortPwrBtn, OPT_SHORT_PWR, "shortPwrBtn", StrId::STR_CAT_CONTROLS),
@@ -420,7 +417,6 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_ENUM(StrId::STR_TIME_TO_SLEEP, sleepTimeout, OPT_SLEEP_TIMEOUT, "sleepTimeout", StrId::STR_CAT_SYSTEM),
     WEB_TOGGLE(StrId::STR_SHOW_HIDDEN_FILES, showHiddenFiles, "showHiddenFiles", StrId::STR_CAT_SYSTEM),
 
-    WEB_TOGGLE(StrId::STR_DISPLAY_DAY, displayDay, "displayDay", StrId::STR_APPS),
     WEB_ENUM(StrId::STR_CHOOSE_WIFI, syncDayWifiChoice, OPT_AUTO_MANUAL, "syncDayWifiChoice", StrId::STR_APPS),
     WEB_ENUM(StrId::STR_SYNC_DAY_REMINDER_EVERY, syncDayReminderStarts, OPT_REMINDER_STARTS, "syncDayReminderStarts",
              StrId::STR_APPS),
@@ -2092,9 +2088,6 @@ void CrossPointWebServer::handlePostSettings() {
           if (s.valuePtr) {
             const uint8_t previousValue = SETTINGS.*(s.valuePtr);
             SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
-            if (s.valuePtr == &CrossPointSettings::fontFamily) {
-              SETTINGS.sdFontFamilyName[0] = '\0';
-            }
             if (s.valuePtr == &CrossPointSettings::readingStatsAutoBackup &&
                 SETTINGS.readingStatsAutoBackup != previousValue &&
                 SETTINGS.getReadingStatsAutoBackupIntervalDays() > 0 && !READING_STATS.hasAutoBackups()) {

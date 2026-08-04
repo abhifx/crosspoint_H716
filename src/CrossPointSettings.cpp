@@ -25,6 +25,7 @@ namespace {
 constexpr uint8_t SETTINGS_FILE_VERSION = 1;
 constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
 constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
+constexpr char SETTINGS_STEROIDS_FILE_JSON[] = "/.crosspoint/settings-steroids.json";
 constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr uint8_t LEGACY_FONT_SIZE_COUNT = 4;
 
@@ -96,10 +97,13 @@ void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings
 
 bool CrossPointSettings::saveToFile() const {
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
+  const bool upstreamOk = JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
+  const bool steroidsOk = JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON);
+  return upstreamOk && steroidsOk;
 }
 
 bool CrossPointSettings::loadFromFile() {
+  // ---- Recovery: upstream settings ----
   const std::string tempPath = std::string(SETTINGS_FILE_JSON) + ".tmp";
   if (!Storage.exists(SETTINGS_FILE_JSON) && Storage.exists(tempPath.c_str())) {
     if (Storage.rename(tempPath.c_str(), SETTINGS_FILE_JSON)) {
@@ -107,30 +111,68 @@ bool CrossPointSettings::loadFromFile() {
     }
   }
 
-  // Try JSON first
+  // 1. Load upstream settings (~131 fields)
+  bool upstreamOk = false;
   if (Storage.exists(SETTINGS_FILE_JSON)) {
     String json = Storage.readFile(SETTINGS_FILE_JSON);
     if (!json.isEmpty()) {
       bool resave = false;
-      bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
-      if (result && resave) {
-        if (saveToFile()) {
-          LOG_DBG("CPS", "Resaved settings to update format");
-        } else {
-          LOG_ERR("CPS", "Failed to resave settings after format update");
-        }
+      upstreamOk = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
+      if (upstreamOk && resave) {
+        JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
+        LOG_DBG("CPS", "Resaved upstream settings to update format");
       }
-      return result;
     }
   }
 
-  // Fall back to binary migration
-  if (Storage.exists(SETTINGS_FILE_BIN)) {
+  // 2. Try to load Steroids settings (~40 fields) from separate file
+  bool steroidsLoaded = false;
+  if (Storage.exists(SETTINGS_STEROIDS_FILE_JSON)) {
+    String stzJson = Storage.readFile(SETTINGS_STEROIDS_FILE_JSON);
+    if (!stzJson.isEmpty()) {
+      bool stzResave = false;
+      steroidsLoaded = JsonSettingsIO::loadSettingsSteroids(*this, stzJson.c_str(), &stzResave);
+      if (steroidsLoaded && stzResave) {
+        JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON);
+        LOG_DBG("CPS", "Resaved steroids settings to update format");
+      }
+    }
+  }
+
+  // 3. One-shot migration: if steroids file doesn't exist yet but upstream
+  //    loaded OK and the old settings.json still contains steroids fields
+  //    (as it did before this split), extract them into the new file now.
+  if (!steroidsLoaded && upstreamOk && Storage.exists(SETTINGS_FILE_JSON)) {
+    LOG_DBG("CPS", "One-shot migration: extracting steroids settings from old settings.json");
+
+    // Re-read the old settings.json to pick up steroids fields that were
+    // loaded by the upstream loadSettings (which included them before the split)
+    String oldJson = Storage.readFile(SETTINGS_FILE_JSON);
+    if (!oldJson.isEmpty()) {
+      bool stzResave = false;
+      if (JsonSettingsIO::loadSettingsSteroids(*this, oldJson.c_str(), &stzResave)) {
+        // Save steroids to the new dedicated file
+        JsonSettingsIO::saveSettingsSteroids(*this, SETTINGS_STEROIDS_FILE_JSON);
+
+        // Re-save settings.json without steroids fields
+        // (saveSettings no longer writes them since the split)
+        if (JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON)) {
+          LOG_DBG("CPS", "Cleaned steroids fields from settings.json after migration");
+        } else {
+          LOG_ERR("CPS", "Failed to clean steroids fields from settings.json — will retry next boot");
+        }
+        steroidsLoaded = true;
+      }
+    }
+  }
+
+  // 4. Fall back to binary migration (unchanged upstream logic)
+  if (!upstreamOk && Storage.exists(SETTINGS_FILE_BIN)) {
     if (loadFromBinaryFile()) {
-      if (saveToFile()) {
+      if (JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON)) {
         Storage.rename(SETTINGS_FILE_BIN, SETTINGS_FILE_BAK);
         LOG_DBG("CPS", "Migrated settings.bin to settings.json");
-        return true;
+        upstreamOk = true;
       } else {
         LOG_ERR("CPS", "Failed to save migrated settings to JSON");
         return false;
@@ -138,7 +180,7 @@ bool CrossPointSettings::loadFromFile() {
     }
   }
 
-  return false;
+  return upstreamOk;
 }
 
 bool CrossPointSettings::loadFromBinaryFile() {

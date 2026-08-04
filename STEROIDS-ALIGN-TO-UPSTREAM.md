@@ -126,6 +126,52 @@ found missing in Steroids and have been restored:
   `std::stable_sort`, aligned `loadReadingStatsFromFile` to use
   `loadJsonDocumentFromFile`
 
+### 2026-08-04: Steroids Settings JSON Split
+
+**Key architectural change:** Steroids settings are now stored in a separate JSON file
+(`/.crosspoint/settings-steroids.json`) instead of being mixed into
+`/.crosspoint/settings.json`. This makes `JsonSettingsIO.cpp` save/load functions
+byte-identical to upstream, eliminating merge conflicts in the largest conflict
+zone of the codebase.
+
+**How it works:**
+- `settings.json` (~131 fields): upstream-only settings, byte-identical to upstream
+- `settings-steroids.json` (~40 fields): Steroids-only settings with `formatVersion: 1`
+- `CrossPointSettings::saveToFile()` saves to BOTH files transparently
+- `CrossPointSettings::loadFromFile()` loads upstream first, then Steroids
+- One-shot migration: on first boot after upgrade, if `settings-steroids.json` doesn't
+  exist, Steroids fields are extracted from the old unified `settings.json`, saved to
+  the new file, and `settings.json` is re-saved without them. Subsequent boots skip this.
+
+**The 40 Steroids-only fields in `settings-steroids.json`:**
+- Reader: `dotsSpacing`, `epubRenderMode`, `guideReadingEnabled`
+- Status bar: `statusBarTimeLeft`
+- Controls: `frontLongPressBehavior`, `cycleScreensaverOnTap`
+- Library: `libraryLayout`, `libraryFilter`, `librarySort`, `librarySearchText`,
+  `libraryRootDir`, `libraryUpdateMode`, `libraryLastCleanupDay`
+- Screensaver: `screenSaverDirectory`, `screenSaverOrder`, `screenSaverInterval`,
+  `screenSaverWakeButton`, `screenSaverReaderDir`, `screenSaverReaderOrder`,
+  `screenSaverText`, `screenSaverFontSize`, `screenSaverTextPosition`,
+  `screenSaverTextStyle`, `screenSaverShowPanel`, `screenSaverPanelColor`,
+  `screenSaverPanelOpacity`, `screenSaverMinBattery`, `screenSaverReplaceSleep`
+- Shortcuts: `libraryShortcut*`, `screenSaverShortcut*`, `clippingsShortcut*`,
+  `wikipediaShortcut*`
+
+**Files changed:**
+- `src/JsonSettingsIO.h`: added `saveSettingsSteroids`, `loadSettingsSteroids`
+- `src/JsonSettingsIO.cpp`: removed steroids fields from `saveSettings`/`loadSettingsDirect`,
+  added `writeSteroidsSettingsDoc`/`readSteroidsSettingsDoc` helpers,
+  added `saveSettingsSteroids`/`loadSettingsSteroids` public functions,
+  removed unreachable dead code block (~230 lines)
+- `src/CrossPointSettings.cpp`: added `SETTINGS_STEROIDS_FILE_JSON` constant,
+  wired `saveToFile()` to save both files, wired `loadFromFile()` with
+  one-shot migration logic
+
+**Migration safety:** If the Steroids file save fails during migration, the old
+`settings.json` (still containing Steroids fields) is preserved and migration
+retries on next boot. If `settings-steroids.json` is corrupted or deleted,
+Steroids settings revert to struct defaults — upstream settings are unaffected.
+
 ### Why JsonSettingsIO.cpp is critical
 
 The local Steroids `JsonSettingsIO.cpp` contains serialization for **147+ settings**
@@ -862,4 +908,4 @@ section in `STEROIDS-ADDICTIONS.md` §8A for the full design rationale.
 
 ---
 
-*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, and ReadingStatsStore full alignment audit*
+*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, ReadingStatsStore full alignment audit, and Steroids settings JSON split*

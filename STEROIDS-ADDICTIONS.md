@@ -570,10 +570,58 @@ reintroduce standalone `STEROIDS-LIBRARY.md` or `STEROIDS-APP-ICON-THEME.md`:
 | **`STEROIDS-ADDICTIONS.md`** | All Steroids apps, screensaver/sleep/deep-sleep handling, and every enhancement (this file: app catalog §2, icon/theme guide §3, Wikipedia §5, library §6, bookmarks & clippings §7). |
 | **`STEROIDS-ALIGN-TO-UPSTREAM.md`** | Instructions for merging a new upstream release into Steroids while preserving everything in this file. |
 
+## 12. Steroids Settings Storage
+
+Since 2026-08-04, Steroids-only settings are stored in a separate JSON file
+(`/.crosspoint/settings-steroids.json`) rather than being mixed into the
+upstream `/.crosspoint/settings.json`. This isolates the 40 Steroids-specific
+fields from the ~131 upstream fields, making `JsonSettingsIO.cpp` save/load
+functions byte-identical to upstream — zero merge conflicts on future upstream
+releases.
+
+### File layout
+
+| File | Contents |
+|------|----------|
+| `/.crosspoint/settings.json` | ~131 upstream CrossPoint settings (byte-identical to upstream) |
+| `/.crosspoint/settings-steroids.json` | 40 Steroids-only settings with `formatVersion: 1` |
+
+### Steroids-only fields
+
+| Category | Fields |
+|---|---|
+| **Reader/rendering** | `dotsSpacing`, `epubRenderMode`, `guideReadingEnabled` |
+| **Controls** | `frontLongPressBehavior`, `cycleScreensaverOnTap` |
+| **Status bar** | `statusBarTimeLeft` |
+| **Library** | `libraryLayout`, `libraryFilter`, `librarySort`, `librarySearchText`, `libraryRootDir`, `libraryUpdateMode`, `libraryLastCleanupDay` |
+| **Screensaver** | `screenSaverDirectory`, `screenSaverOrder`, `screenSaverInterval`, `screenSaverWakeButton`, `screenSaverReaderDir`, `screenSaverReaderOrder`, `screenSaverText`, `screenSaverFontSize`, `screenSaverTextPosition`, `screenSaverTextStyle`, `screenSaverShowPanel`, `screenSaverPanelColor`, `screenSaverPanelOpacity`, `screenSaverMinBattery`, `screenSaverReplaceSleep` |
+| **Shortcuts** | `libraryShortcut*`, `screenSaverShortcut*`, `clippingsShortcut*`, `wikipediaShortcut*` |
+
+### Migration
+
+On first boot after the upgrade, if `settings-steroids.json` doesn't exist,
+`CrossPointSettings::loadFromFile()` extracts Steroids fields from the old
+unified `settings.json`, saves them to the new file, and re-saves
+`settings.json` without them. If the migration fails, the old file is
+preserved and migration retries on next boot.
+
+### Implementation
+
+- `src/JsonSettingsIO.h`: `saveSettingsSteroids` / `loadSettingsSteroids`
+- `src/JsonSettingsIO.cpp`: `writeSteroidsSettingsDoc` / `readSteroidsSettingsDoc` helpers
+- `src/CrossPointSettings.cpp`: `SETTINGS_STEROIDS_FILE_JSON` constant, migration logic
+
+### Rollback safety
+
+If `settings-steroids.json` is corrupted or deleted, all Steroids fields revert
+to their struct-initializer defaults. Upstream settings in `settings.json` are
+completely unaffected.
+
 ---
 
-*Last updated: 2026-08-01 — CPR-vCodex Steroids. Consolidated from the former
+*Last updated: 2026-08-04 — CPR-vCodex Steroids. Consolidated from the former
 STEROIDS-CLIPPINGS-BOOKMARKS.md, STEROIDS-LIBRARY.md, STEROIDS-APP-ICON-THEME.md,
 README, and the Wikipedia feature. Two Steroids definition files exist:
 STEROIDS-ADDICTIONS.md (enhancements, this file) and
-STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge instructions).*
+STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge instructions).
+Includes §12: Steroids settings JSON split (2026-08-04).*

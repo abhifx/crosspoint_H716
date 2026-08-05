@@ -622,15 +622,23 @@ void setup() {
     I18N.loadSettings();
   }
 
-  if (BootRecovery::shouldSkipKOReader()) {
-    logSkip("Skipping KOReader credential load due to recovery mode");
+  if (BootRecovery::shouldSkipKOReader() || isSilentReboot) {
+    if (isSilentReboot) {
+      logSkip("Skipping KOReader credential load on silent reboot (profiles unchanged)");
+    } else {
+      logSkip("Skipping KOReader credential load due to recovery mode");
+    }
   } else {
     BootRecovery::enterStage(BootRecovery::BootStage::KOReader);
     KOREADER_STORE.loadFromFile();
   }
 
-  if (BootRecovery::shouldSkipOPDS()) {
-    logSkip("Skipping OPDS store load due to recovery mode");
+  if (BootRecovery::shouldSkipOPDS() || isSilentReboot) {
+    if (isSilentReboot) {
+      logSkip("Skipping OPDS store load on silent reboot (servers unchanged)");
+    } else {
+      logSkip("Skipping OPDS store load due to recovery mode");
+    }
   } else {
     BootRecovery::enterStage(BootRecovery::BootStage::OPDS);
     OPDS_STORE.loadFromFile();
@@ -714,7 +722,11 @@ void setup() {
   } else {
     BootRecovery::enterStage(BootRecovery::BootStage::ReadingStats);
     if (READING_STATS.loadFromFile()) {
-      READING_STATS.createDueAutoBackup();
+      if (!isSilentReboot) {
+        READING_STATS.createDueAutoBackup();
+      } else {
+        LOG_DBG("MAIN", "Skipping reading stats auto-backup on silent reboot");
+      }
     }
   }
 
@@ -732,8 +744,12 @@ void setup() {
     FAVORITES.loadFromFile();
   }
 
-  if (skipFlashcardsLoad) {
-    logSkip("Skipping flashcards load due to recovery mode");
+  if (skipFlashcardsLoad || isSilentReboot) {
+    if (isSilentReboot) {
+      logSkip("Skipping flashcards load on silent reboot (decks unchanged)");
+    } else {
+      logSkip("Skipping flashcards load due to recovery mode");
+    }
   } else {
     BootRecovery::enterStage(BootRecovery::BootStage::Flashcards);
     FLASHCARDS.loadFromFile();

@@ -48,6 +48,7 @@ bool LibraryActivity::forceScanOnNextOpen_ = false;
 #include "activities/apps/ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "SilentRestart.h"
 
 // Compile-time verification: the largest icon (32×32 1‑bpp) is exactly 128 B.
 static_assert(sizeof(CoverIcon) == 128, "unexpected icon size, update kMaxIconBytes");
@@ -250,6 +251,15 @@ void LibraryActivity::onExit() {
   pageTitleCache_.clear();
   pageTitleCacheKey_ = -1;
   cachedTotalBooks_ = -1;
+
+  // Silent restart to reclaim heap after potentially heavy library browsing.
+  // The Library cache, thumbnail parser, and book index can fragment the heap
+  // significantly. A full ESP.restart gives the system a clean slate before
+  // returning to Home — seamless (no popup, no white flash).
+  LOG_DBG("LIB", "onExit: requesting seamless silent restart to Home (free=%d maxA=%d)",
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  silentRestartToHome();
+  // Unreachable: ESP.restart() above resets the CPU.
 }
 
 void LibraryActivity::freeBackgroundMemory() {

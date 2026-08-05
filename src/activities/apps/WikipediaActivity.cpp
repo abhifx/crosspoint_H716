@@ -22,6 +22,7 @@
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "SilentRestart.h"
 #include "network/HttpDownloader.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/WikiTxtReaderActivity.h"
@@ -333,6 +334,15 @@ void WikipediaActivity::onExit() {
   cachedPageTitles.clear();
   freeBuffer();
   wifiOff();
+
+  // Wikipedia uses WiFi (HTTP/HTTPS client), which allocates socket buffers,
+  // TLS session data, and HTTP response chunks that fragment the heap.
+  // A silent restart reclaims this before returning to Home — seamless,
+  // no popup, no white flash.
+  LOG_DBG("WIKI", "onExit: requesting seamless silent restart to Home (free=%d maxA=%d)",
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  silentRestartToHome();
+  // Unreachable: ESP.restart() above resets the CPU.
 }
 
 void WikipediaActivity::loop() {

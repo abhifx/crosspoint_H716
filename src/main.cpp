@@ -224,6 +224,19 @@ void silentRestartToReader() {
   ESP.restart();
 }
 
+void silentRestartToHome() {
+  if (deepSleepInProgress) return;
+  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Silent restart (target=home, seamless — no popup)");
+  // Skip the "Loading..." popup for a seamless transition.
+  // The display.begin(true) in setup() will skip the white flash,
+  // and the boot activity is skipped, so the user sees a brief
+  // dark frame then Home appears — visually cleaner than the popup.
+  delay(20);
+  ESP.restart();
+}
+
 // Verify power button press duration on wake-up from deep sleep
 // Pre-condition: isWakeupByPowerButton() == true
 void verifyPowerButtonDuration() {

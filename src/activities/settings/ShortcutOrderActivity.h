@@ -12,6 +12,7 @@ class ShortcutOrderActivity final : public Activity {
       : Activity("ShortcutOrder", renderer, mappedInput), group(group) {}
 
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 

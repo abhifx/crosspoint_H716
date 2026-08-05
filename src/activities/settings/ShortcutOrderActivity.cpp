@@ -64,6 +64,13 @@ void ShortcutOrderActivity::onEnter() {
   requestUpdate();
 }
 
+void ShortcutOrderActivity::onExit() {
+  Activity::onExit();
+  // Ensure order changes are persisted even if the user exits without
+  // explicitly confirming (e.g. Back button).
+  SETTINGS.saveToFile();
+}
+
 void ShortcutOrderActivity::reloadEntries() {
   entries = getShortcutOrderEntries(group);
   if (entries.empty()) {
@@ -83,6 +90,7 @@ void ShortcutOrderActivity::moveSelectedEntry(const int delta) {
   auto& targetOrder = getShortcutOrderRef(SETTINGS, entries[targetIndex]);
   std::swap(selectedOrder, targetOrder);
   normalizeShortcutOrderSettings(SETTINGS);
+  SETTINGS.saveToFile();
 
   std::swap(entries[selectedIndex], entries[targetIndex]);
   selectedIndex = targetIndex;

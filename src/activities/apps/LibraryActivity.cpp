@@ -251,15 +251,6 @@ void LibraryActivity::onExit() {
   pageTitleCache_.clear();
   pageTitleCacheKey_ = -1;
   cachedTotalBooks_ = -1;
-
-  // Silent restart to reclaim heap after potentially heavy library browsing.
-  // The Library cache, thumbnail parser, and book index can fragment the heap
-  // significantly. A full ESP.restart gives the system a clean slate before
-  // returning to Home — seamless (no popup, no white flash).
-  LOG_DBG("LIB", "onExit: requesting seamless silent restart to Home (free=%d maxA=%d)",
-          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-  silentRestartToHome();
-  // Unreachable: ESP.restart() above resets the CPU.
 }
 
 void LibraryActivity::freeBackgroundMemory() {
@@ -749,6 +740,13 @@ void LibraryActivity::loop() {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       upHeld_ = false; downHeld_ = false;
       upLongTriggered_ = false; downLongTriggered_ = false;
+      // Silent restart to reclaim fragmented heap before returning Home.
+      // Library browsing fragments the heap significantly (cache, thumbnails,
+      // book index vectors). A full ESP.restart gives the system a clean slate.
+      LOG_DBG("LIB", "Back to Home: requesting seamless silent restart (free=%d maxA=%d)",
+              ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      silentRestartToHome();
+      // Unreachable: ESP.restart() above resets the CPU.
       onGoHome();
     }
     if (mappedInput.isPressed(MappedInputManager::Button::Up)) {
@@ -869,6 +867,10 @@ void LibraryActivity::loop() {
       upHeld_ = false; downHeld_ = false;
       upLongTriggered_ = false; downLongTriggered_ = false;
     } else {
+      LOG_DBG("LIB", "Back to Home: requesting seamless silent restart (free=%d maxA=%d)",
+              ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      silentRestartToHome();
+      // Unreachable: ESP.restart() above resets the CPU.
       onGoHome();
     }
     return;

@@ -334,15 +334,6 @@ void WikipediaActivity::onExit() {
   cachedPageTitles.clear();
   freeBuffer();
   wifiOff();
-
-  // Wikipedia uses WiFi (HTTP/HTTPS client), which allocates socket buffers,
-  // TLS session data, and HTTP response chunks that fragment the heap.
-  // A silent restart reclaims this before returning to Home — seamless,
-  // no popup, no white flash.
-  LOG_DBG("WIKI", "onExit: requesting seamless silent restart to Home (free=%d maxA=%d)",
-          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-  silentRestartToHome();
-  // Unreachable: ESP.restart() above resets the CPU.
 }
 
 void WikipediaActivity::loop() {
@@ -350,6 +341,12 @@ void WikipediaActivity::loop() {
     switch (state) {
       case State::SEARCH_INPUT:
       case State::ERROR:
+        // Wikipedia uses WiFi (HTTP/HTTPS) which fragments the heap.
+        // Clean it up before returning to Home.
+        LOG_DBG("WIKI", "Back to Home: requesting seamless silent restart (free=%d maxA=%d)",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+        silentRestartToHome();
+        // Unreachable: ESP.restart() above resets the CPU.
         finish(); break;
       case State::SEARCH_HISTORY:
       case State::CACHED_PAGES:

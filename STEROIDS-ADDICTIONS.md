@@ -574,23 +574,40 @@ reintroduce standalone `STEROIDS-LIBRARY.md` or `STEROIDS-APP-ICON-THEME.md`:
 
 Since 2026-08-04, Steroids-only settings are stored in a separate JSON file
 (`/.crosspoint/settings-steroids.json`) rather than being mixed into the
-upstream `/.crosspoint/settings.json`. This isolates the 40 Steroids-specific
-fields from the ~131 upstream fields, making `JsonSettingsIO.cpp` save/load
+upstream `/.crosspoint/settings.json`. This isolates the 37 Steroids-specific
+fields from the ~107 upstream fields, making `JsonSettingsIO.cpp` save/load
 functions byte-identical to upstream — zero merge conflicts on future upstream
 releases.
+
+The separation includes a **dedicated C++ file** (`src/JsonSettingsIOSteroids.cpp`)
+and a **shared internal helpers include** (`src/JsonSettingsIOShared.inc`) so the
+upstream `JsonSettingsIO.cpp` contains only CrossPoint upstream code. Internal
+dead code (~230 lines of unreachable generic settings loader) was removed.
 
 ### File layout
 
 | File | Contents |
 |------|----------|
-| `/.crosspoint/settings.json` | ~131 upstream CrossPoint settings (byte-identical to upstream) |
-| `/.crosspoint/settings-steroids.json` | 40 Steroids-only settings with `formatVersion: 1` |
+| `/.crosspoint/settings.json` | ~107 upstream CrossPoint settings (byte-identical to upstream) |
+| `/.crosspoint/settings-steroids.json` | 37 Steroids-only settings with `formatVersion: 1` |
+| `/.crosspoint/settings-steroids.json.bak` | **Pre-migration backup** of the original unified `settings.json`, created once during migration. Keep for manual rollback if needed. |
 
-### Steroids-only fields
+### Steroids-only fields (37 fields, 5 diverged from upstream)
 
+Fields with diverging enum values/counts/defaults from upstream:
+| Field | Divergence |
+|---|---|
+| `uiTheme` | Steroids adds `LYRA_MARCOAND75=3` |
+| `fontFamily` | Steroids adds `LEXEND=2` |
+| `longPressButtonBehavior` | Steroids adds `BOOKMARK=1`, `CLIPPING=2`, `FONTSIZE=5` |
+| `clockFormat` | Aligned to upstream convention: `0=24h, 1=12h` |
+| `displayDay` | Default changed from `1` (DATE_ONLY) to `2` (TIME_ONLY) |
+
+All other fields are unique to Steroids (not present in upstream at all):
 | Category | Fields |
 |---|---|
-| **Reader/rendering** | `dotsSpacing`, `epubRenderMode`, `guideReadingEnabled` |
+| **Display/Theme** | `darkMode`, `antiGhostingExperimental`, `displayDay`, `clockFormat` |
+| **Font/Rendering** | `guideReadingEnabled`, `dotsSpacing`, `epubRenderMode` |
 | **Controls** | `frontLongPressBehavior`, `cycleScreensaverOnTap` |
 | **Status bar** | `statusBarTimeLeft` |
 | **Library** | `libraryLayout`, `libraryFilter`, `librarySort`, `librarySearchText`, `libraryRootDir`, `libraryUpdateMode`, `libraryLastCleanupDay` |
@@ -601,27 +618,67 @@ releases.
 
 On first boot after the upgrade, if `settings-steroids.json` doesn't exist,
 `CrossPointSettings::loadFromFile()` extracts Steroids fields from the old
-unified `settings.json`, saves them to the new file, and re-saves
-`settings.json` without them. If the migration fails, the old file is
-preserved and migration retries on next boot.
+unified `settings.json`, saves them to the new file, creates a **pre-migration
+backup** at `/.crosspoint/settings-steroids.json.bak`, and re-saves
+`settings.json` without Steroids fields. If the migration fails at any point,
+the old file is preserved and migration retries on next boot.
 
-### Implementation
+### Code architecture
 
-- `src/JsonSettingsIO.h`: `saveSettingsSteroids` / `loadSettingsSteroids`
-- `src/JsonSettingsIO.cpp`: `writeSteroidsSettingsDoc` / `readSteroidsSettingsDoc` helpers
-- `src/CrossPointSettings.cpp`: `SETTINGS_STEROIDS_FILE_JSON` constant, migration logic
+- `src/JsonSettingsIO.h` / `.cpp`: upstream-only, byte-identical to upstream
+- `src/JsonSettingsIOSteroids.h` / `.cpp`: Steroids-only serialization
+- `src/JsonSettingsIOShared.inc`: shared internal helpers (`saveJsonDocumentToFile`, `migrateStoredUiTheme`, etc.)
+- `src/CrossPointSettings.cpp`: unified facade (`saveToFile` saves both, `loadFromFile` loads both with migration)
+
+### Web interface
+
+Three web pages with clean separation:
+- `/settings` — upstream-only device settings (~50 fields from WEB_SETTINGS)
+- `/app-settings` — upstream app settings (SyncDay, Reading Stats, Achievements, Flashcards, Shortcuts, KOReader, Status Bar)
+- `/steroids-settings` — all 37 Steroids fields via dedicated `/api/steroids-settings` endpoints
 
 ### Rollback safety
 
 If `settings-steroids.json` is corrupted or deleted, all Steroids fields revert
 to their struct-initializer defaults. Upstream settings in `settings.json` are
-completely unaffected.
+completely unaffected. The pre-migration backup at `/.crosspoint/settings-steroids.json.bak`
+provides a manual recovery path to the original unified settings file.
+
+### Shortcut order persistence
+
+Shortcut order changes made in Home (Lyra MarcoAnd75 / Lyra Carousel) are
+immediately persisted via `SETTINGS.saveToFile()`. Normalization occurs after
+**both** JSON files are loaded, ensuring the 4 Steroids shortcuts (Library,
+Screensaver, Clippings, Wikipedia) don't perturb the upstream shortcut ordering.
 
 ---
 
-*Last updated: 2026-08-04 — CPR-vCodex Steroids. Consolidated from the former
-STEROIDS-CLIPPINGS-BOOKMARKS.md, STEROIDS-LIBRARY.md, STEROIDS-APP-ICON-THEME.md,
-README, and the Wikipedia feature. Two Steroids definition files exist:
-STEROIDS-ADDICTIONS.md (enhancements, this file) and
-STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge instructions).
-Includes §12: Steroids settings JSON split (2026-08-04).*
+## 13. Silent Restart (Heap Reclamation)
+
+When returning to Home from memory-intensive activities, a **silent restart**
+(`ESP.restart()` via RTC_NOINIT magic) gives the system a clean heap slate.
+The reboot is visually seamless: no "Loading..." popup, no white flash
+(`display.begin(true)` skips the panel reset), and the Boot activity is skipped.
+
+**Activities that trigger silent restart on Back-to-Home:**
+- `LibraryActivity` — library cache, thumbnail parser, book index vectors
+- `WikipediaActivity` — WiFi socket buffers, TLS session, HTTP response chunks
+
+**Silent reboot boot optimizations (saving ~1088ms):**
+- KOReader credential profiles skipped (unchanged mid-session)
+- ReadingStats auto-backup skipped (already current)
+- OPDS server list skipped (unchanged mid-session)
+- Flashcard decks skipped (unchanged mid-session)
+
+**Heap improvement:** `maxAlloc` rises from ~70 KB (cold boot with heavy activity)
+to ~105 KB after silent restart, providing significantly more headroom for rendering
+and UI operations. This directly reduces OOM risks in the status bar time-left
+estimate, page rendering, and web server heap pressure.
+
+---
+
+*Last updated: 2026-08-05 — CPR-vCodex Steroids. Includes §12 Steroids Settings
+Storage (v2: C++ file separation, web UI split, pre-migration backup, shortcut
+order fix, sdFontFamilyName recovery, 19 WEB_SETTINGS dedup) and §13 Silent
+Restart (heap reclamation, boot optimizations). Two Steroids definition files:
+STEROIDS-ADDICTIONS.md (enhancements) and STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge).*

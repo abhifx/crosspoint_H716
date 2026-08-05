@@ -52,10 +52,18 @@ On top of that, Steroids adds a substantial set of original features developed a
 >   Default/Balanced/Light rendering with isolated caches.
 > - **🕹️ Configurable long-press** — side and front buttons for bookmark/
 >   clipping/chapter/orientation/font actions.
-> - **🌐 Web portal & OTA** — split device/app settings, dynamic fonts, Steroids
+> - **🌐 Web portal & OTA** — split device/app/steroids settings, dynamic fonts, Steroids
 >   branding, fork OTA manifest.
 > - **⚙️ System & i18n** — on-device STRING settings, clock/DS3231 X3 support,
 >   Italian translation overhaul, safety/memory optimizations.
+> - **🧹 Settings JSON split** — 37 Steroids-only settings in dedicated
+>   `settings-steroids.json`, leaving upstream `settings.json` byte-identical
+>   (zero merge conflicts). Dedicated `JsonSettingsIOSteroids.cpp` code file.
+> - **🔄 Silent restart** — seamless `ESP.restart()` on Back-to-Home from
+>   Library/Wikipedia reclaims fragmented heap; `maxAlloc` rises from ~70 KB
+>   to ~105 KB. Boot skips 4 stages (~1088ms saved) on silent reboot.
+> - **💾 Pre-migration backup** — original unified `settings.json` backed up
+>   to `/.crosspoint/settings-steroids.json.bak` before one-shot migration.
 
 ---
 
@@ -389,7 +397,9 @@ Long-press on both side and front buttons can now be configured for quick bookma
 | **Reader Menu Icons Fixed** | 🎯 UI | All 32×32 menu icons replaced with proper 24×24 versions; 4 blank icons regenerated from SVGs (QR, percent, screenshot, delete cache); 2 new clipping icons |
 | **Screensaver Font Sizes** | 🛡️ Screensaver | X-Small and X-Large font sizes added using Bookerly for the reading dashboard overlay |
 | **OTA Fix** | ⚙️ System | OTA update detection fixed for newer dev builds; manifest updated for fork release assets |
-| **Web Portal** | 🌐 Web | Unified navigation with split device/app settings, dynamic fonts, white logo, Steroids branding |
+| **Web Portal** | 🌐 Web | Unified navigation with split device/app/steroids settings, dynamic fonts, white logo, Steroids branding |
+| **Steroids Settings JSON Split** | 🧹 Settings | 37 Steroids-only settings in dedicated `settings-steroids.json` + `JsonSettingsIOSteroids.cpp`; upstream `JsonSettingsIO.cpp` byte-identical (zero merge conflicts); pre-migration backup at `settings-steroids.json.bak` |
+| **Silent Restart** | 🔄 Heap | Seamless `ESP.restart()` on Back-to-Home from Library/Wikipedia; maxAlloc ~70KB → ~105KB; boot skips 4 stages (~1088ms saved); no popup, no white flash |
 | **Wikipedia App** | 📖 Apps | Search Wikipedia, summary preview, and full-article reading — wikitext downloaded to a markdown cache (`.wiki`) for offline reading; dedicated `WikiTxtReaderActivity` |
 | **Per-Language Wikipedia** | 📖 Apps | Request base URL follows the selected UI language (`it`, `fr`, `de`, `sl`, …) instead of a hardcoded `it.wikipedia.org` |
 | **Clippings Preview Panel** | ✂️ Reading | Single press on a clipping opens a readable preview (chapter, page, full text); Select again jumps to the book — lets you read a highlight without leaving your place |
@@ -413,7 +423,7 @@ The development and feature discussion for CPR-vCodex Steroids takes place in th
 | Project | `CPR-vCodex Steroids` |
 | Device | `Xteink X4`; `Xteink X3` compatibility reported by users, not personally tested |
 | Current upstream base | [`1.5.0.5-cpr-vcodex`](https://github.com/franssjz/cpr-vcodex/releases/tag/1.5.0.5-cpr-vcodex) |
-| Current Steroids build | Synced with upstream `1.5.0.5` + Steroids features: e-book library, Wikipedia app (per-language), clippings preview, bookmarks v4, guide dots, library, carousel, web portal, screensaver (random shuffle, safe wake), configurable long-press, EPUB render modes, reworked 2-bit grayscale image pipeline, OTA fixes, time/clock X3 support, EndOfBook options |
+| Current Steroids build | Synced with upstream `1.5.0.5` + Steroids features: e-book library, Wikipedia app (per-language), clippings preview, bookmarks v4, guide dots, library, carousel, web portal (3 settings pages), screensaver (random shuffle, safe wake), configurable long-press, EPUB render modes, reworked 2-bit grayscale image pipeline, OTA fixes, time/clock X3 support, EndOfBook options, silent restart (heap reclamation), settings JSON split (37 fields, zero merge conflicts) |
 | Latest SD font package | [`sd-fonts-m1-b4`](https://github.com/franssjz/cpr-vcodex/releases/tag/sd-fonts-m1-b4) |
 | Changelog | [CHANGELOG.md](./CHANGELOG.md) |
 | GitHub Releases | [Releases page](https://github.com/marcoand75/cpr-vcodex-steroids/releases) |

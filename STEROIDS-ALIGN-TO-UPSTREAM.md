@@ -195,33 +195,65 @@ that read/write `settings-steroids.json` directly.
 retries on next boot. If `settings-steroids.json` is corrupted or deleted,
 Steroids settings revert to struct defaults — upstream settings are unaffected.
 
-### Why JsonSettingsIO.cpp is critical
+### Why JsonSettingsIO.cpp is NO LONGER critical (v2 split)
 
-The local Steroids `JsonSettingsIO.cpp` contains serialization for **147+ settings**
-that upstream doesn't have. The upstream version was built for a different feature set
-and will silently drop all Steroids settings when it writes JSON. If you accidentally
-take upstream's `JsonSettingsIO.cpp`:
-- Shortcuts (clippings, library, screensaver) stop saving/loading
-- Screensaver settings (text, font, position, panel color, opacity, interval) stop working
-- Library settings (layout, filter, sort, root dir) stop working
-- Front long press behavior (bookmark/clipping, chapter skip, orientation, font size) stops working
-- Guide dots, Bionic Reading, EPUB render modes stop saving
+As of the 2026-08-04 settings split, `JsonSettingsIO.cpp` is **byte-identical to
+upstream**. All 37 Steroids-only fields are now serialized in
+`src/JsonSettingsIOSteroids.cpp` which upstream never touches. This means:
 
-### Why CrossPointWebServer.cpp is critical
+- **Zero merge conflicts** in `JsonSettingsIO.cpp` on any future upstream release
+- The only conflict zone is `CrossPointSettings.h` (the POD struct — ~20 lines)
+- `JsonSettingsIOShared.inc` contains shared internal helpers used by both files
 
-The local Steroids `CrossPointWebServer.cpp` has the `/app-settings` route and
-the `handleAppSettingsPage()` method. Upstream deleted the separate App Settings
-page and merged everything into `/settings`. Taking upstream's web server removes:
-- The App Settings browser editor
-- The logo.png endpoint
-- The `AppSettingsPageHtml.generated.h` include
+If you accidentally take upstream's `JsonSettingsIO.cpp`, **no data is lost**
+because steroids fields are in their own file. The result would be a build
+failure from the missing steroids file includes, which is immediately obvious.
 
-### HTML nav links: App Settings must be added back
+### Why CrossPointWebServer.cpp is important (but simpler to merge)
 
-Upstream merged App Settings into the main Settings page, so their HTML
-does NOT have an "App Settings" nav link. After any merge where you take
-upstream HTML, you MUST add `<a href="/app-settings">App Settings</a>`
-to all 5 HTML pages in the nav-links section.
+The local Steroids `CrossPointWebServer.cpp` adds:
+- `/steroids-settings` route and handler (16 lines registration + ~400 lines handlers)
+- `/api/steroids-settings` GET/POST endpoints
+- `SteroidsSettingsPageHtml.generated.h` include
+- Some steroids-only settings removed from `WEB_SETTINGS[]` (clean separation)
+
+The actual merge is simpler now because steroids fields are no longer in
+`WEB_SETTINGS[]`. The upstream `WEB_SETTINGS[]` contains only upstream fields.
+If upstream adds new WEB_SETTINGS entries, they merge cleanly.
+
+### HTML nav links: Steroids must be added back
+
+Upstream does NOT have a "Steroids" nav link. After any merge where you take
+upstream HTML, you MUST add `<a href="/steroids-settings">Steroids</a>`
+to all 6 HTML pages in the nav-links section (Home, Files, Settings, App
+Settings, Fonts, IfFound).
+
+### Pre-migration backup location
+
+The one-shot settings migration creates a backup of the original unified
+`settings.json` at:
+```
+/.crosspoint/settings-steroids.json.bak
+```
+This file is created **once** during the first boot after upgrade. It is
+never overwritten. Keep it on the SD card for manual rollback if the
+migration had issues. It is safe to delete after confirming everything works.
+
+### Silent restart mechanism
+
+When returning to Home from Library or Wikipedia, the system uses
+`silentRestartToHome()` — a `ESP.restart()` variant that skips the
+"Loading..." popup and the panel white flash. The boot sequence skips
+KOReader, Flashcard, OPDS loads and ReadingStats backup (~1088ms saved).
+This provides a clean heap on return to Home with `maxAlloc` rising from
+~70 KB to ~105 KB.
+
+The `SilentRestart.h` API:
+```cpp
+void silentRestart();          // Home, with "Loading..." popup (WiFi exit)
+void silentRestartToReader();  // Currently-open EPUB (WiFi exit)
+void silentRestartToHome();    // Home, seamless — no popup (Library/Wikipedia exit)
+```
 
 ---
 
@@ -931,4 +963,4 @@ section in `STEROIDS-ADDICTIONS.md` §8A for the full design rationale.
 
 ---
 
-*Last updated: 2026-08-04 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, ReadingStatsStore full alignment audit, Steroids settings JSON split (v2 with C++ file separation), and web UI steroids page*
+*Last updated: 2026-08-05 — based on 1.5.0.3 → 1.5.0.5 merge, plus power button fix, grayscale pipeline divergence, ReadingStatsStore full alignment audit, Steroids settings JSON split (v2 with C++ file separation), web UI steroids page, shortcut order persistence fix, silent restart mechanism, and pre-migration backup at /.crosspoint/settings-steroids.json.bak*

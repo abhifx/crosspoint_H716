@@ -10,6 +10,7 @@
 #include <string>
 
 #include "fontIds.h"
+#include "util/ShortcutRegistry.h"
 
 // Initialize the static instance
 CrossPointSettings CrossPointSettings::instance;
@@ -208,6 +209,14 @@ bool CrossPointSettings::loadFromFile() {
         return false;
       }
     }
+  }
+
+  // Normalize shortcut orders AFTER both upstream and steroids files are loaded.
+  // Calling it in loadSettingsDirect (upstream only) would normalize against
+  // steroids default values, then steroids load overwrites them, leaving
+  // upstream orders with gaps. This is called here once everything is in memory.
+  if (upstreamOk) {
+    normalizeShortcutOrderSettings(*this);
   }
 
   return upstreamOk;

@@ -359,7 +359,6 @@ bool loadSettingsDirect(CrossPointSettings& s, const JsonDocument& doc, bool* ne
                                        static_cast<uint8_t>(2), s.opdsBrowserShortcutVisible);
 
   migrateLegacyStatsShortcut(s, doc, needsResave);
-  normalizeShortcutOrderSettings(s);
   CrossPointSettings::validateFrontButtonMapping(s);
 
   LOG_DBG("CPS", "Settings loaded from file");

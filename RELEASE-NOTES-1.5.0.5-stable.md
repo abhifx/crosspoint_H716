@@ -101,6 +101,65 @@ now prevented.
 - **Home carousel** deduplicates hash computation, saving ~159ms on the first
   render after boot.
 
+### 🛡️ Out-of-Memory Protection (Comprehensive Safeguards)
+
+This release adds **layered memory safety** across every subsystem where low
+RAM could previously cause a crash. Instead of crashing, the device now degrades
+gracefully — skipping an operation, falling back to simpler rendering, or
+displaying a warning instead of aborting.
+
+**What happens when memory runs low:**
+
+- 🖼️ **Covers & thumbnails** — if there isn't enough RAM to decode a cover image
+  (EPUB, JPEG, PNG), the cover is simply skipped. No crash, no black screen.
+  On the next visit, when enough memory is available, the cover will be generated.
+  Simple quantization is used as a fallback when the ditherer can't be allocated.
+
+- 📖 **Book indexing** — when parsing a chapter and memory gets tight, the parser
+  stops building the current chapter and shows a "low memory" warning. You can
+  still read the book — just that chapter will use simpler formatting. On reopening
+  the book with more free memory, the full chapter cache will be rebuilt.
+
+- 📊 **Status bar time-left estimate** — if memory is too tight for the calculation,
+  the estimate is simply hidden for that screen refresh. No crash, no freeze.
+
+- 🎨 **Grayscale images in books** — when memory can't hold the temporary grayscale
+  buffers, the image renders in black-and-white only for that page. The next page
+  will retry grayscale normally.
+
+- 📚 **Library cover generation** — covers are only generated when at least 32 KB
+  of contiguous memory is available. If memory is tight, covers are skipped for
+  that session and picked up later.
+
+- 🔤 **SD card fonts** — every font loading step (kern tables, ligatures, glyph
+  bitmaps, unicode intervals) uses safe allocation. If any step fails, the font
+  simply doesn't load — the device falls back to built-in fonts.
+
+- 🌐 **WiFi & network** — before any network operation (Wikipedia, KOReader Sync,
+  web server, OTA updates), unused memory from fonts and reading stats is released
+  and the heap is checked. If there still isn't enough contiguous memory for a TLS
+  handshake (36 KB), the operation shows a clear error message instead of crashing.
+
+- 📖 **Dictionary lookups** — if memory is low, the definition text is progressively
+  halved until it fits. If even a minimal definition won't fit, the word is simply
+  not looked up — no crash.
+
+- 📝 **Flashcard decks** — if memory is below the safe threshold (48 KB free),
+  deck loading is skipped entirely for that session. Reload on next open.
+
+- 🖥️ **Screensaver** — if the grayscale rendering pass can't allocate its buffer
+  (10 KB), the screensaver renders in black-and-white instead. Visual quality drops
+  slightly, but the device keeps running.
+
+**Over 100 `reserve()` calls** across the entire codebase pre-allocate vector
+capacity during loading, preventing the incremental growth that causes heap
+fragmentation over time. Together with the silent restart, this means the device
+stays responsive far longer between reboots.
+
+**59 allocation sites** use `new (std::nothrow)` — safe allocation that returns
+`nullptr` instead of crashing when memory is exhausted. The surrounding code
+handles the `nullptr` gracefully with documented fallback paths.
+
 ---
 
 ## ⚠️ Important: First Boot & Settings Backup

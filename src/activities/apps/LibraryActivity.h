@@ -70,6 +70,10 @@ class LibraryActivity final : public Activity {
   bool upLongTriggered_ = false;
   bool downHeld_ = false;
   bool downLongTriggered_ = false;
+  bool leftHeld_ = false;
+  bool leftLongTriggered_ = false;
+  bool rightHeld_ = false;
+  bool rightLongTriggered_ = false;
   int popupSpawnButton_ = -1;
   static constexpr unsigned long kLongPressMs = 800;
 

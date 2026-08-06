@@ -637,25 +637,29 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
   Atkinson1BitDitherer* atkinson1BitDitherer = nullptr;
 
   if (oneBit) {
-    atkinson1BitDitherer = new (std::nothrow) Atkinson1BitDitherer(outWidth);
-    if (atkinson1BitDitherer && !atkinson1BitDitherer->valid()) {
-      delete atkinson1BitDitherer;
-      atkinson1BitDitherer = nullptr;
+    if (g_imageRenderDitheringEnabled) {
+      atkinson1BitDitherer = new (std::nothrow) Atkinson1BitDitherer(outWidth);
+      if (atkinson1BitDitherer && !atkinson1BitDitherer->valid()) {
+        delete atkinson1BitDitherer;
+        atkinson1BitDitherer = nullptr;
+      }
     }
   } else if (!USE_8BIT_OUTPUT) {
-    if (USE_ATKINSON) {
+    if (g_imageRenderDitheringEnabled) {
+      if (g_imageRenderUseAtkinson) {
       atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
       if (atkinsonDitherer && !atkinsonDitherer->valid()) {
         delete atkinsonDitherer;
         atkinsonDitherer = nullptr;
       }
-    } else if (USE_FLOYD_STEINBERG) {
+    } else {
       fsDitherer = new (std::nothrow) FloydSteinbergDitherer(outWidth);
       if (fsDitherer && !fsDitherer->valid()) {
         delete fsDitherer;
         fsDitherer = nullptr;
       }
     }
+    }  // g_imageRenderDitheringEnabled
   }
 
   // Scaling accumulators

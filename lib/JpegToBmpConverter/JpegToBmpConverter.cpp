@@ -755,16 +755,19 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
           ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   if (oneBit) {
-    ctx.atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
-    if (ctx.atkinson1BitDitherer && !ctx.atkinson1BitDitherer->valid()) {
-      ctx.atkinson1BitDitherer.reset();
-    }
-    if (!ctx.atkinson1BitDitherer) {
-      // OOM: fall back to hash 1-bit quantization for this image (no ditherer).
-      LOG_ERR("JPG", "OOM: Atkinson1BitDitherer — 1-bit quantization fallback");
+    if (g_imageRenderDitheringEnabled) {
+      ctx.atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
+      if (ctx.atkinson1BitDitherer && !ctx.atkinson1BitDitherer->valid()) {
+        ctx.atkinson1BitDitherer.reset();
+      }
+      if (!ctx.atkinson1BitDitherer) {
+        // OOM: fall back to hash 1-bit quantization for this image (no ditherer).
+        LOG_ERR("JPG", "OOM: Atkinson1BitDitherer — 1-bit quantization fallback");
+      }
     }
   } else if (!USE_8BIT_OUTPUT) {
-    if (USE_ATKINSON) {
+    if (g_imageRenderDitheringEnabled) {
+      if (g_imageRenderUseAtkinson) {
       ctx.atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
       if (ctx.atkinsonDitherer && !ctx.atkinsonDitherer->valid()) {
         ctx.atkinsonDitherer.reset();
@@ -773,7 +776,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
         // OOM: fall back to simple 2-bit quantization for this image (no ditherer).
         LOG_ERR("JPG", "OOM: AtkinsonDitherer — simple-2bit quantization fallback");
       }
-    } else if (USE_FLOYD_STEINBERG) {
+    } else {
       ctx.fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth);
       if (ctx.fsDitherer && !ctx.fsDitherer->valid()) {
         ctx.fsDitherer.reset();
@@ -782,7 +785,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
         // OOM: fall back to simple 2-bit quantization for this image (no ditherer).
         LOG_ERR("JPG", "OOM: FloydSteinbergDitherer — simple-2bit quantization fallback");
       }
-    }
+      }  // g_imageRenderUseAtkinson / Floyd
+    }  // g_imageRenderDitheringEnabled
     LOG_DBG("HCR-FRAG", "Jpeg ditherers done: free=%u maxA=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   }
 

@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <BitmapHelpers.h>
 #include <DitheringConfig.h>
+#include <ImageRenderConfig.h>
 #include <HalDisplay.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
@@ -613,6 +614,7 @@ void setup() {
   } else {
     BootRecovery::enterStage(BootRecovery::BootStage::Settings);
     SETTINGS.loadFromFile();
+    imageRenderConfigApplySettings();  // Apply image-rendering params from loaded settings
   }
 
   if (BootRecovery::shouldSkipLanguage()) {

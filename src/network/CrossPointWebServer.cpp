@@ -17,6 +17,7 @@
 #include "AchievementsStore.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
+#include <ImageRenderConfig.h>
 #include "KOReaderCredentialStore.h"
 #include "OpdsServerStore.h"
 #include "ReadingStatsStore.h"
@@ -249,6 +250,7 @@ constexpr StrId OPT_SLEEP_FILTER[] = {StrId::STR_NONE_OPT, StrId::STR_FILTER_CON
 constexpr StrId OPT_HIDE_BATTERY[] = {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS};
 constexpr StrId OPT_REFRESH_FREQ[] = {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                                       StrId::STR_PAGES_30};
+constexpr StrId OPT_DITHER_ALGORITHM[] = {StrId::STR_IMAGE_DITHER_ATKINSON, StrId::STR_IMAGE_DITHER_FLOYD};
 constexpr StrId OPT_UI_THEME[] = {StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_CUSTOM, StrId::STR_THEME_LYRA_CAROUSEL,
                                    StrId::STR_THEME_LYRA_MARCOAND75};
 constexpr StrId OPT_FONT_SIZE[] = {StrId::STR_X_SMALL, StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE,
@@ -380,6 +382,18 @@ constexpr WebSettingDef WEB_SETTINGS[] = {
     WEB_ENUM(StrId::STR_HOME_BOOK_SOURCE, homeBookSource, OPT_HOME_BOOK_SOURCE, "homeBookSource",
              StrId::STR_CAT_DISPLAY),
     WEB_TOGGLE(StrId::STR_SUNLIGHT_FADING_FIX, fadingFix, "fadingFix", StrId::STR_CAT_DISPLAY),
+    // Image rendering tuning (steroids)
+    WEB_TOGGLE(StrId::STR_IMAGE_DITHERING, imageDitheringEnabled, "imageDitheringEnabled", StrId::STR_CAT_DISPLAY),
+    WEB_TOGGLE(StrId::STR_IMAGE_LUT, imageLutEnabled, "imageLutEnabled", StrId::STR_CAT_DISPLAY),
+    WEB_ENUM(StrId::STR_IMAGE_DITHER_ALGORITHM, imageDitheringAlgorithm, OPT_DITHER_ALGORITHM,
+             "imageDitheringAlgorithm", StrId::STR_CAT_DISPLAY),
+    WEB_VALUE(StrId::STR_IMAGE_THRESHOLD_BLACK, imageThresholdBlack, 1, 253, 1, "imageThresholdBlack",
+              StrId::STR_CAT_DISPLAY),
+    WEB_VALUE(StrId::STR_IMAGE_THRESHOLD_DARK, imageThresholdDark, 2, 254, 1, "imageThresholdDark",
+              StrId::STR_CAT_DISPLAY),
+    WEB_VALUE(StrId::STR_IMAGE_THRESHOLD_LIGHT, imageThresholdLight, 3, 255, 1, "imageThresholdLight",
+              StrId::STR_CAT_DISPLAY),
+    WEB_VALUE(StrId::STR_IMAGE_GAMMA, imageGamma, 5, 30, 1, "imageGamma", StrId::STR_CAT_DISPLAY),
 
     WEB_DYNAMIC_STRING(StrId::STR_FONT_INSTALLED, WebDynamicSetting::SdFontFamily, "sdFontFamily", StrId::STR_CAT_READER),
     WEB_ENUM(StrId::STR_FONT_SIZE, fontSize, OPT_FONT_SIZE, "fontSize", StrId::STR_CAT_READER),
@@ -2180,6 +2194,70 @@ void CrossPointWebServer::handleGetSteroidsSettings() const {
     obj["value"] = s.displayDay;
   }
 
+  // Image Rendering Tuning (steroids)
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageDitheringEnabled";
+    obj["name"] = "Image Dithering";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "toggle";
+    obj["value"] = s.imageDitheringEnabled;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageLutEnabled";
+    obj["name"] = "Gamma LUT";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "toggle";
+    obj["value"] = s.imageLutEnabled;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageDitheringAlgorithm";
+    obj["name"] = "Dither Algorithm";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "enum";
+    JsonArray opts = obj["options"].to<JsonArray>();
+    opts.add("Atkinson"); opts.add("Floyd-Steinberg");
+    obj["value"] = s.imageDitheringAlgorithm;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageThresholdBlack";
+    obj["name"] = "Black Threshold";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "value";
+    obj["min"] = 1; obj["max"] = 253; obj["step"] = 1;
+    obj["value"] = s.imageThresholdBlack;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageThresholdDark";
+    obj["name"] = "Dark Gray Threshold";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "value";
+    obj["min"] = 2; obj["max"] = 254; obj["step"] = 1;
+    obj["value"] = s.imageThresholdDark;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageThresholdLight";
+    obj["name"] = "Light Gray Threshold";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "value";
+    obj["min"] = 3; obj["max"] = 255; obj["step"] = 1;
+    obj["value"] = s.imageThresholdLight;
+  }
+  {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["key"] = "imageGamma";
+    obj["name"] = "Gamma Value (x10)";
+    obj["category"] = "Display & Theme";
+    obj["type"] = "value";
+    obj["min"] = 5; obj["max"] = 30; obj["step"] = 1;
+    obj["value"] = s.imageGamma;
+  }
+
   // Font & Rendering
   {
     JsonObject obj = arr.add<JsonObject>();
@@ -2579,6 +2657,14 @@ void CrossPointWebServer::handlePostSteroidsSettings() {
   applyEnum("dotsSpacing", s.dotsSpacing, CrossPointSettings::DOTS_SPACING_COUNT);
   applyEnum("epubRenderMode", s.epubRenderMode, CrossPointSettings::EPUB_RENDER_MODE_COUNT);
   applyToggle("antiGhostingExperimental", s.antiGhostingExperimental);
+  // Image rendering tuning (steroids)
+  applyToggle("imageDitheringEnabled", s.imageDitheringEnabled);
+  applyToggle("imageLutEnabled", s.imageLutEnabled);
+  applyEnum("imageDitheringAlgorithm", s.imageDitheringAlgorithm, static_cast<uint8_t>(2));
+  applyValue("imageThresholdBlack", s.imageThresholdBlack, 1, 253);
+  applyValue("imageThresholdDark", s.imageThresholdDark, 2, 254);
+  applyValue("imageThresholdLight", s.imageThresholdLight, 3, 255);
+  applyValue("imageGamma", s.imageGamma, 5, 30);
   applyEnum("longPressButtonBehavior", s.longPressButtonBehavior, CrossPointSettings::LONG_PRESS_BUTTON_BEHAVIOR_COUNT);
   applyEnum("frontLongPressBehavior", s.frontLongPressBehavior, CrossPointSettings::FRONT_LONG_PRESS_BEHAVIOR_COUNT);
   applyToggle("cycleScreensaverOnTap", s.cycleScreensaverOnTap);
@@ -2618,6 +2704,7 @@ void CrossPointWebServer::handlePostSteroidsSettings() {
   applyToggle("wikipediaShortcutVisible", s.wikipediaShortcutVisible);
 
   SETTINGS.saveToFile();
+  imageRenderConfigApplySettings();
   LOG_DBG("WEB", "Applied %d steroids setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " steroid setting(s)");
 }

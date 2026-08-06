@@ -209,6 +209,13 @@ class SettingsActivity final : public Activity {
   void toggleCurrentSetting();
   void buildSettingsLists();
 
+  // Value editing mode (fast up/down for numeric settings)
+  bool valueEditingMode = false;
+  uint8_t valueEditOriginal = 0;
+  void enterValueEditMode(const SettingInfo& setting);
+  void exitValueEditMode(bool confirmed);
+  void adjustValueEdit(int delta);
+
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("Settings", renderer, mappedInput) {}

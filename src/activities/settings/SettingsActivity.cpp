@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalTiltSensor.h>
+#include <ImageRenderConfig.h>
 #include <Logging.h>
 #include <Utf8.h>
 #include <WiFi.h>
@@ -90,6 +91,15 @@ const std::vector<SettingInfo>& getDeviceDisplaySettings() {
       SettingInfo::Toggle(StrId::STR_ANTI_GHOSTING_EXPERIMENTAL, &CrossPointSettings::antiGhostingExperimental),
       SettingInfo::Toggle(StrId::STR_DARK_MODE, &CrossPointSettings::darkMode),
       SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix),
+      // Image rendering tuning (steroids)
+      SettingInfo::Toggle(StrId::STR_IMAGE_DITHERING, &CrossPointSettings::imageDitheringEnabled),
+      SettingInfo::Toggle(StrId::STR_IMAGE_LUT, &CrossPointSettings::imageLutEnabled),
+      SettingInfo::Enum(StrId::STR_IMAGE_DITHER_ALGORITHM, &CrossPointSettings::imageDitheringAlgorithm,
+                        {StrId::STR_IMAGE_DITHER_ATKINSON, StrId::STR_IMAGE_DITHER_FLOYD}),
+      SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_BLACK, &CrossPointSettings::imageThresholdBlack, {1, 253, 1}),
+      SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_DARK, &CrossPointSettings::imageThresholdDark, {2, 254, 1}),
+      SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_LIGHT, &CrossPointSettings::imageThresholdLight, {3, 255, 1}),
+      SettingInfo::Value(StrId::STR_IMAGE_GAMMA, &CrossPointSettings::imageGamma, {5, 30, 1}),
   };
   return settings;
 }
@@ -399,7 +409,24 @@ std::string getSettingValueText(const SettingInfo& setting) {
     return I18N.get(setting.enumValues[safeIndex]);
   }
   if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    return std::to_string(SETTINGS.*(setting.valuePtr));
+    const uint8_t value = SETTINGS.*(setting.valuePtr);
+    uint8_t defaultVal = 0;
+    bool hasDefault = false;
+    if (setting.valuePtr == &CrossPointSettings::imageThresholdBlack) {
+      defaultVal = 50; hasDefault = true;
+    } else if (setting.valuePtr == &CrossPointSettings::imageThresholdDark) {
+      defaultVal = 120; hasDefault = true;
+    } else if (setting.valuePtr == &CrossPointSettings::imageThresholdLight) {
+      defaultVal = 200; hasDefault = true;
+    } else if (setting.valuePtr == &CrossPointSettings::imageGamma) {
+      defaultVal = 15; hasDefault = true;
+    }
+    if (hasDefault) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%u  (%s: %u)", value, tr(STR_DEFAULT_VALUE), defaultVal);
+      return std::string(buf);
+    }
+    return std::to_string(value);
   }
   if (setting.type == SettingType::ACTION && setting.action == SettingAction::TimeZone) {
     return TimeUtils::getCurrentTimeZoneLabel();
@@ -582,6 +609,28 @@ void SettingsActivity::showTransientPopup(const char* message, const int progres
 void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
+  // ── Value editing mode: up/down adjusts the value, Select/Back exits ──
+  if (valueEditingMode) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      exitValueEditMode(true);
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      exitValueEditMode(false);
+      requestUpdate();
+      return;
+    }
+    // Up short = +step, Up long = +5*step
+    buttonNavigator.onNextRelease([this] { adjustValueEdit(+1); });
+    buttonNavigator.onNextContinuous([this] { adjustValueEdit(+5); });
+    // Down short = -step, Down long = -5*step
+    buttonNavigator.onPreviousRelease([this] { adjustValueEdit(-1); });
+    buttonNavigator.onPreviousContinuous([this] { adjustValueEdit(-5); });
+    return;
+  }
+
+  // ── Normal navigation mode ──
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     if (selectedSettingIndex == 0) {
       selectedCategoryIndex = (selectedCategoryIndex < categoryCount - 1) ? (selectedCategoryIndex + 1) : 0;
@@ -600,6 +649,7 @@ void SettingsActivity::loop() {
       requestUpdate();
     } else {
       SETTINGS.saveToFile();
+      imageRenderConfigApplySettings();
       onGoHome();
     }
     return;
@@ -676,12 +726,8 @@ void SettingsActivity::toggleCurrentSetting() {
     const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
     SETTINGS.*(setting.valuePtr) = (currentValue + 1) % static_cast<uint8_t>(setting.enumValues.size());
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    const int8_t currentValue = SETTINGS.*(setting.valuePtr);
-    if (currentValue + setting.valueRange.step > setting.valueRange.max) {
-      SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
-    } else {
-      SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
-    }
+    enterValueEditMode(setting);
+    return;
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
 
@@ -1137,6 +1183,8 @@ void SettingsActivity::render(RenderLock&&) {
   const char* confirmLabel = nullptr;
   if (selectedSettingIndex == 0) {
     confirmLabel = I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount]);
+  } else if (valueEditingMode) {
+    confirmLabel = tr(STR_CONFIRM);
   } else {
     const auto& selectedSetting = *(*currentSettings)[selectedSettingIndex - 1];
     confirmLabel = (selectedSetting.type == SettingType::ACTION || selectedSetting.type == SettingType::SECTION ||
@@ -1209,4 +1257,47 @@ void SettingsActivity::render(RenderLock&&) {
   if (prewarmedFonts) {
     renderer.getFontCacheManager()->clearCache();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Value editing mode helpers (steroids – fast numeric setting adjustment)
+// ─────────────────────────────────────────────────────────────────────────────
+void SettingsActivity::enterValueEditMode(const SettingInfo& setting) {
+  valueEditingMode = true;
+  valueEditOriginal = SETTINGS.*(setting.valuePtr);
+  // Keep the current selected setting so the render continues to highlight it.
+}
+
+void SettingsActivity::exitValueEditMode(const bool confirmed) {
+  valueEditingMode = false;
+  if (!confirmed) {
+    // Restore the original value (undo any adjustments made during editing).
+    const int selectedSetting = selectedSettingIndex - 1;
+    if (selectedSetting >= 0 && selectedSetting < settingsCount) {
+      const auto& setting = *(*currentSettings)[selectedSetting];
+      if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
+        SETTINGS.*(setting.valuePtr) = valueEditOriginal;
+      }
+    }
+  }
+}
+
+void SettingsActivity::adjustValueEdit(const int delta) {
+  const int selectedSetting = selectedSettingIndex - 1;
+  if (selectedSetting < 0 || selectedSetting >= settingsCount) return;
+  const auto& setting = *(*currentSettings)[selectedSetting];
+  if (setting.type != SettingType::VALUE || setting.valuePtr == nullptr) return;
+
+  const int step = setting.valueRange.step;
+  const int currentValue = SETTINGS.*(setting.valuePtr);
+  const int newValue = currentValue + delta * step;
+
+  if (newValue < setting.valueRange.min) {
+    SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
+  } else if (newValue > setting.valueRange.max) {
+    SETTINGS.*(setting.valuePtr) = setting.valueRange.max;
+  } else {
+    SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(newValue);
+  }
+  requestUpdate();
 }

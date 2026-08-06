@@ -2,24 +2,38 @@
 
 #include <cstdint>
 
-// Central configuration for the image-to-grayscale (2-bit / 4-level) pipeline
-// shared by the BMP reader, the JPEG cover converter, the PNG cover converter,
-// and the sleep/screensaver image rendering.
+// =============================================================================
+// DitheringConfig.h – Backward-compatibility re-exports for the image pipeline.
 //
-// 4-level grayscale: 0=black, 1=dark gray, 2=light gray, 3=white.
+// This file previously held compile-time constexpr flags (USE_ATKINSON,
+// USE_FLOYD_STEINBERG, GAMMA_VALUE). After the steroids image-rendering
+// settings refactor those flags are now runtime-configurable globals
+// declared in ImageRenderConfig.h.
+//
+// Keeping this header ensures all existing #include "DitheringConfig.h"
+// sites continue to compile. New code should #include "ImageRenderConfig.h"
+// directly.
+// =============================================================================
 
-constexpr bool USE_ATKINSON = true;           // Atkinson error diffusion (preferred)
-constexpr bool USE_FLOYD_STEINBERG = false;   // Floyd-Steinberg (serpentine) fallback
+#include "ImageRenderConfig.h"
 
+// ---------------------------------------------------------------------------
+// Legacy names – still used throughout the rendering pipeline.
+// These are now aliases to the runtime globals so behaviour follows the
+// current settings without changing every call site.
+// ---------------------------------------------------------------------------
+
+// GRAY_LEVEL_x remain compile-time constants (panel-native gray levels).
 constexpr uint8_t GRAY_LEVEL_0 = 0;
 constexpr uint8_t GRAY_LEVEL_1 = 85;
 constexpr uint8_t GRAY_LEVEL_2 = 170;
 constexpr uint8_t GRAY_LEVEL_3 = 255;
 
-constexpr float GAMMA_VALUE = 1.5f;  // Gamma applied to input luminance before dithering
-
-// 8-bit -> gamma-corrected lookup table (built by initGammaLUT()).
+// 8-bit -> gamma-corrected lookup table (rebuilt when gamma changes).
 extern uint8_t gammaLUT[256];
 
 // Fill gammaLUT once at startup (out = 255 * (in/255)^(1/gamma)).
+// Now accepts an optional gamma parameter; if <= 0 the current runtime
+// gamma (g_imageRenderGamma) is used.
 void initGammaLUT();
+void initGammaLUT(float gamma);

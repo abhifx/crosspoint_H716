@@ -541,6 +541,23 @@ class CrossPointSettings {
   uint8_t libraryUpdateMode = LIBRARY_UPDATE_MANUAL;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
+  // Image rendering / dithering configuration (CPR-vCodex-steroids).
+  // Enables error-diffusion dithering (Atkinson/Floyd-Steinberg) for covers/screensavers.
+  uint8_t imageDitheringEnabled = 1;
+  // Enables gamma-correction LUT before quantization.
+  uint8_t imageLutEnabled = 1;
+  // Dithering algorithm: 0 = Atkinson, 1 = Floyd-Steinberg.
+  uint8_t imageDitheringAlgorithm = 0;
+  // 4-level grayscale thresholds (quantizeSimple).  Values are clamped 0-255.
+  // Level 0 (black)   when gray < thresholdBlack
+  // Level 1 (d.gray)  when gray < thresholdDark
+  // Level 2 (l.gray)  when gray < thresholdLight
+  // Level 3 (white)   otherwise
+  uint8_t imageThresholdBlack = 50;
+  uint8_t imageThresholdDark  = 120;
+  uint8_t imageThresholdLight = 200;
+  // Gamma value stored as fixed-point uint8 (value / 10).  e.g. 15 -> 1.5
+  uint8_t imageGamma = 15;
   // ScreenSaver settings
   char screenSaverDirectory[128] = "";
   uint8_t screenSaverOrder = SCREENSAVER_SHUFFLE;

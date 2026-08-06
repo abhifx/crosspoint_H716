@@ -89,6 +89,14 @@ void writeSteroidsSettingsDoc(JsonDocument& doc, const CrossPointSettings& s) {
   }
   doc["screenSaverReaderOrder"] = s.screenSaverReaderOrder;
 
+  doc["imageDitheringEnabled"] = s.imageDitheringEnabled;
+  doc["imageLutEnabled"] = s.imageLutEnabled;
+  doc["imageDitheringAlgorithm"] = s.imageDitheringAlgorithm;
+  doc["imageThresholdBlack"] = s.imageThresholdBlack;
+  doc["imageThresholdDark"] = s.imageThresholdDark;
+  doc["imageThresholdLight"] = s.imageThresholdLight;
+  doc["imageGamma"] = s.imageGamma;
+
   doc["statusBarTimeLeft"] = s.statusBarTimeLeft;
 
   doc["libraryShortcut"] = s.libraryShortcut;
@@ -178,6 +186,15 @@ void readSteroidsSettingsDoc(const JsonDocument& doc, CrossPointSettings& s, boo
   loadEnum("screenSaverPanelOpacity", s.screenSaverPanelOpacity, static_cast<uint8_t>(4));
   loadEnum("screenSaverMinBattery", s.screenSaverMinBattery, static_cast<uint8_t>(9));
   loadToggle("screenSaverReplaceSleep", s.screenSaverReplaceSleep);
+
+  loadToggle("imageDitheringEnabled", s.imageDitheringEnabled);
+  loadToggle("imageLutEnabled", s.imageLutEnabled);
+  // imageDitheringAlgorithm: 0=Atkinson, 1=Floyd-Steinberg
+  loadEnum("imageDitheringAlgorithm", s.imageDitheringAlgorithm, static_cast<uint8_t>(2));
+  s.imageThresholdBlack  = clamp(doc["imageThresholdBlack"]  | s.imageThresholdBlack,  static_cast<uint8_t>(255), s.imageThresholdBlack);
+  s.imageThresholdDark   = clamp(doc["imageThresholdDark"]   | s.imageThresholdDark,   static_cast<uint8_t>(255), s.imageThresholdDark);
+  s.imageThresholdLight  = clamp(doc["imageThresholdLight"]  | s.imageThresholdLight,  static_cast<uint8_t>(255), s.imageThresholdLight);
+  s.imageGamma           = clamp(doc["imageGamma"]           | s.imageGamma,           static_cast<uint8_t>(50),  s.imageGamma);
 
   loadEnum("statusBarTimeLeft", s.statusBarTimeLeft, S::STATUS_BAR_TIME_LEFT_COUNT);
 

@@ -12,32 +12,46 @@
 // a fully-black image.
 uint8_t gammaLUT[256];
 static bool gammaLUTReady = false;
+static float lastGammaValue = -1.0f;  // Track last gamma so we can detect changes
 
 void initGammaLUT() {
+  initGammaLUT(g_imageRenderGamma);
+}
+
+void initGammaLUT(float gamma) {
+  if (gamma <= 0.0f) gamma = g_imageRenderGamma;
   for (int i = 0; i < 256; ++i) {
     const float norm = static_cast<float>(i) / 255.0f;
-    const float correct = std::pow(norm, 1.0f / GAMMA_VALUE);
+    const float correct = std::pow(norm, 1.0f / gamma);
     gammaLUT[i] = static_cast<uint8_t>(correct * 255.0f + 0.5f);
   }
+  lastGammaValue = gamma;
   gammaLUTReady = true;
 }
 
 // Apply the gamma-corrected luminance. The LUT maps the input 8-bit luminance
 // so that midtones get a perceptually correct weight before 4-level quantization.
 int adjustPixel(int gray) {
-  if (!gammaLUTReady) initGammaLUT();
+  // If the LUT is disabled via settings, return the input unchanged.
+  if (!g_imageRenderLutEnabled) return gray;
+
+  // If gamma changed since last init, rebuild the LUT.
+  if (!gammaLUTReady || lastGammaValue != g_imageRenderGamma)
+    initGammaLUT(g_imageRenderGamma);
+
   if (gray < 0) gray = 0;
   if (gray > 255) gray = 255;
   return gammaLUT[static_cast<uint8_t>(gray)];
 }
-// Simple quantization without dithering - divide into 4 levels
-// The thresholds are tuned empirically for the X4 display (50/120/200).
+
+// Simple quantization without dithering – divide into 4 levels.
+// Thresholds now come from runtime settings (ImageRenderConfig globals).
 uint8_t quantizeSimple(int gray) {
-  if (gray < 50) {
+  if (gray < g_imageRenderThresholdBlack) {
     return 0;
-  } else if (gray < 120) {
+  } else if (gray < g_imageRenderThresholdDark) {
     return 1;
-  } else if (gray < 200) {
+  } else if (gray < g_imageRenderThresholdLight) {
     return 2;
   } else {
     return 3;

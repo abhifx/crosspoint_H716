@@ -45,6 +45,22 @@ const std::vector<SettingInfo>& getSettingsList() {
         SettingInfo::Toggle(StrId::STR_DARK_MODE, &CrossPointSettings::darkMode, "darkMode", StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
+        // --- Image Rendering Tuning (steroids) ---
+        SettingInfo::Toggle(StrId::STR_IMAGE_DITHERING, &CrossPointSettings::imageDitheringEnabled,
+                            "imageDitheringEnabled", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Toggle(StrId::STR_IMAGE_LUT, &CrossPointSettings::imageLutEnabled,
+                            "imageLutEnabled", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(StrId::STR_IMAGE_DITHER_ALGORITHM, &CrossPointSettings::imageDitheringAlgorithm,
+                          {StrId::STR_IMAGE_DITHER_ATKINSON, StrId::STR_IMAGE_DITHER_FLOYD},
+                          "imageDitheringAlgorithm", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_BLACK, &CrossPointSettings::imageThresholdBlack,
+                           {1, 253, 1}, "imageThresholdBlack", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_DARK, &CrossPointSettings::imageThresholdDark,
+                           {2, 254, 1}, "imageThresholdDark", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_IMAGE_THRESHOLD_LIGHT, &CrossPointSettings::imageThresholdLight,
+                           {3, 255, 1}, "imageThresholdLight", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_IMAGE_GAMMA, &CrossPointSettings::imageGamma,
+                           {5, 30, 1}, "imageGamma", StrId::STR_CAT_DISPLAY),
         // --- Reader ---
 #ifdef OMIT_LEXEND
         SettingInfo::Enum(StrId::STR_FONT_FAMILY, &CrossPointSettings::fontFamily,

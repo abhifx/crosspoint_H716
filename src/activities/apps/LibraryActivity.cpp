@@ -897,29 +897,33 @@ void LibraryActivity::loop() {
     return;
   }
 
-  // ---- Long-press Up/Down to open sort/filter popups ----------------------
+  // ---- Long-press Up/Down for page turn -----------------------------------
   if (mappedInput.isPressed(MappedInputManager::Button::Up)) {
     if (!upHeld_) { upHeld_ = true; upLongTriggered_ = false; }
     if (!upLongTriggered_ && mappedInput.getHeldTime() >= kLongPressMs) {
-        upLongTriggered_ = true;
-        popupSpawnButton_ = static_cast<int>(MappedInputManager::Button::Up);
-        openSortPopup();
-        return;
+      upLongTriggered_ = true;
     }
   }
   if (mappedInput.isPressed(MappedInputManager::Button::Down)) {
     if (!downHeld_) { downHeld_ = true; downLongTriggered_ = false; }
     if (!downLongTriggered_ && mappedInput.getHeldTime() >= kLongPressMs) {
-        downLongTriggered_ = true;
-        popupSpawnButton_ = static_cast<int>(MappedInputManager::Button::Down);
-        openFilterPopup();
-        return;
+      downLongTriggered_ = true;
     }
   }
 
-  // ---- Directional navigation ---------------------------------------------
+  // ---- Directional navigation / page turn on long-press release -----------
   if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
-    if (upHeld_ && !upLongTriggered_) {
+    if (upHeld_ && upLongTriggered_) {
+      // Long-press Up: previous page
+      int prevPage = (selectorIndex_ / gridsPerPage_) - 1;
+      if (prevPage < 0) prevPage = (total + gridsPerPage_ - 1) / gridsPerPage_ - 1;
+      selectorIndex_ = prevPage * gridsPerPage_;
+      if (selectorIndex_ >= total) selectorIndex_ = 0;
+      lastPage_ = prevPage;
+      forceRender_ = true;
+      refreshPageCache();
+      requestUpdate();
+    } else if (upHeld_ && !upLongTriggered_) {
       int ps = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
       int r = (selectorIndex_ - ps) / gridColumns_;
       if (r == 0) {
@@ -953,7 +957,18 @@ void LibraryActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-    if (downHeld_ && !downLongTriggered_) {
+    if (downHeld_ && downLongTriggered_) {
+      // Long-press Down: next page
+      int nextPage = (selectorIndex_ / gridsPerPage_) + 1;
+      int totalPages = (total + gridsPerPage_ - 1) / gridsPerPage_;
+      if (nextPage >= totalPages) nextPage = 0;
+      selectorIndex_ = nextPage * gridsPerPage_;
+      if (selectorIndex_ >= total) selectorIndex_ = 0;
+      lastPage_ = nextPage;
+      forceRender_ = true;
+      refreshPageCache();
+      requestUpdate();
+    } else if (downHeld_ && !downLongTriggered_) {
       int ps = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
       int pageItems = std::min(gridsPerPage_, total - ps);
       // Ceiling division: 5 items / 4 cols = 2 rows (not 1)
@@ -1264,7 +1279,7 @@ void LibraryActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, tr(STR_LIBRARY_EMPTY));
     const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP_SORT), tr(STR_DIR_DOWN_FILTER));
+    GUI.drawSideButtonHints(renderer, tr(STR_LIBRARY_PAGE_UP), tr(STR_LIBRARY_PAGE_DOWN));
   }
 
   if (total > 0) {
@@ -1326,7 +1341,7 @@ void LibraryActivity::render(RenderLock&&) {
   } else {
     const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP_SORT), tr(STR_DIR_DOWN_FILTER));
+    GUI.drawSideButtonHints(renderer, tr(STR_LIBRARY_PAGE_UP), tr(STR_LIBRARY_PAGE_DOWN));
   }
 
   if (popupMode_ != PopupMode::None) popupOverlay_.render(renderer, pageWidth, pageHeight);

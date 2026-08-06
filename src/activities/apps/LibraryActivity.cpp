@@ -1064,7 +1064,7 @@ void LibraryActivity::render(RenderLock&&) {
           if (sortLabel && sortLabel[0]) { cachedInfo_ += " / "; cachedInfo_ += sortLabel; }
           if (!currentSearchText_.empty()) {
             cachedInfo_ += " [";
-            cachedInfo_ += currentSearchText_.size() > 20 ? currentSearchText_.substr(0, 20) + ".." : currentSearchText_;
+            cachedInfo_ += currentSearchText_.size() > 20 ? currentSearchText_.substr(0, 20) + "..." : currentSearchText_;
             cachedInfo_ += "]";
           }
 
@@ -1072,14 +1072,8 @@ void LibraryActivity::render(RenderLock&&) {
             int slot = selectorIndex_ % gridsPerPage_;
             cachedSelTitle_ = pageCache_[slot].title[0] ? pageCache_[slot].title : filenameWithoutExtension(pageCache_[slot].path);
             cachedSelAuthor_ = pageCache_[slot].author;
-            const int maxSelW = pageWidth - 20;
-            if (renderer.getTextWidth(UI_10_FONT_ID, cachedSelTitle_.c_str(), EpdFontFamily::REGULAR) > maxSelW) {
-              while (cachedSelTitle_.size() > 3 &&
-                     renderer.getTextWidth(UI_10_FONT_ID, (cachedSelTitle_ + "..").c_str(), EpdFontFamily::REGULAR) > maxSelW) {
-                cachedSelTitle_.pop_back();
-              }
-              cachedSelTitle_ += "..";
-            }
+            const int maxSelW = pageWidth - 16;  // 8px margin each side
+            cachedSelTitle_ = renderer.truncatedText(UI_10_FONT_ID, cachedSelTitle_.c_str(), maxSelW, EpdFontFamily::BOLD);
           } else {
             cachedSelTitle_.clear();
             cachedSelAuthor_.clear();
@@ -1109,20 +1103,14 @@ void LibraryActivity::render(RenderLock&&) {
       // 5. Draw new title/author.
       if (selectorIndex_ < total && !cachedSelTitle_.empty()) {
           const int selTitleW = renderer.getTextWidth(UI_10_FONT_ID, cachedSelTitle_.c_str(), EpdFontFamily::BOLD);
-          const int selTitleX = (pageWidth - selTitleW) / 2;
+          const int selTitleX = std::max(8, (pageWidth - selTitleW) / 2);
           renderer.drawText(UI_10_FONT_ID, selTitleX, selTitleY, cachedSelTitle_.c_str(), true, EpdFontFamily::BOLD);
 
           if (!cachedSelAuthor_.empty()) {
-              std::string author = cachedSelAuthor_;
+              std::string author = renderer.truncatedText(UI_10_FONT_ID, cachedSelAuthor_.c_str(), pageWidth - 16, EpdFontFamily::REGULAR);
               const int authorY = selTitleY + lh + 1;
-              if (renderer.getTextWidth(UI_10_FONT_ID, author.c_str(), EpdFontFamily::REGULAR) > pageWidth - 20) {
-                  while (author.size() > 5 && renderer.getTextWidth(UI_10_FONT_ID, (author + "..").c_str(), EpdFontFamily::REGULAR) > pageWidth - 20) {
-                      author.pop_back();
-                  }
-                  author += "..";
-              }
               const int authorW = renderer.getTextWidth(UI_10_FONT_ID, author.c_str(), EpdFontFamily::REGULAR);
-              const int authorX = (pageWidth - authorW) / 2;
+              const int authorX = std::max(8, (pageWidth - authorW) / 2);
               renderer.drawText(UI_10_FONT_ID, authorX, authorY, author.c_str(), true, EpdFontFamily::REGULAR);
           }
       }
@@ -1198,14 +1186,8 @@ void LibraryActivity::render(RenderLock&&) {
       int slot = selectorIndex_ % gridsPerPage_;
       cachedSelTitle_ = pageCache_[slot].title[0] ? pageCache_[slot].title : filenameWithoutExtension(pageCache_[slot].path);
       cachedSelAuthor_ = pageCache_[slot].author;
-      const int maxSelW = pageWidth - 20;
-      if (renderer.getTextWidth(UI_10_FONT_ID, cachedSelTitle_.c_str(), EpdFontFamily::REGULAR) > maxSelW) {
-        while (cachedSelTitle_.size() > 3 &&
-               renderer.getTextWidth(UI_10_FONT_ID, (cachedSelTitle_ + "..").c_str(), EpdFontFamily::REGULAR) > maxSelW) {
-          cachedSelTitle_.pop_back();
-        }
-        cachedSelTitle_ += "..";
-      }
+      const int maxSelW = pageWidth - 16;  // 8px margin each side
+      cachedSelTitle_ = renderer.truncatedText(UI_10_FONT_ID, cachedSelTitle_.c_str(), maxSelW, EpdFontFamily::BOLD);
     } else {
       cachedSelTitle_.clear();
       cachedSelAuthor_.clear();
@@ -1222,14 +1204,8 @@ void LibraryActivity::render(RenderLock&&) {
   }
 
   // Info line (filter/sort/search)
+  cachedInfo_ = renderer.truncatedText(UI_10_FONT_ID, cachedInfo_.c_str(), pageWidth - 16, EpdFontFamily::REGULAR);
   int lblW = renderer.getTextWidth(UI_10_FONT_ID, cachedInfo_.c_str(), EpdFontFamily::REGULAR);
-  if (lblW > pageWidth - 20) {
-    while (cachedInfo_.size() > 5 && renderer.getTextWidth(UI_10_FONT_ID, (cachedInfo_ + "..").c_str(), EpdFontFamily::REGULAR) > pageWidth - 20) {
-      cachedInfo_.pop_back();
-    }
-    cachedInfo_ += "..";
-  }
-  lblW = renderer.getTextWidth(UI_10_FONT_ID, cachedInfo_.c_str(), EpdFontFamily::REGULAR);
   int centerX = (pageWidth - lblW) / 2;
   int headerY = metrics.topPadding + 8;
   renderer.drawText(UI_10_FONT_ID, centerX, headerY, cachedInfo_.c_str(), true, EpdFontFamily::REGULAR);
@@ -1240,21 +1216,14 @@ void LibraryActivity::render(RenderLock&&) {
     const int selTitleY = headerY + lh + 2;
     renderer.fillRect(0, selTitleY, pageWidth, lh * 2 + 1, false);
     const int selTitleW = renderer.getTextWidth(UI_10_FONT_ID, cachedSelTitle_.c_str(), EpdFontFamily::BOLD);
-    const int selTitleX = (pageWidth - selTitleW) / 2;
+    const int selTitleX = std::max(8, (pageWidth - selTitleW) / 2);  // min 8px left margin
     renderer.drawText(UI_10_FONT_ID, selTitleX, selTitleY, cachedSelTitle_.c_str(), true, EpdFontFamily::BOLD);
 
     if (!cachedSelAuthor_.empty()) {
-      std::string author = cachedSelAuthor_;
+      std::string author = renderer.truncatedText(UI_10_FONT_ID, cachedSelAuthor_.c_str(), pageWidth - 16, EpdFontFamily::REGULAR);
       const int authorY = selTitleY + lh + 1;
-      if (renderer.getTextWidth(UI_10_FONT_ID, author.c_str(), EpdFontFamily::REGULAR) > pageWidth - 20) {
-        while (author.size() > 5 &&
-               renderer.getTextWidth(UI_10_FONT_ID, (author + "..").c_str(), EpdFontFamily::REGULAR) > pageWidth - 20) {
-          author.pop_back();
-        }
-        author += "..";
-      }
       const int authorW = renderer.getTextWidth(UI_10_FONT_ID, author.c_str(), EpdFontFamily::REGULAR);
-      const int authorX = (pageWidth - authorW) / 2;
+      const int authorX = std::max(8, (pageWidth - authorW) / 2);  // min 8px left margin
       renderer.drawText(UI_10_FONT_ID, authorX, authorY, author.c_str(), true, EpdFontFamily::REGULAR);
     }
 

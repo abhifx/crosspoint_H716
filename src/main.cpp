@@ -293,7 +293,7 @@ void setup() {
   halTiltSensor.begin();
   halClock.begin();
 
-  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  LOG_INF("MAIN", "Hardware detect: %s", BoardConfig::ACTIVE.name);
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter

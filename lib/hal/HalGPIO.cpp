@@ -7,6 +7,10 @@
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 
+#if FREEINK_DEVICE_LILYGO_H716
+#include <BoardT5H716.h>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -113,7 +117,9 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 }  // namespace
 
 void HalGPIO::begin() {
-#if FREEINK_MCU_C3
+#if FREEINK_DEVICE_LILYGO_H716
+  BoardT5H716::begin();
+#elif FREEINK_MCU_C3
   _deviceType = detectDeviceTypeWithFingerprint();
   BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
 

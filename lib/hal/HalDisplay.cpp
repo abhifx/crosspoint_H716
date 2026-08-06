@@ -1,6 +1,10 @@
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 
+#if FREEINK_DEVICE_LILYGO_H716
+#include <BoardT5H716.h>
+#endif
+
 // Global HalDisplay instance
 HalDisplay display;
 
@@ -85,7 +89,12 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
 }
 
-void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
+void HalDisplay::deepSleep() {
+  einkDisplay.deepSleep();
+#if FREEINK_DEVICE_LILYGO_H716
+  BoardT5H716::deinitForSleep();
+#endif
+}
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 

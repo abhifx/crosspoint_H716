@@ -822,11 +822,29 @@ void LibraryActivity::loop() {
                   deleteLibraryCovers(path);
                   forceRender_ = true; requestUpdate(); return;
                 case BookContextMenuActivity::MenuAction::DELETE_PAGE_COVER_THUMBS:
-                  deletePageCovers();
-                  forceRender_ = true; requestUpdate(); return;
+                  startActivityForResult(
+                      std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                          tr(STR_LIBRARY_DELETE_PAGE_COVERS), tr(STR_LIBRARY_DELETE_PAGE_COVERS_CONFIRM)),
+                      [this](const ActivityResult& r) {
+                        if (!r.isCancelled) {
+                          deletePageCovers();
+                          forceRender_ = true;
+                        }
+                        requestUpdate();
+                      });
+                  return;
                 case BookContextMenuActivity::MenuAction::DELETE_ALL_LIBRARY_COVERS:
-                  deleteAllLibraryCovers();
-                  forceRender_ = true; requestUpdate(); return;
+                  startActivityForResult(
+                      std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                          tr(STR_LIBRARY_DELETE_ALL_COVERS), tr(STR_LIBRARY_DELETE_ALL_COVERS_CONFIRM)),
+                      [this](const ActivityResult& r) {
+                        if (!r.isCancelled) {
+                          deleteAllLibraryCovers();
+                          forceRender_ = true;
+                        }
+                        requestUpdate();
+                      });
+                  return;
                 default: forceRender_ = true; requestUpdate(); return;
               }
             });

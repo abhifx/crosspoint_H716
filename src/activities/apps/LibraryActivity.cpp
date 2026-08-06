@@ -820,6 +820,7 @@ void LibraryActivity::loop() {
                 }
                 case BookContextMenuActivity::MenuAction::DELETE_COVER_THUMB:
                   deleteLibraryCovers(path);
+                  refreshPageCache();
                   forceRender_ = true; requestUpdate(); return;
                 case BookContextMenuActivity::MenuAction::DELETE_PAGE_COVER_THUMBS:
                   startActivityForResult(
@@ -828,8 +829,9 @@ void LibraryActivity::loop() {
                       [this](const ActivityResult& r) {
                         if (!r.isCancelled) {
                           deletePageCovers();
-                          forceRender_ = true;
                         }
+                        refreshPageCache();
+                        forceRender_ = true;
                         requestUpdate();
                       });
                   return;
@@ -840,8 +842,9 @@ void LibraryActivity::loop() {
                       [this](const ActivityResult& r) {
                         if (!r.isCancelled) {
                           deleteAllLibraryCovers();
-                          forceRender_ = true;
                         }
+                        refreshPageCache();
+                        forceRender_ = true;
                         requestUpdate();
                       });
                   return;

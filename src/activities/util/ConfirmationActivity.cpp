@@ -19,14 +19,16 @@ void ConfirmationActivity::onEnter() {
     wrappedHeading = renderer.wrappedText(fontId, heading.c_str(), maxWidth, maxLines, EpdFontFamily::BOLD);
   }
   if (!body.empty()) {
-    safeBody = renderer.truncatedText(fontId, body.c_str(), maxWidth, EpdFontFamily::REGULAR);
+    // Use word-wrapping for body too, so long confirmation messages span multiple lines instead of truncating.
+    wrappedBody = renderer.wrappedText(fontId, body.c_str(), maxWidth, maxLines, EpdFontFamily::REGULAR);
   }
 
   const int headingLineCount = static_cast<int>(wrappedHeading.size());
+  const int bodyLineCount = static_cast<int>(wrappedBody.size());
   int totalHeight = headingLineCount * lineHeight;
-  if (!safeBody.empty()) {
+  if (bodyLineCount > 0) {
     if (headingLineCount > 0) totalHeight += spacing;
-    totalHeight += lineHeight;
+    totalHeight += bodyLineCount * lineHeight;
   }
 
   startY = (renderer.getScreenHeight() - totalHeight) / 2;
@@ -44,13 +46,14 @@ void ConfirmationActivity::render(RenderLock&& lock) {
     renderer.drawCenteredText(fontId, currentY, line.c_str(), true, EpdFontFamily::BOLD);
     currentY += lineHeight;
   }
-  if (!wrappedHeading.empty() && !safeBody.empty()) {
+  if (!wrappedHeading.empty() && !wrappedBody.empty()) {
     currentY += spacing;
   }
 
-  // Draw Body
-  if (!safeBody.empty()) {
-    renderer.drawCenteredText(fontId, currentY, safeBody.c_str(), true, EpdFontFamily::REGULAR);
+  // Draw Body (word-wrapped, multi-line)
+  for (const auto& line : wrappedBody) {
+    renderer.drawCenteredText(fontId, currentY, line.c_str(), true, EpdFontFamily::REGULAR);
+    currentY += lineHeight;
   }
 
   // Draw UI Elements

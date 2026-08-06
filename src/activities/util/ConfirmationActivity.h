@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "../../fontIds.h"
 #include "../Activity.h"
@@ -17,7 +18,7 @@ class ConfirmationActivity : public Activity {
   static constexpr int maxLines = 8;
 
   std::vector<std::string> wrappedHeading;
-  std::string safeBody;
+  std::vector<std::string> wrappedBody;
   int startY = 0;
   int lineHeight = 0;
 

@@ -8,6 +8,7 @@
 
 #include "../Activity.h"
 #include "./FileBrowserActivity.h"
+#include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
 
 struct RecentBook;
@@ -65,6 +66,7 @@ class HomeActivity final : public Activity {
   void reloadHomeBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
   bool needsRecentCoverLoad(int coverHeight) const;
+  void drawCarouselTitle(GfxRenderer& renderer, const ThemeMetrics& metrics, int totalBooks);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

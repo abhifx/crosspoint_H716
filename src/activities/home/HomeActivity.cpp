@@ -63,7 +63,13 @@ constexpr unsigned long RECENT_BOOK_LONG_PRESS_MS = 1000;
 constexpr int DEFAULT_HOME_SHORTCUT_PAGE_SIZE = 4;
 constexpr int LYRA_HOME_SHORTCUT_PAGE_SIZE = 5;
 constexpr const char* CAROUSEL_FRAME_CACHE_DIR_LYRA = "/.crosspoint/home-carousel-cache";
-constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache";
+constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache-v2";
+
+// Bump this version whenever the theme rendering logic changes in a way that
+// would make cached carousel frames invalid (e.g. layout, colours, metrics).
+// Old cache directories are simply orphaned and will be cleaned by the user
+// via "Clear theme cache" or by removing them from the SD card.
+constexpr uint8_t MARCOAND75_CACHE_VERSION = 2;
 
 const char* getCarouselFrameCacheDir() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_MARCOAND75
@@ -458,7 +464,8 @@ void HomeActivity::loadRecentBooks(const int maxBooks) {
   if (homeUsesFavorites()) {
     const auto books = FAVORITES.getBooks();
     std::vector<std::string> staleFavorites;
-    recentBooks.reserve(std::min(static_cast<int>(books.size()), maxBooks));
+    const bool unlimited = (maxBooks <= 0);
+    recentBooks.reserve(unlimited ? books.size() : std::min(static_cast<int>(books.size()), maxBooks));
 
     for (const FavoriteBook& book : books) {
       if (book.path.empty() || !Storage.exists(book.path.c_str())) {
@@ -469,7 +476,7 @@ void HomeActivity::loadRecentBooks(const int maxBooks) {
         continue;
       }
 
-      if (static_cast<int>(recentBooks.size()) < maxBooks) {
+      if (unlimited || static_cast<int>(recentBooks.size()) < maxBooks) {
         recentBooks.push_back(resolveFavoriteForHome(book));
       }
     }
@@ -483,10 +490,11 @@ void HomeActivity::loadRecentBooks(const int maxBooks) {
   }
 
   const auto& books = RECENT_BOOKS.getBooks();
-  recentBooks.reserve(std::min(static_cast<int>(books.size()), maxBooks));
+  const bool unlimited = (maxBooks <= 0);
+  recentBooks.reserve(unlimited ? books.size() : std::min(static_cast<int>(books.size()), maxBooks));
 
   for (const RecentBook& book : books) {
-    if (static_cast<int>(recentBooks.size()) >= maxBooks) {
+    if (!unlimited && static_cast<int>(recentBooks.size()) >= maxBooks) {
       break;
     }
     if (!RecentBooksStore::isMissing(book)) {
@@ -730,7 +738,8 @@ void HomeActivity::onEnter() {
   carouselCoverLoadAttemptPath.clear();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  reloadHomeBooks(metrics.homeRecentBooksCount);
+  // Carousel themes show all books (0 = unlimited); other themes respect the configured count.
+  reloadHomeBooks(isLyraCarouselTheme() ? 0 : metrics.homeRecentBooksCount);
 
   LOG_DBG("HOME", "onEnter: after reloadHomeBooks heap=%u maxA=%u books=%zu",
                ESP.getFreeHeap(), ESP.getMaxAllocHeap(), recentBooks.size());
@@ -1205,7 +1214,7 @@ void HomeActivity::loop() {
                                            : RECENT_BOOKS.removeBook(selectedBook.path);
                   if (removed) {
                     const auto& metrics = UITheme::getInstance().getMetrics();
-                    reloadHomeBooks(metrics.homeRecentBooksCount);
+                    reloadHomeBooks(isLyraCarouselTheme() ? 0 : metrics.homeRecentBooksCount);
                     if (recentBooks.empty()) {
                       selectorIndex = 0;
                     } else if (currentSelection >= static_cast<int>(recentBooks.size())) {
@@ -1347,7 +1356,7 @@ void HomeActivity::loop() {
           startActivityForResult(std::make_unique<FavoritesAppActivity>(renderer, mappedInput),
                                  [this](const ActivityResult&) {
                                    const auto& metrics = UITheme::getInstance().getMetrics();
-                                   reloadHomeBooks(metrics.homeRecentBooksCount);
+                                   reloadHomeBooks(isLyraCarouselTheme() ? 0 : metrics.homeRecentBooksCount);
                                    requestFreshHomeRender(true);
                                  });
           break;
@@ -1423,6 +1432,7 @@ void HomeActivity::render(RenderLock&&) {
       renderer.fillRect(0, 0, pageWidth, metrics.homeTopPadding, false);
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
       HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
+      drawCarouselTitle(renderer, metrics, recentCount);
       GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                              inCarouselRow);
       LOG_DBG("HCR", "live render carousel frame overlay: %ums (fillRect+header+border)",
@@ -1442,6 +1452,7 @@ void HomeActivity::render(RenderLock&&) {
 
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
     HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
+    drawCarouselTitle(renderer, metrics, recentCount);
 
     coverRectX = 0;
     coverRectY = metrics.homeTopPadding;
@@ -1553,4 +1564,17 @@ void HomeActivity::onWikipediaOpen() {
   startActivityForResult(
       std::make_unique<WikipediaActivity>(renderer, mappedInput),
       [this](const ActivityResult&) { requestFreshHomeRender(true); });
+}
+
+void HomeActivity::drawCarouselTitle(GfxRenderer& renderer, const ThemeMetrics& metrics, const int totalBooks) {
+  if (!isLyraCarouselTheme() || totalBooks == 0) return;
+
+  const char* label =
+      homeUsesFavorites() ? tr(STR_CAROUSEL_FAVORITES) : tr(STR_CAROUSEL_RECENTS);
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%s (%d)", label, totalBooks);
+
+  // Position: top-left, 8px margin from edges, larger font (SMALL_FONT → UI_12)
+  constexpr int kMargin = 8;
+  renderer.drawText(UI_12_FONT_ID, kMargin, kMargin, buf, true);
 }

@@ -241,14 +241,15 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
   } else {
     snprintf(etaBuf, sizeof(etaBuf), "...");
   }
-  char timeVal[32], sessVal[16], streakVal[16], goalVal[32], dayVal[32], booksFinished[16];
+  char timeVal[32], sessVal[16], daysVal[16], streakVal[16], goalVal[32], dayVal[32], booksFinished[16];
   fmtDuration(tMs, timeVal, sizeof(timeVal));
   snprintf(sessVal, sizeof(sessVal), "%u", sess);
+  // Days: number of distinct reading days for this book
+  snprintf(daysVal, sizeof(daysVal), "%u", stats ? static_cast<uint32_t>(stats->readingDays.size()) : 0u);
   fmtDuration(getDailyReadingGoalMs(), goalVal, sizeof(goalVal));
   fmtDuration(READING_STATS.getTodayReadingMs(), dayVal, sizeof(dayVal));
   snprintf(streakVal, sizeof(streakVal), "%dd", READING_STATS.getCurrentStreakDays());
   snprintf(booksFinished, sizeof(booksFinished), "%d", READING_STATS.getBooksFinishedCount());
-  const char* etaVal = done ? "--" : etaBuf;
 
   constexpr int gap = 6;
   constexpr int pad = 5;
@@ -271,18 +272,33 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
 
   {
     const int colW = (pw - gap) / 2;
-    const int h2 = lh * 3 + 2 * pad + 6;
+    const int h2 = lh * 5 + 2 * pad + 6;
+    // ── Left: BOOK STATS ──
     drawCyberPanel(r, px, curY, colW, h2, inCar);
     int ly = curY + pad;
     r.drawText(dataFont, px + textLeft, ly, tr(STR_HOME_PANEL_BOOK), true, EpdFontFamily::BOLD);
     ly += lh + 2;
-    char buf[40];
+    char buf[48];
+    // "Read" = total reading time spent on this book
     snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_TIME), timeVal);
     r.drawText(dataFont, px + textLeft, ly, buf, true);
     ly += lh + 2;
     snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_SESSIONS), sessVal);
     r.drawText(dataFont, px + textLeft, ly, buf, true);
+    ly += lh + 2;
+    // Days = distinct days this book was read
+    snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_DAYS), daysVal);
+    r.drawText(dataFont, px + textLeft, ly, buf, true);
+    ly += lh + 2;
+    // "Left" = estimated remaining time to finish the book
+    if (!done && etaBuf[0] != '\0') {
+      snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_ETA), etaBuf);
+    } else {
+      snprintf(buf, sizeof(buf), "%s: --", tr(STR_HOME_PANEL_ETA));
+    }
+    r.drawText(dataFont, px + textLeft, ly, buf, true);
 
+    // ── Right: GLOBAL STATS ──
     const int rightX = px + colW + gap;
     drawCyberPanel(r, rightX, curY, colW, h2, inCar);
     int ry = curY + pad;
@@ -292,6 +308,20 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
     r.drawText(dataFont, rightX + textLeft, ry, buf, true);
     ry += lh + 2;
     snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_GOAL), goalVal);
+    r.drawText(dataFont, rightX + textLeft, ry, buf, true);
+    // Mini-checkmark when daily goal is reached (drawn geometrically – safe on all fonts)
+    if (READING_STATS.getTodayReadingMs() >= getDailyReadingGoalMs() && getDailyReadingGoalMs() > 0) {
+      const int chkX = rightX + textLeft + r.getTextWidth(dataFont, buf, EpdFontFamily::REGULAR) + 6;
+      const int chkY = ry + lh / 2;
+      // Thicker mini-checkmark (2-pixel wide strokes)
+      r.drawLine(chkX, chkY, chkX + 4, chkY + 5, 2, true);
+      r.drawLine(chkX + 4, chkY + 5, chkX + 11, chkY - 3, 2, true);
+    }
+    ry += lh + 2;
+    snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_STREAK), streakVal);
+    r.drawText(dataFont, rightX + textLeft, ry, buf, true);
+    ry += lh + 2;
+    snprintf(buf, sizeof(buf), "%s: %s", tr(STR_HOME_PANEL_FINISHED), booksFinished);
     r.drawText(dataFont, rightX + textLeft, ry, buf, true);
 
     curY += h2 + gap;
@@ -321,18 +351,6 @@ void drawDataPanel(const GfxRenderer& r, const RecentBook& book, bool inCar, int
                  "COMPLETED", true, EpdFontFamily::BOLD);
     }
     curY += h3 + gap;
-  }
-
-  {
-    const int h4 = kProgSegH + 2 * pad + 8;
-    drawCyberPanel(r, px, curY, pw, h4, inCar);
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s: %s - %s: %s - %s: %s",
-             tr(STR_HOME_PANEL_STREAK), streakVal,
-             tr(STR_HOME_PANEL_FINISHED), booksFinished,
-             tr(STR_HOME_PANEL_ETA), etaVal);
-    const auto sTrunc = r.truncatedText(dataFont, buf, pw - textLeft - pad - 4);
-    r.drawText(dataFont, px + textLeft, curY + (h4 - lh) / 2, sTrunc.c_str(), true);
   }
 }
 
@@ -519,7 +537,7 @@ void LyraMarcoand75Theme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
     const int panelX   = rect.x + 8;
     const int panelW   = rect.width - 16;
-    const int dotsY    = centerCoverTop + kFiveCoverCenterH + 8;
+    const int dotsY    = centerCoverTop + kFiveCoverCenterH + 2;  // +8 - 6 = +2
     constexpr int carouselGap = 14;
 
     const int panelTopY = rect.y + kCoverTopPad + 6;

@@ -85,7 +85,7 @@
 namespace {
 constexpr int hPaddingInSelection = 8;
 constexpr int cornerRadius = 6;
-constexpr int topHintButtonY = 345;
+constexpr int topHintButtonY = 334;  // was 345, adjusted for 100px button height (was 78)
 constexpr int popupMarginX = 16;
 constexpr int popupMarginY = 12;
 constexpr int maxListValueWidth = 200;
@@ -733,7 +733,8 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   const int screenWidth = renderer.getScreenWidth();
   constexpr int buttonWidth = LyraMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
-  constexpr int buttonHeight = 78;                                       // Height on screen (width when rotated)
+  constexpr int buttonHeight = 100;                                       // Height on screen (width when rotated)
+  constexpr int buttonSpacing = 5;                                        // Gap between stacked buttons
   constexpr int buttonMargin = 0;
 
   if (gpio.deviceIsX3()) {
@@ -765,13 +766,13 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     }
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
-      renderer.drawRoundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, 1, cornerRadius, true,
+      renderer.drawRoundedRect(x, topHintButtonY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight, 1, cornerRadius, true,
                                false, true, false, true);
     }
 
     for (int i = 0; i < 2; i++) {
       if (labels[i] != nullptr && labels[i][0] != '\0') {
-        const int y = topHintButtonY + (i * buttonHeight) + 5;
+        const int y = topHintButtonY + (i * buttonHeight) + buttonSpacing;
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
         renderer.drawTextRotated90CW(SMALL_FONT_ID, x, y + (buttonHeight + textWidth) / 2, labels[i]);
       }

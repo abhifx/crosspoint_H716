@@ -244,7 +244,7 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   const int screenWidth = renderer.getScreenWidth();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
-  constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
+  constexpr int buttonHeight = 100;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 4;
 
   if (gpio.deviceIsX3()) {
@@ -272,7 +272,7 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     }
   } else {
     // X4 layout: Both buttons stacked on right side
-    constexpr int topButtonY = 345;
+    constexpr int topButtonY = 334;  // was 345, adjusted for 100px button height (was 80)
     const char* labels[] = {topBtn, bottomBtn};
     const int x = screenWidth - buttonMargin - buttonWidth;
 

@@ -63,13 +63,13 @@ constexpr unsigned long RECENT_BOOK_LONG_PRESS_MS = 1000;
 constexpr int DEFAULT_HOME_SHORTCUT_PAGE_SIZE = 4;
 constexpr int LYRA_HOME_SHORTCUT_PAGE_SIZE = 5;
 constexpr const char* CAROUSEL_FRAME_CACHE_DIR_LYRA = "/.crosspoint/home-carousel-cache";
-constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache-v2";
+constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache-v3";
 
 // Bump this version whenever the theme rendering logic changes in a way that
 // would make cached carousel frames invalid (e.g. layout, colours, metrics).
 // Old cache directories are simply orphaned and will be cleaned by the user
 // via "Clear theme cache" or by removing them from the SD card.
-constexpr uint8_t MARCOAND75_CACHE_VERSION = 2;
+constexpr uint8_t MARCOAND75_CACHE_VERSION = 3;
 
 const char* getCarouselFrameCacheDir() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_MARCOAND75

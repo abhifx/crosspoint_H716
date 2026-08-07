@@ -947,10 +947,13 @@ void LibraryActivity::loop() {
                   if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;
                   refreshPageCache();
                   forceRender_ = true; requestUpdate(); return;
-                case BookContextMenuActivity::MenuAction::DELETE_BOOK_FILE:
+                case BookContextMenuActivity::MenuAction::DELETE_BOOK_FILE: {
+                  const bool isManual = (SETTINGS.libraryUpdateMode != CrossPointSettings::LIBRARY_UPDATE_AUTO);
+                  const char* confirmMsg = isManual ? tr(STR_DELETE_BOOK_FILE_CONFIRM_MANUAL)
+                                                    : tr(STR_DELETE_BOOK_FILE_CONFIRM);
                   startActivityForResult(
                       std::make_unique<ConfirmationActivity>(renderer, mappedInput,
-                          tr(STR_DELETE_BOOK_FILE), tr(STR_DELETE_BOOK_FILE_CONFIRM)),
+                          tr(STR_DELETE_BOOK_FILE), confirmMsg),
                       [this, path](const ActivityResult& r) {
                         if (!r.isCancelled) {
                           deleteBookFile(path);
@@ -967,6 +970,7 @@ void LibraryActivity::loop() {
                         requestUpdate();
                       });
                   return;
+                }
                 default: forceRender_ = true; requestUpdate(); return;
               }
             });

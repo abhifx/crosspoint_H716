@@ -85,7 +85,7 @@
 namespace {
 constexpr int hPaddingInSelection = 8;
 constexpr int cornerRadius = 6;
-constexpr int topHintButtonY = 334;  // was 345, adjusted for 100px button height (was 78)
+constexpr int topHintButtonY = 318;  // was 345, then 334, moved up 16px for physical button alignment
 constexpr int popupMarginX = 16;
 constexpr int popupMarginY = 12;
 constexpr int maxListValueWidth = 200;
@@ -772,7 +772,7 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
 
     for (int i = 0; i < 2; i++) {
       if (labels[i] != nullptr && labels[i][0] != '\0') {
-        const int y = topHintButtonY + (i * buttonHeight) + buttonSpacing;
+        const int y = topHintButtonY + i * (buttonHeight + buttonSpacing);
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
         renderer.drawTextRotated90CW(SMALL_FONT_ID, x, y + (buttonHeight + textWidth) / 2, labels[i]);
       }

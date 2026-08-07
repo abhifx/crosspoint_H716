@@ -272,7 +272,7 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     }
   } else {
     // X4 layout: Both buttons stacked on right side
-    constexpr int topButtonY = 334;  // was 345, adjusted for 100px button height (was 80)
+    constexpr int topButtonY = 318;  // was 345, then 334, moved up 16px for physical button alignment
     const char* labels[] = {topBtn, bottomBtn};
     const int x = screenWidth - buttonMargin - buttonWidth;
 

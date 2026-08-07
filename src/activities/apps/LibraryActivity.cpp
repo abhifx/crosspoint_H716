@@ -954,13 +954,15 @@ void LibraryActivity::loop() {
                       [this, path](const ActivityResult& r) {
                         if (!r.isCancelled) {
                           deleteBookFile(path);
-                          // Force a full library re-scan. The file is gone
-                          // from disk but the in-RAM index still has its entry.
-                          forceScanOnNextOpen_ = true;
+                          if (SETTINGS.libraryUpdateMode == CrossPointSettings::LIBRARY_UPDATE_AUTO) {
+                            // Force re-scan now — the file is gone but the
+                            // in-RAM index still has its entry.
+                            forceScanOnNextOpen_ = true;
+                            scanSd();
+                            selectorIndex_ = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
+                            if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;
+                          }
                         }
-                        scanSd();
-                        selectorIndex_ = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
-                        if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;
                         forceRender_ = true;
                         requestUpdate();
                       });

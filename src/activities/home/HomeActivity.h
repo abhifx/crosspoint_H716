@@ -66,7 +66,7 @@ class HomeActivity final : public Activity {
   void reloadHomeBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
   bool needsRecentCoverLoad(int coverHeight) const;
-  void drawCarouselTitle(GfxRenderer& renderer, const ThemeMetrics& metrics, int totalBooks);
+  void drawCarouselRecentsPanel(GfxRenderer& renderer, int totalBooks);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

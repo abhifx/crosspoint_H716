@@ -53,6 +53,7 @@
 #include "components/UITheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraMarcoand75Theme.h"
+#include "components/PanelDrawHelper.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
 #include "util/ShortcutRegistry.h"
@@ -63,13 +64,13 @@ constexpr unsigned long RECENT_BOOK_LONG_PRESS_MS = 1000;
 constexpr int DEFAULT_HOME_SHORTCUT_PAGE_SIZE = 4;
 constexpr int LYRA_HOME_SHORTCUT_PAGE_SIZE = 5;
 constexpr const char* CAROUSEL_FRAME_CACHE_DIR_LYRA = "/.crosspoint/home-carousel-cache";
-constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache-v3";
+constexpr const char* CAROUSEL_FRAME_CACHE_DIR_MARCOAND75 = "/.crosspoint/marcoand75-cache-v4";
 
 // Bump this version whenever the theme rendering logic changes in a way that
 // would make cached carousel frames invalid (e.g. layout, colours, metrics).
 // Old cache directories are simply orphaned and will be cleaned by the user
 // via "Clear theme cache" or by removing them from the SD card.
-constexpr uint8_t MARCOAND75_CACHE_VERSION = 3;
+constexpr uint8_t MARCOAND75_CACHE_VERSION = 4;
 
 const char* getCarouselFrameCacheDir() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_MARCOAND75
@@ -1432,7 +1433,7 @@ void HomeActivity::render(RenderLock&&) {
       renderer.fillRect(0, 0, pageWidth, metrics.homeTopPadding, false);
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
       HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
-      drawCarouselTitle(renderer, metrics, recentCount);
+      drawCarouselRecentsPanel(renderer, recentCount);
       GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                              inCarouselRow);
       LOG_DBG("HCR", "live render carousel frame overlay: %ums (fillRect+header+border)",
@@ -1452,7 +1453,7 @@ void HomeActivity::render(RenderLock&&) {
 
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr, nullptr);
     HeaderDateUtils::drawTopLine(renderer, HeaderDateUtils::getDisplayDateText());
-    drawCarouselTitle(renderer, metrics, recentCount);
+    drawCarouselRecentsPanel(renderer, recentCount);
 
     coverRectX = 0;
     coverRectY = metrics.homeTopPadding;
@@ -1566,15 +1567,24 @@ void HomeActivity::onWikipediaOpen() {
       [this](const ActivityResult&) { requestFreshHomeRender(true); });
 }
 
-void HomeActivity::drawCarouselTitle(GfxRenderer& renderer, const ThemeMetrics& metrics, const int totalBooks) {
+void HomeActivity::drawCarouselRecentsPanel(GfxRenderer& renderer, const int totalBooks) {
   if (!isLyraCarouselTheme() || totalBooks == 0) return;
 
-  const char* label =
-      homeUsesFavorites() ? tr(STR_CAROUSEL_FAVORITES) : tr(STR_CAROUSEL_RECENTS);
-  char buf[64];
-  snprintf(buf, sizeof(buf), "%s (%d)", label, totalBooks);
+  const int screenW = renderer.getScreenWidth();
+  // Height: progress bar panel (42px) + 8px extra = 50px
+  constexpr int panelH = 50;
+  // Width: 6/10 of screen minus 16px
+  const int panelW = screenW * 6 / 10 - 16;
+  constexpr int panelX = 8;
+  constexpr int panelY = 10;  // 10px margin above
+  const int fontId = UI_12_FONT_ID;
+  const int lh = renderer.getLineHeight(fontId);
+  constexpr int textLeft = 20;  // same spacing as book title in panel below
 
-  // Position: top-left, 8px margin from edges, larger font (SMALL_FONT → UI_12)
-  constexpr int kMargin = 8;
-  renderer.drawText(UI_12_FONT_ID, kMargin, kMargin, buf, true);
-}
+  PanelDrawHelper::drawCyberpunkPanel(renderer, panelX, panelY, panelW, panelH, true);
+
+  char buf[48];
+  snprintf(buf, sizeof(buf), "%s (%d)", tr(STR_CAROUSEL_RECENTS), totalBooks);
+  const int textY = panelY + (panelH - lh) / 2;
+  renderer.drawText(fontId, panelX + textLeft, textY, buf, true, EpdFontFamily::BOLD);
+}  // namespace GUI

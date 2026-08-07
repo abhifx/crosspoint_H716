@@ -620,6 +620,12 @@ void LibraryActivity::beginTextSearch() {
 
 void LibraryActivity::loop() {
   // ---- Cover generation: one slot per frame, after grid is rendered -------
+  if (coverGenPending_) {
+    coverGenPending_ = false;
+    coverGenActive_ = true;
+    // Fall through to the generation loop below — coverGenSlot_/Done_/Total_
+    // are already set by the callback.
+  }
   if (coverGenActive_) {
     const int total = totalBooks_;
     const int pageStart = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
@@ -665,15 +671,36 @@ void LibraryActivity::loop() {
                 coverGenDone_ + 1, coverGenTotal_, pageCache_[slot].path,
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
+        // Temporarily move the selector to this book so the selection
+        // frame, title and author update to show which book is being processed.
+        // Save originals for restoration after generation.
+        const int savedSelector = selectorIndex_;
+        const std::string savedSelTitle = cachedSelTitle_;
+        const std::string savedSelAuthor = cachedSelAuthor_;
+        selectorIndex_ = pageStart + slot;
+        cachedSelTitle_ = pageCache_[slot].title;
+        cachedSelAuthor_ = pageCache_[slot].author[0] ? std::string(pageCache_[slot].author) : std::string{};
+
+        // Let the render show the updated selector + title/author + grid
+        // with placeholders. The cover generation happens after this.
+        forceRender_ = true;
+        requestUpdate();
+
         // Generate cover using Epub/Xtc parser
         if (generatePageCover(pageCache_[slot].path)) {
           ++coverGenDone_;
-          // Force full render after EVERY generated cover so the new BMP
-          // appears on screen immediately. Without forceRender the render
-          // early-out would skip the update (same page, same selector).
-          forceRender_ = true;
-          requestUpdate();
         }
+
+        // Restore original selector and title/author
+        selectorIndex_ = savedSelector;
+        cachedSelTitle_ = savedSelTitle;
+        cachedSelAuthor_ = savedSelAuthor;
+
+        // Force full render after EVERY cover so the new BMP appears on
+        // screen immediately (covers the progress bar). Without forceRender
+        // the render early-out would skip the update (same page, same selector).
+        forceRender_ = true;
+        requestUpdate();
       }
     }
 
@@ -831,6 +858,13 @@ void LibraryActivity::loop() {
                           deletePageCovers();
                         }
                         refreshPageCache();
+                        // Defer generation by one frame so the grid is drawn
+                        // before the generation loop blocks the renderer.
+                        coverGenActive_ = false;
+                        coverGenPending_ = true;
+                        coverGenSlot_ = 0;
+                        coverGenDone_ = 0;
+                        coverGenTotal_ = 0;
                         forceRender_ = true;
                         requestUpdate();
                       });
@@ -844,6 +878,11 @@ void LibraryActivity::loop() {
                           deleteAllLibraryCovers();
                         }
                         refreshPageCache();
+                        coverGenActive_ = false;
+                        coverGenPending_ = true;
+                        coverGenSlot_ = 0;
+                        coverGenDone_ = 0;
+                        coverGenTotal_ = 0;
                         forceRender_ = true;
                         requestUpdate();
                       });
@@ -1292,7 +1331,7 @@ void LibraryActivity::render(RenderLock&&) {
     }
 
     // Cover generation progress text centered below author
-    if (coverGenActive_ && coverGenTotal_ > 0) {
+    if ((coverGenActive_ || coverGenPending_) && coverGenTotal_ > 0) {
       char covBuf[48];
       snprintf(covBuf, sizeof(covBuf), "%d/%d %s", coverGenDone_ + 1, coverGenTotal_, tr(STR_LOADING_POPUP));
       const int covW = renderer.getTextWidth(SMALL_FONT_ID, covBuf, EpdFontFamily::REGULAR);
@@ -1432,6 +1471,26 @@ void LibraryActivity::drawTileContent(int i, int x, int y) const {
         int tw = renderer.getTextWidth(SMALL_FONT_ID, ln.c_str(), EpdFontFamily::BOLD);
         renderer.drawText(SMALL_FONT_ID, x + (coverWidth_ - tw) / 2, ty, ln.c_str(), false, EpdFontFamily::BOLD);
         ty += lh;
+      }
+    }
+
+    // Progress bar for cover generation: drawn in WHITE on the black placeholder.
+    // The bar is only visible when coverGenActive_ is true and this tile
+    // corresponds to a slot that is being or has been processed.
+    if (coverGenActive_ || coverGenPending_) {
+      const int pageStart = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
+      const int slot = (pageStart + i) - pageStart;  // local slot index
+      if (slot >= 0 && slot < gridsPerPage_ && slot <= coverGenSlot_ && coverGenTotal_ > 0) {
+        constexpr int kBarH = 8;
+        const int barY = y + coverHeight_ - kBarH - 4;
+        const int maxBarW = coverWidth_ - 6;
+        // White outline
+        renderer.drawRect(x + 3, barY, maxBarW, kBarH, false);
+        // White fill: proportional to done / total
+        const int barW = (coverGenDone_ * maxBarW) / coverGenTotal_;
+        if (barW > 0) {
+          renderer.fillRect(x + 3, barY, barW, kBarH, false);
+        }
       }
     }
   }

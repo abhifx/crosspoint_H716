@@ -954,10 +954,10 @@ void LibraryActivity::loop() {
                       [this, path](const ActivityResult& r) {
                         if (!r.isCancelled) {
                           deleteBookFile(path);
+                          // Force a full library re-scan. The file is gone
+                          // from disk but the in-RAM index still has its entry.
+                          forceScanOnNextOpen_ = true;
                         }
-                        // Rebuild the library view: sync index, reload page
-                        // cache, recalculate totals, and reset selector to
-                        // the first book on the current page.
                         scanSd();
                         selectorIndex_ = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
                         if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;

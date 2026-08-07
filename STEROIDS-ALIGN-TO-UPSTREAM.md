@@ -24,6 +24,8 @@ these files during a merge — always keep the local Steroids version:
 | `src/activities/apps/ScreenSaverDirActivity.cpp/h` | Screensaver directory selector |
 | `src/activities/apps/ScreenSaverPreviewActivity.cpp/h` | Screensaver preview |
 | `src/components/LibraryCache.cpp/h` | Library thumbnail cache |
+| `src/HiddenBooksStore.h` | Hidden books singleton (bookId + path, JSON persist) |
+| `src/HiddenBooksStore.cpp` | Load/save/toggle/remove with atomic JSON write |
 | `src/components/EpubParser.cpp/h` | EPUB metadata parser (used by library) |
 | `src/components/themes/lyra/LyraMarcoand75Theme.cpp/h` | Custom Steroids theme |
 | `src/components/LibraryPopupOverlay.h` | Library popup overlay |
@@ -34,6 +36,8 @@ these files during a merge — always keep the local Steroids version:
 | `src/util/CoverRibbonBaker.cpp/h` | Cover ribbon baker |
 | `src/util/BookStoreUtils.h` | Book store utilities |
 | `lib/GfxRenderer/DitheringConfig.h` | Steroids-only shared grayscale config (dither method, gray levels, gamma, `gammaLUT`) |
+| `lib/GfxRenderer/ImageRenderConfig.h` | Runtime image rendering parameters (globals + failover defaults) |
+| `lib/GfxRenderer/ImageRenderConfig.cpp` | init + applySettings from CrossPointSettings |
 | `lib/GfxRenderer/BitmapHelpers.h` | Ditherers reworked with `int16_t`, pre-clamp error, safe +2 buffer indexing |
 | `lib/GfxRenderer/BitmapHelpers.cpp` | `quantizeSimple` (50/120/200), `unquantize`, `adjustPixel` gamma-LUT |
 | `lib/GfxRenderer/Bitmap.cpp` | Uses shared `DitheringConfig.h` (removed local `USE_ATKINSON`) |

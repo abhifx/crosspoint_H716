@@ -677,8 +677,228 @@ estimate, page rendering, and web server heap pressure.
 
 ---
 
-*Last updated: 2026-08-05 — CPR-vCodex Steroids. Includes §12 Steroids Settings
-Storage (v2: C++ file separation, web UI split, pre-migration backup, shortcut
-order fix, sdFontFamilyName recovery, 19 WEB_SETTINGS dedup) and §13 Silent
-Restart (heap reclamation, boot optimizations). Two Steroids definition files:
-STEROIDS-ADDICTIONS.md (enhancements) and STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge).*
+## 14. Library Shelf Enhancements
+
+### 14.1 Hide/Unhide Books
+
+Books can be hidden from the Library shelf without deleting them from the SD card.
+
+**Storage**: `/.crosspoint/hidden_books.json` — JSON array of `{bookId, path}` entries,
+managed by `HiddenBooksStore` (singleton, same pattern as `FavoritesStore`). Atomic writes
+via `serializeJson(doc, HalFile)`, atomic reads via byte-by-byte `file.read()`.
+
+**Context menu** (long-press on book): "Hide from Shelf" / "Show on Shelf" (toggle label
+based on current hidden state).
+
+**Filter integration**:
+- Hidden books are **excluded from all standard views**: All, Favourites, Latest Read,
+  Unread, Completed. Exclusion happens in `LibraryIndex::matchesFilter()` before the
+  per-filter switch.
+- New **"Hidden" filter** in the filter popup shows **only** hidden books (for management).
+- `LibraryIndex::totalMatching()` fast path for `FilterMode::ALL` now also checks
+  `HIDDEN_BOOKS.isHidden()` (previously skipped filtering entirely).
+- `BookRef` gained an `isHidden` flag set by `recordToBookRef()`.
+- `CrossPointSettings` gained `LIBRARY_FILTER_HIDDEN = 5`.
+
+**Grid refresh after hide/unhide**: `totalBooks_` and `totalPages_` are recalculated via
+`LibraryIndex::totalMatching()`, the page cache is refreshed, and the selector resets
+to the first book on the current page. Book/page counts in the header update immediately.
+
+### 14.2 Permanent Book Deletion
+
+**Context menu** → "Delete Book File" → confirmation dialog.
+
+**Dynamic confirmation message**: changes based on `Settings → Library Update Mode`:
+- **AUTO**: standard warning message.
+- **Manual**: adds a reminder to run a manual library scan afterward.
+  `STR_DELETE_BOOK_FILE_CONFIRM` / `STR_DELETE_BOOK_FILE_CONFIRM_MANUAL` i18n keys.
+
+**What is deleted**:
+- The book file from the SD card
+- Per-book cache directory (`/.crosspoint/epub_<hash>` or `/.crosspoint/xtc_<hash>`)
+- Cover thumbnail (matching `coverWidth_ × coverHeight_`)
+
+**What is preserved**: reading stats, bookmarks, clippings — never touched.
+
+**Post-deletion cleanup**:
+- Removes book from Hidden books, Favorites, and Recent books lists
+- **AUTO mode**: sets `forceScanOnNextOpen_ = true`, calls `scanSd()` to rebuild the
+  library index immediately. Grid updates with correct counts.
+- **Manual mode**: does not re-scan. The grid is not rebuilt. The user must run
+  "Update" from the library menu.
+
+### 14.3 Cover Generation Progress
+
+During cover thumbnail generation (after clearing cache or on missing covers):
+- **Per-tile progress bar**: white bar drawn on black placeholder tiles, proportional
+  to `coverGenDone_ / coverGenTotal_`
+- **Global counter**: "X/Y Loading…" displayed below the selected book author
+- **Selector feedback**: selection frame moves to the book being generated, title/author
+  update in real-time to show which book is being processed
+- **Deferred start**: the grid is rendered before generation begins (`coverGenPending_` flag)
+- **Input lock**: `coverGenLock_` blocks all input during single-cover generation to prevent
+  state corruption when the user presses keys while the selector is temporarily moved
+
+### 14.4 Side Button Page Navigation
+
+| Button | Short Press | Long Press (≥800ms) |
+|--------|-------------|---------------------|
+| Up | Row up | Sort popup |
+| Down | Row down | Filter popup |
+| Left | Previous book | **Previous page** (P−) |
+| Right | Next book | **Next page** (P+) |
+
+Button labels updated: `Left/P−` / `Right/P+` (EN), `Sx/P−` / `Dx/P+` (IT).
+
+### 14.5 Library Header Text Truncation
+
+Book title, author, and info line use `renderer.truncatedText()` (Unicode ellipsis `…`,
+UTF‑8 safe codepoint traversal, O(log n) binary search) with 8px minimum margins on both
+sides. Font style used for truncation matches the draw style (BOLD for titles, REGULAR
+for body) to prevent overflow past the margin.
+
+### 14.6 Re-generate Cover Labels
+
+| Action | EN | IT |
+|--------|-----|------|
+| Single | Re-generate this cover | Rigenera questa copertina |
+| Page | Re-generate page covers | Rigenera copertine pagina |
+| All | Re-generate all book covers | Rigenera tutte le copertine |
+
+Page and all-cover deletions show a `ConfirmationActivity` dialog. After confirmation or
+cancellation, `refreshPageCache()` triggers automatic regeneration of missing covers.
+`ConfirmationActivity` body text uses `wrappedText` (word-wrap, max 8 lines) for long
+messages.
+
+### 14.7 New Files
+
+| Path | Purpose |
+|------|---------|
+| `src/HiddenBooksStore.h` | Singleton for hidden books (bookId + normalized path) |
+| `src/HiddenBooksStore.cpp` | Persistence, toggle, add, remove, deduplication |
+
+### 14.8 Modified Files
+
+| Path | Change |
+|------|--------|
+| `src/activities/home/BookContextMenuActivity.h/.cpp` | `isHidden` parameter, `HIDE_BOOK`, `DELETE_BOOK_FILE` menu actions, toggle label |
+| `src/activities/apps/LibraryActivity.h/.cpp` | `coverGenLock_`, `coverGenPending_`, `deleteBookFile()`, hide/delete/filter handlers, progress bar rendering |
+| `src/components/LibraryIndex.h` | `FilterMode::HIDDEN = 5`, `BookRef::isHidden` |
+| `src/components/LibraryIndex.cpp` | `matchesFilter()` hidden exclusion, `totalMatching()` fast-path fix, `recordToBookRef()` isHidden |
+| `src/CrossPointSettings.h` | `LIBRARY_FILTER_HIDDEN = 5` |
+| `src/main.cpp` | `HIDDEN_BOOKS.loadFromFile()` at boot |
+
+---
+
+## 15. Dashboard (Lyra MarcoAnd75) Restructure
+
+### 15.1 Layout
+
+```
+┌──────────────────────────────────────────┐
+│  Panel 1: Title + Author                 │
+├────────────────────┬─────────────────────┤
+│  BOOK STATS        │  GLOBAL STATS       │
+│  Read: 8h48m       │  Today: 1h8m        │
+│  Sessions: 23      │  Goal: 30m  ✓       │
+│  Days: 12          │  Curr. Streak: 9d   │
+│  Left: ~2h5m       │  Books Read: 3      │
+├────────────────────┴─────────────────────┤
+│  Panel 3: Progress bar  81%             │
+└──────────────────────────────────────────┘
+```
+
+Previously the footer panel (Streak/Read/ETA) was removed entirely. ETA moved to
+BOOK STATS. Streak and Books Read moved to GLOBAL STATS. "Days" (distinct reading
+days for the current book) added as a new metric.
+
+### 15.2 Label Clarifications
+
+| Metric | EN | IT |
+|--------|-----|------|
+| Already-read time | `Read` | `Letto` |
+| Remaining time | `Left` | `Rimasto` |
+| Distinct reading days | `Days` | `Giorni` |
+| Current streak | `Curr. Streak` | `Serie attuale` |
+| Finished books | `Books Read` | `Libri letti` |
+| Goal reached | Geometric checkmark (drawLine, thickness 2) | ✓ |
+
+### 15.3 Carousel Header
+
+"Latest Recents (N)" / "Preferiti (N)" label at top-left (UI_12 font, 8px margin).
+Does not affect carousel position or dot indicators.
+
+### 15.4 Cache Versioning
+
+Carousel cache directory: `/.crosspoint/marcoand75-cache-v3`. Bump
+`MARCOAND75_CACHE_VERSION` in `src/activities/home/HomeActivity.cpp` when
+the theme rendering logic changes.
+
+---
+
+## 16. Image Rendering Tuning (Settings → Display)
+
+Runtime-configurable parameters for cover/screensaver image rendering, centralized
+in `lib/GfxRenderer/ImageRenderConfig.h/.cpp`.
+
+| Setting | Type | Default | Range | Description |
+|---------|------|---------|-------|-------------|
+| Image Dithering | Toggle | ON | — | Enable error-diffusion dithering |
+| Gamma LUT | Toggle | ON | — | Enable gamma-correction lookup table |
+| Dither Algorithm | Enum | Atkinson | Atkinson / Floyd-Steinberg | Algorithm selection |
+| Black Threshold | Value | 50 | 1–253 | Gray level below which = black |
+| Dark Gray Threshold | Value | 120 | 2–254 | Gray level below which = dark gray |
+| Light Gray Threshold | Value | 200 | 3–255 | Gray level below which = light gray |
+| Gamma Value | Value | 15 (×10=1.5) | 5–30 (0.5–3.0) | Gamma correction multiplier |
+
+**Failover**: all defaults match the historic X4 calibration. If settings are corrupted
+or not yet loaded, failover values are used.
+
+**Pipeline**: affects `Bitmap`, `JpegToBmpConverter`, `PngToBmpConverter`, and EPUB
+inline converters via `DitherUtils.h`. `DitheringConfig.h` is now a backward-compat
+wrapper around `ImageRenderConfig.h`.
+
+**Settings UI**: value settings enter fast edit mode — up/down short = ±1 step,
+long = ±5 step, Select confirms, Back cancels. Default values shown inline.
+
+**Web interface**: full `WEB_SETTINGS` entries for `/api/settings`, GET/POST
+steroids-settings handlers updated.
+
+**New files**: `lib/GfxRenderer/ImageRenderConfig.h`, `lib/GfxRenderer/ImageRenderConfig.cpp`
+
+---
+
+## 17. Confirmation Dialog Multi-line Body
+
+`ConfirmationActivity` body text changed from single-line `truncatedText` to
+word-wrapped `wrappedText` (max 8 lines, max width = screen width minus 40px margins).
+Long messages like the delete-book confirmation display fully across multiple lines.
+
+Modified: `src/activities/util/ConfirmationActivity.h/.cpp`
+
+---
+
+## 18. Other Fixes
+
+### 18.1 Clear Reading Cache Dialog (issue #37)
+
+| EN | IT |
+|----|-----|
+| "This will clear cached book rendering data." | "Verranno cancellati i dati di rendering in cache." |
+| "Your reading position and stats will be preserved." | "Posizione di lettura e statistiche saranno conservate." |
+
+### 18.2 Side Button Hints Alignment
+
+Side button hint boxes in Lyra themes:
+- Height: 100px (was 78px) — prevents label overflow
+- `topHintButtonY`: 318 (was 345) — physical button alignment
+- Text Y centering: fixed `topHintButtonY + i * (buttonHeight + buttonSpacing)` instead
+  of incorrectly adding `buttonSpacing` to the top button
+
+---
+
+*Last updated: 2026-08-07 — CPR-vCodex Steroids. Added §14 Library Shelf Enhancements
+(hide/unhide, permanent deletion, cover generation progress, side button page navigation,
+header text truncation, re-generate covers), §15 Dashboard restructure, §16 Image Rendering
+Tuning, §17 Confirmation Dialog multi-line body, §18 Other fixes. Two Steroids definition
+files: STEROIDS-ADDICTIONS.md (enhancements) and STEROIDS-ALIGN-TO-UPSTREAM.md (upstream merge).*

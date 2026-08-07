@@ -1,0 +1,8 @@
+- `[x]` Resolve GT911 ghost taps and I2C `Error -1`
+- `[x]` Verify PSRAM initialization (Octal PSRAM correctly configured)
+- `[x]` Enable BLE HID support
+    - `[x]` Add NimBLE-Arduino library to platformio.ini
+    - `[x]` Initialize BleHid in setup()
+    - `[x]` Add bring-up BLE scan logic
+- `[x]` Verify WiFi scanning and connectivity
+- `[x]` Final hardware cleanup (remove debug loops)

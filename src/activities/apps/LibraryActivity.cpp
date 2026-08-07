@@ -20,6 +20,7 @@
 #include "../util/KeyboardEntryActivity.h"
 #include "CrossPointSettings.h"
 #include "FavoritesStore.h"
+#include "HiddenBooksStore.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
@@ -192,6 +193,41 @@ static bool includeBookByFilter(const LibraryCache::Entry& e, CrossPointSettings
 
 }  // namespace
 
+void LibraryActivity::deleteBookFile(const std::string& bookPath) {
+  // Permanently delete the book file + its rendering cache + cover thumb.
+  // Reading stats, bookmarks and clippings are NOT affected.
+  if (bookPath.empty() || !Storage.exists(bookPath.c_str())) return;
+  LOG_DBG("LIB", "DelBook: %s", bookPath.c_str());
+
+  // 1. Remove the book file
+  Storage.remove(bookPath.c_str());
+
+  // 2. Remove the per-book cache directory (epub_<hash> or xtc_<hash>)
+  unsigned long long hash = std::hash<std::string>{}(bookPath);
+  if (FsHelpers::hasEpubExtension(bookPath) || FsHelpers::hasXtcExtension(bookPath)) {
+    char cacheDir[64];
+    const char* prefix = FsHelpers::hasEpubExtension(bookPath) ? "epub" : "xtc";
+    snprintf(cacheDir, sizeof(cacheDir), "/.crosspoint/%s_%llu", prefix, hash);
+    if (Storage.exists(cacheDir)) {
+      Storage.rmdir(cacheDir);
+      LOG_DBG("LIB", "DelBook: removed cache dir %s", cacheDir);
+    }
+  }
+
+  // 3. Remove cover thumbnail
+  std::string thumbPath = LibraryIndex::thumbPathFor(bookPath, coverWidth_, coverHeight_);
+  if (!thumbPath.empty() && Storage.exists(thumbPath.c_str())) {
+    Storage.remove(thumbPath.c_str());
+  }
+
+  // 4. Remove from hidden books, recents, and favourites
+  HIDDEN_BOOKS.removeBook(bookPath);
+  FAVORITES.removeBook(bookPath);
+  RECENT_BOOKS.removeBook(bookPath);
+
+  // 5. Re-scan the library index to remove the entry
+  LibraryIndex::sync();
+}
 
 // ============================================================================
 // SECTION 2: Layout & lifecycle
@@ -516,6 +552,11 @@ void LibraryActivity::openFilterPopup() {
   completedItem.selected = (currentFilter_ == CrossPointSettings::LIBRARY_FILTER_COMPLETED);
   popupOverlay_.items.push_back(completedItem);
 
+  PopupItem hiddenItem; hiddenItem.label = I18N.get(StrId::STR_HIDDEN_FILTER);
+  hiddenItem.icon = LibraryIcon; hiddenItem.iconW = 32; hiddenItem.iconH = 32;
+  hiddenItem.selected = (currentFilter_ == CrossPointSettings::LIBRARY_FILTER_HIDDEN);
+  popupOverlay_.items.push_back(hiddenItem);
+
   PopupItem searchItem; searchItem.label = I18N.get(StrId::STR_SEARCH_LIBRARY);
   searchItem.icon = SearchPlusIcon; searchItem.iconW = 32; searchItem.iconH = 32;
   searchItem.selected = false;
@@ -583,10 +624,16 @@ void LibraryActivity::selectPopupItem() {
       SETTINGS.saveToFile();
       rebuildForFilter(currentFilter_);
     } else if (idx == 5) {
+      // Hidden
+      currentFilter_ = CrossPointSettings::LIBRARY_FILTER_HIDDEN;
+      SETTINGS.libraryFilter = currentFilter_;
+      SETTINGS.saveToFile();
+      rebuildForFilter(currentFilter_);
+    } else if (idx == 6) {
       closePopup();
       beginTextSearch();
       return;
-    } else if (idx == 6) {
+    } else if (idx == 7) {
       currentSearchText_.clear();
       SETTINGS.librarySearchText[0] = '\0';
       SETTINGS.saveToFile();
@@ -820,9 +867,10 @@ void LibraryActivity::loop() {
         const bool isFav = FAVORITES.isFavorite(path);
         const auto* stats = READING_STATS.findBook(path);
         const bool isCompleted = stats && stats->completed;
+        const bool isHidden = HIDDEN_BOOKS.isHidden(path);
 
         startActivityForResult(
-            std::make_unique<BookContextMenuActivity>(renderer, mappedInput, title, isFav, isCompleted, isEpub, true),
+            std::make_unique<BookContextMenuActivity>(renderer, mappedInput, title, isFav, isCompleted, isEpub, true, isHidden),
             [this, idx, slot, path, title, isEpub](const ActivityResult& result) {
               if (result.isCancelled) { forceRender_ = true; requestUpdate(); return; }
               const auto* menuResult = std::get_if<MenuResult>(&result.data);
@@ -883,6 +931,30 @@ void LibraryActivity::loop() {
                         coverGenSlot_ = 0;
                         coverGenDone_ = 0;
                         coverGenTotal_ = 0;
+                        forceRender_ = true;
+                        requestUpdate();
+                      });
+                  return;
+                case BookContextMenuActivity::MenuAction::HIDE_BOOK:
+                  HIDDEN_BOOKS.toggleBook(path);
+                  // Reload grid and counts: hidden books must disappear / reappear.
+                  // Select first available book on the current page.
+                  selectorIndex_ = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
+                  totalBooks_ = LibraryIndex::totalMatching(
+                      currentSearchText_.empty() ? nullptr : currentSearchText_.c_str(),
+                      static_cast<LibraryIndex::FilterMode>(currentFilter_));
+                  totalPages_ = (totalBooks_ + gridsPerPage_ - 1) / gridsPerPage_;
+                  if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;
+                  refreshPageCache();
+                  forceRender_ = true; requestUpdate(); return;
+                case BookContextMenuActivity::MenuAction::DELETE_BOOK_FILE:
+                  startActivityForResult(
+                      std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                          tr(STR_DELETE_BOOK_FILE), tr(STR_DELETE_BOOK_FILE_CONFIRM)),
+                      [this, path](const ActivityResult& r) {
+                        if (!r.isCancelled) {
+                          deleteBookFile(path);
+                        }
                         forceRender_ = true;
                         requestUpdate();
                       });
@@ -1147,6 +1219,7 @@ void LibraryActivity::render(RenderLock&&) {
             case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
             case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
             case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
+            case CrossPointSettings::LIBRARY_FILTER_HIDDEN:     cachedInfo_ = tr(STR_HIDDEN_FILTER); break;
             default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
           }
           if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {
@@ -1263,6 +1336,7 @@ void LibraryActivity::render(RenderLock&&) {
       case CrossPointSettings::LIBRARY_FILTER_LATEST_READ: cachedInfo_ = tr(STR_LATEST_READ); break;
       case CrossPointSettings::LIBRARY_FILTER_UNREAD:     cachedInfo_ = tr(STR_UNREAD); break;
       case CrossPointSettings::LIBRARY_FILTER_COMPLETED:  cachedInfo_ = tr(STR_COMPLETED); break;
+      case CrossPointSettings::LIBRARY_FILTER_HIDDEN:     cachedInfo_ = tr(STR_HIDDEN_FILTER); break;
       default: cachedInfo_ = collectionsMode_ ? tr(STR_SORT_COLLECTIONS) : tr(STR_ALL_BOOKS); break;
     }
     if (collectionsMode_ && currentCollectionIdx_ >= 0 && !currentCollectionName_.empty()) {

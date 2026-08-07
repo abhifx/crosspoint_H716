@@ -50,6 +50,7 @@ struct __attribute__((packed)) BookRef {
   bool isFavorite;
   bool isOpened;
   bool isCompleted;
+  bool isHidden;
 };
 static_assert(sizeof(BookRef) <= 260, "BookRef fits in stack");
 
@@ -71,6 +72,7 @@ enum class FilterMode {
   LATEST_READ = 2,
   UNREAD = 3,
   COMPLETED = 4,
+  HIDDEN = 5,
 };
 
 // ---- Public API ----

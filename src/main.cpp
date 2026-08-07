@@ -25,6 +25,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "FavoritesStore.h"
+#include "HiddenBooksStore.h"
 #include "FlashcardsStore.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
@@ -745,6 +746,8 @@ void setup() {
     BootRecovery::enterStage(BootRecovery::BootStage::Favorites);
     FAVORITES.loadFromFile();
   }
+
+  HIDDEN_BOOKS.loadFromFile();
 
   if (skipFlashcardsLoad || isSilentReboot) {
     if (isSilentReboot) {

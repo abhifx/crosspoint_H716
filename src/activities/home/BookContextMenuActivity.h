@@ -21,12 +21,14 @@ class BookContextMenuActivity final : public Activity {
     DELETE_PAGE_COVER_THUMBS,
     DELETE_ALL_LIBRARY_COVERS,
     REINDEX_LIBRARY,
-    CLEAR_THEME_CACHE
+    CLEAR_THEME_CACHE,
+    HIDE_BOOK,           // Hide from library shelf
+    DELETE_BOOK_FILE     // Permanently delete book file + cache
   };
 
   explicit BookContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                   const std::string& bookTitle, bool isFavorite, bool isCompleted,
-                                   bool isEpubFormat, bool isLibraryMode = false);
+                                    const std::string& bookTitle, bool isFavorite, bool isCompleted,
+                                    bool isEpubFormat, bool isLibraryMode = false, bool isHidden = false);
 
   void onEnter() override;
   void loop() override;
@@ -41,7 +43,8 @@ class BookContextMenuActivity final : public Activity {
     int iconH;                  // native height
   };
 
-  static std::vector<MenuItem> buildMenuItems(bool isFavorite, bool isCompleted, bool isEpubFormat, bool isLibraryMode = false);
+  static std::vector<MenuItem> buildMenuItems(bool isFavorite, bool isCompleted, bool isEpubFormat,
+                                                bool isLibraryMode = false, bool isHidden = false);
 
   const std::vector<MenuItem> menuItems;
   const std::string bookTitle;

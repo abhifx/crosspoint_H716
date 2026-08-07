@@ -3,6 +3,7 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <HiddenBooksStore.h>
 #include <Logging.h>
 #include <Txt.h>
 #include <Xtc.h>
@@ -955,10 +956,17 @@ static void recordToBookRef(const Record& rec, BookRef& ref) {
   const auto* s = READING_STATS.findBook(rec.path);
   ref.isOpened    = s && s->totalReadingMs > 0;
   ref.isCompleted = s && s->completed;
+  ref.isHidden    = HIDDEN_BOOKS.isHidden(rec.path);
 }
 
 // Check if a Record matches the active filter (favourites/recent/etc.)
+// Hidden books are always excluded except when explicitly showing hidden only.
 static bool matchesFilter(const Record& rec, FilterMode m) {
+  // Hidden books are excluded from all standard views.
+  if (m != FilterMode::HIDDEN && HIDDEN_BOOKS.isHidden(rec.path)) {
+    LOG_DBG("LIBIDX", "matchesFilter: hidden book excluded: %s", rec.path);
+    return false;
+  }
   switch (m) {
     case FilterMode::ALL: return true;
     case FilterMode::FAVOURITES: return FAVORITES.isFavorite(rec.path);
@@ -977,6 +985,7 @@ static bool matchesFilter(const Record& rec, FilterMode m) {
       const auto* s = READING_STATS.findBook(rec.path);
       return s && s->completed;
     }
+    case FilterMode::HIDDEN: return HIDDEN_BOOKS.isHidden(rec.path);
   }
   return true;
 }
@@ -1132,13 +1141,14 @@ int totalMatching(const char* searchFilter, FilterMode filterMode) {
   if (!exists()) return 0;
   const bool hasSearch = (searchFilter && searchFilter[0] != '\0');
   if (!hasSearch && filterMode == FilterMode::ALL) {
-    // No filter — fast: just count non-tombstone records in library.dat
+    // Fast path: count non-tombstone records, but still filter out hidden books.
+    // Hidden books must be excluded from ALL views (except explicit HIDDEN filter).
     int count = 0;
     HalFile f = Storage.open(kDatFile);
     if (!f) return 0;
     Record rec;
     while (f.read(reinterpret_cast<uint8_t*>(&rec), kRecordSize) == static_cast<int>(kRecordSize)) {
-      if (!rec.tombstone()) ++count;
+      if (!rec.tombstone() && !HIDDEN_BOOKS.isHidden(rec.path)) ++count;
     }
     f.close();
     return count;

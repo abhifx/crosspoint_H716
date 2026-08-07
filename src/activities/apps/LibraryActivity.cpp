@@ -955,6 +955,12 @@ void LibraryActivity::loop() {
                         if (!r.isCancelled) {
                           deleteBookFile(path);
                         }
+                        // Rebuild the library view: sync index, reload page
+                        // cache, recalculate totals, and reset selector to
+                        // the first book on the current page.
+                        scanSd();
+                        selectorIndex_ = (selectorIndex_ / gridsPerPage_) * gridsPerPage_;
+                        if (selectorIndex_ >= totalBooks_) selectorIndex_ = 0;
                         forceRender_ = true;
                         requestUpdate();
                       });

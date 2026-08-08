@@ -53,6 +53,7 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   switch (mode) {
     case HalDisplay::FULL_REFRESH:
       return EInkDisplay::FULL_REFRESH;
+    case HalDisplay::BALANCED_REFRESH:
     case HalDisplay::HALF_REFRESH:
       return EInkDisplay::HALF_REFRESH;
     case HalDisplay::FAST_REFRESH:
@@ -62,19 +63,47 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
 }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (forceResync || (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH)) {
     einkDisplay.requestResync(1);
+    forceResync = false;
   }
 
-  einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
+  RefreshMode effectiveMode = mode;
+
+  if (fadingFix && effectiveMode == FAST_REFRESH) {
+    effectiveMode = HALF_REFRESH;
+  }
+
+  // Periodic full refresh to combat ghosting
+  if (effectiveMode == FAST_REFRESH || effectiveMode == BALANCED_REFRESH) {
+    if (refreshCycleCount >= QUALITY_REFRESH_THRESHOLD) {
+      effectiveMode = FULL_REFRESH;
+      refreshCycleCount = 0;
+    } else if (refreshCycleCount > 0 && (refreshCycleCount % MIDDLE_REFRESH_THRESHOLD) == 0) {
+      effectiveMode = HALF_REFRESH;
+      refreshCycleCount++;
+    } else {
+      refreshCycleCount++;
+    }
+  } else {
+    refreshCycleCount = 0;
+  }
+
+  einkDisplay.displayBuffer(convertRefreshMode(effectiveMode), turnOffScreen);
 }
 
 void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode) {
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (forceResync || (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH)) {
     einkDisplay.requestResync(1);
+    forceResync = false;
   }
 
-  einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(mode));
+  RefreshMode effectiveMode = mode;
+  if (fadingFix && effectiveMode == FAST_REFRESH) {
+    effectiveMode = HALF_REFRESH;
+  }
+
+  einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(effectiveMode));
 }
 
 void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
@@ -133,7 +162,11 @@ void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) { einkDisplay
 
 void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.cleanupGrayscaleBuffers(bwBuffer); }
 
-void HalDisplay::displayGrayBuffer(bool turnOffScreen) { einkDisplay.displayGrayBuffer(turnOffScreen); }
+void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
+  // Promote to HALF_REFRESH (text mode) if fadingFix is enabled, as it provides
+  // more stable gray levels.
+  einkDisplay.displayGrayBuffer(turnOffScreen, nullptr, fadingFix);
+}
 
 void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows) {
   einkDisplay.writeGrayscalePlaneStrip(lsbPlane ? EInkDisplay::GRAY_PLANE_LSB : EInkDisplay::GRAY_PLANE_MSB, rows,
@@ -141,6 +174,10 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, ui
 }
 
 bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStripGrayscale(); }
+
+void HalDisplay::setFadingFix(bool enabled) { fadingFix = enabled; }
+
+void HalDisplay::requestResync() { forceResync = true; }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

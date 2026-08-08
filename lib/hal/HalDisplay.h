@@ -14,6 +14,7 @@ class HalDisplay {
   enum RefreshMode {
     FULL_REFRESH,  // Full refresh with complete waveform
     HALF_REFRESH,  // Half refresh (1720ms) - balanced quality and speed
+    BALANCED_REFRESH, // Reader-focused fast refresh using the cleaner mid waveform
     FAST_REFRESH   // Fast refresh using custom LUT
   };
 
@@ -92,6 +93,9 @@ class HalDisplay {
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows);
   bool supportsStripGrayscale() const;
 
+  void setFadingFix(bool enabled);
+  void requestResync();
+
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;
@@ -100,6 +104,12 @@ class HalDisplay {
 
  private:
   EInkDisplay einkDisplay;
+  bool fadingFix = false;
+  bool forceResync = false;
+  uint32_t refreshCycleCount = 0;
+
+  static constexpr uint32_t QUALITY_REFRESH_THRESHOLD = 18;
+  static constexpr uint32_t MIDDLE_REFRESH_THRESHOLD = 8;
 };
 
 extern HalDisplay display;

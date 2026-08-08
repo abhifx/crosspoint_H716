@@ -1538,16 +1538,12 @@ void GfxRenderer::invertScreen() const {
 }
 
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
-  auto elapsed = millis() - start_ms;
-  LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
-  display.displayBuffer(refreshMode, fadingFix);
+  display.displayBuffer(refreshMode, false);
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) const {
-  // The async path has no turn-off-screen hook, which the sunlight fading fix
-  // relies on; keep those users on the blocking path.
   if (fadingFix) {
-    display.displayBuffer(refreshMode, fadingFix);
+    display.displayBuffer(refreshMode, false);
     return;
   }
   display.displayBufferAsync(refreshMode);
@@ -2052,7 +2048,7 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 // void GfxRenderer::grayscaleRevert() const { display.grayscaleRevert(); }
 
 void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback) const {
-  display.displayGrayscaleBase(fallback, fadingFix);
+  display.displayGrayscaleBase(fallback, false);
 }
 
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }
@@ -2079,7 +2075,7 @@ void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuff
 
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
-void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFix); }
+void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(false); }
 
 void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const {
   // Guard the uint16_t casts below: a negative would wrap to a huge length.

@@ -58,13 +58,19 @@ std::string normalisePath(const std::string& path) {
   }
 
   if (components.empty()) {
-    return "/";
+    return (path.length() > 0 && path[0] == '/') ? "/" : "";
   }
 
   std::string result;
-  for (const auto& component : components) {
+  if (path.length() > 0 && path[0] == '/') {
     result += '/';
-    result += component;
+  }
+
+  for (size_t i = 0; i < components.size(); ++i) {
+    result += components[i];
+    if (i < components.size() - 1) {
+      result += '/';
+    }
   }
   return result;
 }

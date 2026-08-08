@@ -214,7 +214,7 @@ FreeInkLgfxEpd g_dev;
 
 lgfx::epd_mode::epd_mode_t epdModeFor(RefreshMode m) {
   switch (m) {
-    case RefreshMode::Full: return lgfx::epd_mode::epd_text;
+    case RefreshMode::Full: return lgfx::epd_mode::epd_quality;
     case RefreshMode::Half: return lgfx::epd_mode::epd_text;
     default: return lgfx::epd_mode::epd_fast;
   }
@@ -379,8 +379,8 @@ void LgfxEpdDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
   // Same mode as the B/W base push: Panel_EPD's per-pixel diff keys on the
   // epd_mode LUT offset, so switching modes here would re-drive every pixel
   // (full-screen inversion flash). The board's fast LUT carries both the B/W
-  // drive and the AA gray-nudge columns, so one mode serves both pushes.
-  pushCanvas(lgfx::epd_mode::epd_fast);
+  // anti-aliased text and images.
+  pushCanvas(lgfx::epd_mode::epd_text);
   if (turnOff) g_dev.sleep();
 #else
   (void)fb;

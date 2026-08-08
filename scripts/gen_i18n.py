@@ -830,6 +830,21 @@ def main(
     default_output_dir = "lib/I18n/"
     default_src_dirs = ["src", "lib"]
 
+    # Try to find translations in firmware-specific paths if defaults don't exist
+    if not os.path.isdir(default_translations_dir):
+        # Look for firmware/<name>/lib/I18n/translations
+        project_root = Path(os.getcwd())
+        firmware_dir = project_root / "firmware"
+        if firmware_dir.is_dir():
+            for fw in firmware_dir.iterdir():
+                if fw.is_dir():
+                    candidate = fw / "lib" / "I18n" / "translations"
+                    if candidate.is_dir():
+                        default_translations_dir = str(candidate)
+                        default_output_dir = str(fw / "lib" / "I18n")
+                        default_src_dirs = [str(fw / "src"), "lib"]
+                        break
+
     if translations_dir is None or output_dir is None:
         if len(sys.argv) == 3:
             translations_dir = sys.argv[1]

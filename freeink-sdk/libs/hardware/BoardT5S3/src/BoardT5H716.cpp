@@ -49,6 +49,31 @@ void pushShiftRegister(uint8_t data) {
   digitalWrite(H716_SR_STR, LOW);
 }
 
+void pushShiftRegisterFast(uint8_t data) {
+  current_sr_state = data;
+  // Fast GPIO access for ESP32-S3
+  // STR=0, CLK=12, DATA=13
+  const uint32_t str = (1U << 0);
+  const uint32_t clk = (1U << 12);
+  const uint32_t dat = (1U << 13);
+
+  GPIO.out_w1tc = str;
+  ets_delay_us(1);
+  for (int i = 0; i < 8; i++) {
+    if (data & 0x80) GPIO.out_w1ts = dat;
+    else GPIO.out_w1tc = dat;
+    ets_delay_us(1);
+    GPIO.out_w1ts = clk;
+    ets_delay_us(1);
+    GPIO.out_w1tc = clk;
+    data <<= 1;
+  }
+  ets_delay_us(1);
+  GPIO.out_w1ts = str;
+  ets_delay_us(1);
+  GPIO.out_w1tc = str;
+}
+
 void setSrBit(uint8_t bit, bool high) {
   if (high) current_sr_state |= bit;
   else current_sr_state &= ~bit;

@@ -388,6 +388,34 @@ void LgfxEpdDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
 #endif
 }
 
+void LgfxEpdDriver::displayGray8Bit(EpdBus& bus, const uint8_t* grayBuf, RefreshMode mode, bool turnOff) {
+  (void)bus;
+#if FREEINK_DRIVER_LGFX_EPD
+  if (!g_canvas || !grayBuf) return;
+  auto* dst = static_cast<uint8_t*>(g_canvas->getBuffer());
+  if (!dst) return;
+
+  // Software 8-bit Gray (0=Black, 255=White)
+  // matches LGFX 8-bit Gray (0=Black, 255=White)
+  memcpy(dst, grayBuf, static_cast<size_t>(g_w) * g_h);
+
+  pushCanvas(epdModeFor(mode));
+  if (turnOff) g_dev.sleep();
+#else
+  (void)grayBuf;
+  (void)mode;
+  (void)turnOff;
+#endif
+}
+
+uint8_t* LgfxEpdDriver::getInternalGrayBuffer() {
+#if FREEINK_DRIVER_LGFX_EPD
+  return g_canvas ? static_cast<uint8_t*>(g_canvas->getBuffer()) : nullptr;
+#else
+  return nullptr;
+#endif
+}
+
 void LgfxEpdDriver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
   (void)bus;
 #if FREEINK_DRIVER_LGFX_EPD

@@ -68,6 +68,7 @@ class Bitmap {
   ~Bitmap();
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
+  BmpReaderError readNextRowGray8(uint8_t* data, uint8_t* rowBuffer) const;
   BmpReaderError rewindToData() const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }

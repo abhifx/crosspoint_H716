@@ -1,3 +1,5 @@
+#include <esp_rom_sys.h>
+#pragma message "COMPILING FREEINKDISPLAY.CPP LOCAL"
 #include "FreeInkDisplay.h"
 
 #include <BoardConfig.h>
@@ -50,6 +52,8 @@
 #if FREEINK_DRIVER_IT8951
 #include "driver/It8951Driver.h"
 #endif
+#include "driver/PainterDriver.h"
+#include "driver/PainterDriver.h"
 
 namespace freeink {
 namespace {
@@ -155,7 +159,10 @@ void FreeInkDisplay::selectDriver() {
         break;
       }
 #endif
-#if FREEINK_DRIVER_SSD1677
+#if FREEINK_DEVICE_LILYGO_H716
+      esp_rom_printf("FID: Picking Painter driver for H716 16-gray support\n");
+      _driver = &painterDriver();
+#elif FREEINK_DRIVER_SSD1677
       _driver = &ssd1677Driver();
 #elif FREEINK_DRIVER_UC8253_MURPHY
       _driver = &uc8253MurphyDriver();
@@ -214,6 +221,13 @@ void FreeInkDisplay::begin() {
 #endif
 
   _driver->begin(_bus);
+
+#if FREEINK_DEVICE_LILYGO_H716
+  // Connect EPD_Painter's internal framebuffer to GfxRenderer's 8-bit path if using PainterDriver
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716) {
+     // We need a way to get the painter's buffer.
+  }
+#endif
 }
 
 // ============================================================================
@@ -242,26 +256,44 @@ void FreeInkDisplay::blitImage(const uint8_t* imageData, uint16_t x, uint16_t y,
       if (destY >= displayHeight) break;
       const uint32_t destOffset = static_cast<uint32_t>(destY) * displayWidthBytes + xByte;
       const uint32_t srcOffset = static_cast<uint32_t>(row) * imageWidthBytes;
+      const uint32_t grayRowStart = static_cast<uint32_t>(destY) * displayWidth + x;
+      uint8_t* gBuf = getInternalGrayBuffer();
+
       for (uint16_t col = 0; col < imageWidthBytes; col++) {
         if ((xByte + col) >= displayWidthBytes) break;
         const uint8_t srcByte = fromProgmem ? pgm_read_byte(&imageData[srcOffset + col]) : imageData[srcOffset + col];
         uint8_t& destByte = frameBuffer[destOffset + col];
         const bool isPartialFinalByte = col + 1 == imageWidthBytes && (w & 7) != 0;
+
+        // Update 1-bit buffer
         if (!isPartialFinalByte) {
           if (transparent)
             destByte &= srcByte;  // only black pixels are drawn
           else
             destByte = srcByte;
-          continue;
+        } else {
+          const uint8_t validMask = static_cast<uint8_t>(0xFFU << (8U - (w & 7)));
+          if (transparent)
+            destByte &= static_cast<uint8_t>(srcByte | static_cast<uint8_t>(~validMask));
+          else
+            destByte = static_cast<uint8_t>((destByte & static_cast<uint8_t>(~validMask)) | (srcByte & validMask));
         }
 
-        // Only the high `w % 8` bits belong to the image. Preserve the
-        // destination pixels represented by padding bits in its final byte.
-        const uint8_t validMask = static_cast<uint8_t>(0xFFU << (8U - (w & 7)));
-        if (transparent)
-          destByte &= static_cast<uint8_t>(srcByte | static_cast<uint8_t>(~validMask));
-        else
-          destByte = static_cast<uint8_t>((destByte & static_cast<uint8_t>(~validMask)) | (srcByte & validMask));
+        // Update 8-bit buffer
+        if (gBuf) {
+          int bitsToProcess = (!isPartialFinalByte) ? 8 : (w & 7);
+          for (int bit = 0; bit < bitsToProcess; bit++) {
+            bool white = (srcByte >> (7 - bit)) & 1;
+            uint32_t gx = grayRowStart + col * 8 + bit;
+            if (gx < displayWidth) {
+              if (transparent) {
+                if (!white) gBuf[gx] = 0;
+              } else {
+                gBuf[gx] = white ? 255 : 0;
+              }
+            }
+          }
+        }
       }
     }
     return;
@@ -273,6 +305,7 @@ void FreeInkDisplay::blitImage(const uint8_t* imageData, uint16_t x, uint16_t y,
     if (destY >= displayHeight) break;
     const uint32_t srcRow = static_cast<uint32_t>(row) * imageWidthBytes;
     const uint32_t destRow = static_cast<uint32_t>(destY) * displayWidthBytes;
+    const uint32_t grayRow = static_cast<uint32_t>(destY) * displayWidth;
     for (uint16_t col = 0; col < w; col++) {
       const uint16_t destX = x + col;
       if (destX >= displayWidth) break;
@@ -280,6 +313,8 @@ void FreeInkDisplay::blitImage(const uint8_t* imageData, uint16_t x, uint16_t y,
           fromProgmem ? pgm_read_byte(&imageData[srcRow + (col >> 3)]) : imageData[srcRow + (col >> 3)];
       const bool white = (srcByte >> (7 - (col & 7))) & 1;  // 1 = white, 0 = black
       const uint8_t mask = static_cast<uint8_t>(0x80 >> (destX & 7));
+
+      // Update 1-bit buffer
       uint8_t& cell = frameBuffer[destRow + (destX >> 3)];
       if (transparent) {
         if (!white) cell &= static_cast<uint8_t>(~mask);  // paint black only
@@ -289,12 +324,24 @@ void FreeInkDisplay::blitImage(const uint8_t* imageData, uint16_t x, uint16_t y,
         else
           cell &= static_cast<uint8_t>(~mask);
       }
+
+      // Update 8-bit buffer if it exists (for H716 and other grayscale devices)
+      uint8_t* gBuf = getInternalGrayBuffer();
+      if (gBuf) {
+        if (transparent) {
+          if (!white) gBuf[grayRow + destX] = 0; // Paint Black
+        } else {
+          gBuf[grayRow + destX] = white ? 255 : 0;
+        }
+      }
     }
   }
 }
 
 void FreeInkDisplay::drawImage(const uint8_t* imageData, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                                bool fromProgmem) const {
+  // UI Assets: MSB-first 1-bit.
+  // 1 = White, 0 = Black.
   blitImage(imageData, x, y, w, h, fromProgmem, /*transparent=*/false);
 }
 
@@ -354,6 +401,10 @@ void FreeInkDisplay::syncWriteBufferFromActive() const {
 #ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   if (frameBuffer && frameBufferActive) memcpy(frameBuffer, frameBufferActive, bufferSize);
 #endif
+}
+
+uint8_t* FreeInkDisplay::getInternalGrayBuffer() const {
+  return _driver ? _driver->getInternalGrayBuffer() : nullptr;
 }
 
 uint8_t* FreeInkDisplay::allocFrameBufferStorage() const {
@@ -772,6 +823,14 @@ void FreeInkDisplay::displayGrayBuffer(bool turnOffScreen, const unsigned char* 
   _shadowValid = false;
   _redRamSynced = false;  // grayscale leaves RED holding a gray plane, not the BW baseline
   _driver->displayGray(_bus, frameBuffer, turnOffScreen, lut, factoryMode);
+}
+
+void FreeInkDisplay::displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode, bool turnOffScreen) {
+  if (_inverted) return;
+  syncPendingAsync();
+  _shadowValid = false;
+  _redRamSynced = false;
+  _driver->displayGray8Bit(_bus, grayBuf, (freeink::RefreshMode)mode, turnOffScreen);
 }
 
 void FreeInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) { displayBuffer(mode, turnOffScreen); }

@@ -356,9 +356,11 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
+#if !FREEINK_DEVICE_LILYGO_H716
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
     return;  // Successfully rendered from cache
   }
+#endif
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.

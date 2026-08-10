@@ -325,6 +325,39 @@ void XtcReaderActivity::renderPage() {
     LOG_DBG("XTR", "Pixel distribution: White=%lu, DarkGrey=%lu, LightGrey=%lu, Black=%lu", pixelCounts[0],
             pixelCounts[1], pixelCounts[2], pixelCounts[3]);
 
+    if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+      // 8-bit high-fidelity path: single pass render into grayBuffer.
+      // Map 2-bit XTH values (0=White, 1=Dark, 2=Light, 3=Black) to 8-bit luminance.
+      static const uint8_t xthMap8[] = {255, 85, 170, 0};
+      for (uint16_t y = 0; y < pageHeight; y++) {
+        for (uint16_t x = 0; x < pageWidth; x++) {
+          const uint8_t pv = getPixelValue(x, y);
+          if (pv != 0) {  // Skip white pixels (already cleared)
+            renderer.drawPixelGray(x, y, xthMap8[pv]);
+          }
+        }
+      }
+
+      // Add status bar overlay if enabled
+      if (SETTINGS.statusBarSpec().xtcMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_TOP) {
+        renderStatusBarOverlay(StatusBarOverlayPosition::Top);
+      } else {
+        renderStatusBarOverlay(StatusBarOverlayPosition::Bottom);
+      }
+
+      const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+      renderer.displayGray8Bit(mode);
+      if (pagesUntilFullRefresh <= 1) {
+        pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+      } else {
+        pagesUntilFullRefresh--;
+      }
+
+      free(pageBuffer);
+      LOG_DBG("XTR", "Rendered page %lu/%lu (8-bit grayscale)", currentPage + 1, xtc->getPageCount());
+      return;
+    }
+
     // Pass 1: BW buffer - draw all non-white pixels as black
     for (uint16_t y = 0; y < pageHeight; y++) {
       for (uint16_t x = 0; x < pageWidth; x++) {

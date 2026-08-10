@@ -399,10 +399,22 @@ void TxtReaderActivity::renderPage() {
   renderLines();
   renderStatusBar();
 
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+    // 8-bit high-fidelity path: primary pass already rendered AA text.
+    // Call displayGray8Bit directly to skip the 1-bit UI merge.
+    const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+    renderer.displayGray8Bit(mode);
+    if (pagesUntilFullRefresh <= 1) {
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      pagesUntilFullRefresh--;
+    }
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+    if (SETTINGS.textAntiAliasing) {
+      ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+    }
   }
   // scope destructor clears font cache via FontCacheManager
 }

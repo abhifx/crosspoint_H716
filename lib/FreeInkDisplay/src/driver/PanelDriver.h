@@ -128,6 +128,10 @@ class PanelDriver {
     (void)factoryMode;
     display(bus, fb, nullptr, RefreshMode::Fast, turnOff);
   }
+  virtual void displayGray8Bit(EpdBus& bus, const uint8_t* grayBuf, RefreshMode mode, bool turnOff) {
+    (void)bus; (void)grayBuf; (void)mode; (void)turnOff;
+  }
+  virtual uint8_t* getInternalGrayBuffer() { return nullptr; }
   virtual void cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) { (void)bus; (void)bw; }
 
   // --- optional, controller-specific hooks (no-op by default) ---

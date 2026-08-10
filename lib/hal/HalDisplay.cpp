@@ -127,6 +127,8 @@ void HalDisplay::deepSleep() {
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
+uint8_t* HalDisplay::getInternalGrayBuffer() const { return einkDisplay.getInternalGrayBuffer(); }
+
 uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisplay.lendBuildStorage(sizeOut); }
 
 void HalDisplay::returnFrameBufferStorage() { einkDisplay.returnBuildStorage(); }
@@ -166,6 +168,10 @@ void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   // Promote to HALF_REFRESH (text mode) if fadingFix is enabled, as it provides
   // more stable gray levels.
   einkDisplay.displayGrayBuffer(turnOffScreen, nullptr, fadingFix);
+}
+
+void HalDisplay::displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode, bool turnOffScreen) {
+  einkDisplay.displayGray8Bit(grayBuf, (freeink::FreeInkDisplay::RefreshMode)mode, turnOffScreen);
 }
 
 void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows) {

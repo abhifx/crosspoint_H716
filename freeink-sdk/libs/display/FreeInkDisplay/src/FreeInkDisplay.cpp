@@ -50,6 +50,7 @@
 #if FREEINK_DRIVER_IT8951
 #include "driver/It8951Driver.h"
 #endif
+#include "driver/PainterDriver.h"
 
 namespace freeink {
 namespace {
@@ -155,7 +156,10 @@ void FreeInkDisplay::selectDriver() {
         break;
       }
 #endif
-#if FREEINK_DRIVER_SSD1677
+#if FREEINK_DEVICE_LILYGO_H716
+      esp_rom_printf("FID: Picking Painter driver for H716\n");
+      _driver = &painterDriver();
+#elif FREEINK_DRIVER_SSD1677
       _driver = &ssd1677Driver();
 #elif FREEINK_DRIVER_UC8253_MURPHY
       _driver = &uc8253MurphyDriver();
@@ -354,6 +358,10 @@ void FreeInkDisplay::syncWriteBufferFromActive() const {
 #ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   if (frameBuffer && frameBufferActive) memcpy(frameBuffer, frameBufferActive, bufferSize);
 #endif
+}
+
+uint8_t* FreeInkDisplay::getInternalGrayBuffer() const {
+  return _driver ? _driver->getInternalGrayBuffer() : nullptr;
 }
 
 uint8_t* FreeInkDisplay::allocFrameBufferStorage() const {
@@ -772,6 +780,14 @@ void FreeInkDisplay::displayGrayBuffer(bool turnOffScreen, const unsigned char* 
   _shadowValid = false;
   _redRamSynced = false;  // grayscale leaves RED holding a gray plane, not the BW baseline
   _driver->displayGray(_bus, frameBuffer, turnOffScreen, lut, factoryMode);
+}
+
+void FreeInkDisplay::displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode, bool turnOffScreen) {
+  if (_inverted) return;
+  syncPendingAsync();
+  _shadowValid = false;
+  _redRamSynced = false;
+  _driver->displayGray8Bit(_bus, grayBuf, (freeink::RefreshMode)mode, turnOffScreen);
 }
 
 void FreeInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) { displayBuffer(mode, turnOffScreen); }

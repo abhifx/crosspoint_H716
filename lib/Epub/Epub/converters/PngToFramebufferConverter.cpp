@@ -236,7 +236,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
   // Pre-compute orientation and render-mode state once per callback.
   DirectPixelWriter pw;
-  pw.init(*ctx->renderer);
+  pw.init(*ctx->renderer, true); // Source is 8-bit grayscale
 
   for (int dstY = firstDstY; dstY < endDstY; dstY++) {
     ctx->lastDstY = dstY;
@@ -269,15 +269,18 @@ int pngDrawCallback(PNGDRAW* pDraw) {
       if (outX < screenWidth) {
         uint8_t gray = ctx->grayLineBuffer[srcX];
 
-        uint8_t ditheredGray;
-        if (useDithering) {
-          ditheredGray = applyBayerDither4Level(gray, outX, outY);
+        uint8_t val;
+        if (ctx->renderer->getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          // Send raw 8-bit luminance. The driver will handle dithering.
+          val = gray;
+        } else if (useDithering) {
+          val = applyBayerDither4Level(gray, outX, outY);
         } else {
-          ditheredGray = gray / 85;
-          if (ditheredGray > 3) ditheredGray = 3;
+          val = gray / 85;
+          if (val > 3) val = 3;
         }
-        pw.writePixel(outX, ditheredGray);
-        if (caching) cw.writePixel(outX, ditheredGray);
+        pw.writePixel(outX, val);
+        if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val));
       }
 
       // Bresenham-style stepping: advance srcX based on ratio srcWidth/dstWidth

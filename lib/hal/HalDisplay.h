@@ -58,6 +58,7 @@ class HalDisplay {
 
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
+  uint8_t* getInternalGrayBuffer() const;
 
   // Lend the framebuffer's ~48 KB STORAGE to a memory-hungry phase (chapter
   // builds) without freeing it: the allocation never moves, so repeated loans
@@ -86,6 +87,7 @@ class HalDisplay {
   void cleanupGrayscaleBuffers(const uint8_t* bwBuffer);
 
   void displayGrayBuffer(bool turnOffScreen = false);
+  void displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See

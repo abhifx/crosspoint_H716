@@ -1592,7 +1592,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
   const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
-  const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
+  const bool is8BitRenderer = renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT;
+  const bool tiledGrayscale = !is8BitRenderer && needsAnyGrayscale && renderer.supportsStripGrayscale();
   // Whole-plane buffering only pays when the BW refresh genuinely runs async
   // underneath it; on blocking panels (X3) it would just spend ~50 KB for the
   // identical serial timing. Image pages take the blocking double-FAST path
@@ -1600,10 +1601,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // nothing in flight to overlap.
   const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
   auto renderGrayscalePass = [&]() {
-    if (needsTextGrayscale) {
+    if (is8BitRenderer) {
+      // Unified pass for 8-bit devices: always render text and images together.
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      renderStatusBar();
     } else {
-      page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      if (needsTextGrayscale) {
+        page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      } else {
+        page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      }
     }
   };
 
@@ -1617,6 +1624,25 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
   const auto tBwRender = millis();
+
+  if (is8BitRenderer) {
+    // 8-bit unified grayscale path: everything was rendered into the 8-bit gray buffer.
+    // We perform a single high-quality 16-level grayscale update here.
+    // For images, we force a Full refresh to eliminate ghosting and ensure grayscale fidelity.
+    const auto mode = pageHasImages ? HalDisplay::FULL_REFRESH
+                                    : (pagesUntilFullRefresh <= 1 ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+    renderer.displayGray8Bit(mode);
+
+    if (pageHasImages || pagesUntilFullRefresh <= 1) {
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      pagesUntilFullRefresh--;
+    }
+
+    const auto tEnd = millis();
+    LOG_DBG("ERS", "Page render (8-bit Grayscale): total=%lums mode=%d", tEnd - t0, (int)mode);
+    return;
+  }
 
   if (pageHasImages) {
     // Double FAST_REFRESH with selective image blanking (pablohc's technique):

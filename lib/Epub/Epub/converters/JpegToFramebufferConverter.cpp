@@ -167,7 +167,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   // Pre-compute orientation and render-mode state once per callback invocation
   DirectPixelWriter pw;
-  pw.init(renderer);
+  pw.init(renderer, true); // Source is 8-bit grayscale
 
   // The cache streams to disk one MCU-row band at a time. Flushing rows below
   // this block (raster order guarantees they are final) repositions the band;
@@ -196,15 +196,18 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+        uint8_t val;
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          // Send raw 8-bit luminance. The driver will perform high-quality dithering.
+          val = gray;
+        } else if (useDithering) {
+          val = applyBayerDither4Level(gray, outX, outY);
         } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
+          val = gray / 85;
+          if (val > 3) val = 3;
         }
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        pw.writePixel(outX, val);
+        if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val)); // Keep cache as 2-bit for now
       }
     }
     return 1;
@@ -255,15 +258,18 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+        uint8_t val;
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          // Send raw 8-bit luminance. The driver will perform high-quality dithering.
+          val = gray;
+        } else if (useDithering) {
+          val = applyBayerDither4Level(gray, outX, outY);
         } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
+          val = gray / 85;
+          if (val > 3) val = 3;
         }
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        pw.writePixel(outX, val);
+        if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val));
       }
 
       // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
@@ -278,15 +284,18 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+        uint8_t val;
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          // Send raw 8-bit luminance. The driver will perform high-quality dithering.
+          val = gray;
+        } else if (useDithering) {
+          val = applyBayerDither4Level(gray, outX, outY);
         } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
+          val = gray / 85;
+          if (val > 3) val = 3;
         }
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        pw.writePixel(outX, val);
+        if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val));
       }
 
       // Right edge (with X boundary clamping)
@@ -304,15 +313,18 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+        uint8_t val;
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          // Send raw 8-bit luminance. The driver will perform high-quality dithering.
+          val = gray;
+        } else if (useDithering) {
+          val = applyBayerDither4Level(gray, outX, outY);
         } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
+          val = gray / 85;
+          if (val > 3) val = 3;
         }
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        pw.writePixel(outX, val);
+        if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val));
       }
     }
     return 1;
@@ -337,15 +349,17 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       if (lx >= validW) lx = validW - 1;
       uint8_t gray = row[lx];
 
-      uint8_t dithered;
-      if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
+      uint8_t val;
+      if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+        val = gray;
+      } else if (useDithering) {
+        val = applyBayerDither4Level(gray, outX, outY);
       } else {
-        dithered = gray / 85;
-        if (dithered > 3) dithered = 3;
+        val = gray / 85;
+        if (val > 3) val = 3;
       }
-      pw.writePixel(outX, dithered);
-      if (caching) cw.writePixel(outX, dithered);
+      pw.writePixel(outX, val);
+      if (caching) cw.writePixel(outX, (val > 3 ? val / 64 : val));
     }
   }
 

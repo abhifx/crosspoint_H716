@@ -116,7 +116,7 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const std::deque<std::string
   }
 }
 
-void GfxRenderer::begin() {
+void GfxRenderer::begin(uint8_t* externalGrayBuffer) {
   frameBuffer = display.getFrameBuffer();
   if (!frameBuffer) {
     LOG_ERR("GFX", "!! No framebuffer");
@@ -126,7 +126,19 @@ void GfxRenderer::begin() {
   panelHeight = display.getDisplayHeight();
   panelWidthBytes = display.getDisplayWidthBytes();
   frameBufferSize = display.getBufferSize();
+
+#if FREEINK_DEVICE_LILYGO_H716
+  if (externalGrayBuffer) {
+    grayBuffer = externalGrayBuffer;
+  } else if (!grayBuffer) {
+    grayBuffer = static_cast<uint8_t*>(heap_caps_malloc(static_cast<size_t>(panelWidth) * panelHeight, MALLOC_CAP_SPIRAM));
+    if (grayBuffer) memset(grayBuffer, 0xFF, static_cast<size_t>(panelWidth) * panelHeight); // White (255)
+  }
+  renderMode = GRAYSCALE_8BIT; // Default to high-fidelity grayscale on H716
+#endif
+
   bwBufferChunks.assign((frameBufferSize + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
+  grayBufferChunks.assign((static_cast<size_t>(panelWidth) * panelHeight + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
 }
 
 void GfxRenderer::releaseFrameBufferForBuild() {
@@ -448,6 +460,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           if (renderMode == GfxRenderer::BW && bmpVal < 3) {
             // Black (also paints over the grays in BW mode)
             renderer.drawPixel(screenX, screenY, pixelState);
+          } else if (renderMode == GfxRenderer::GRAYSCALE_8BIT) {
+            // Standard polarity: 0=Black, 255=White. bmpVal is 0..3 (0=Black).
+            renderer.drawPixelGray(screenX, screenY, bmpVal * 85);
           } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
             // Light gray (also mark the MSB if it's going to be a dark gray too)
             // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
@@ -512,15 +527,30 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     rowY = static_cast<uint32_t>(phyY - _stripY0);
   }
 
+  // In 8-bit mode, all primitives also write to the gray buffer
+  if (renderMode == GRAYSCALE_8BIT && grayBuffer) {
+    grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = state ? 0 : 255;
+  }
+
   // Calculate byte position and bit position
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
-  if (state) {
-    target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
-  } else {
-    target[byteIndex] |= 1 << bitPosition;  // Set bit
-  }
+  if (state) target[byteIndex] &= ~(1 << bitPosition);
+  else target[byteIndex] |= 1 << bitPosition;
+}
+
+void GfxRenderer::drawPixelGray(const int x, const int y, const uint8_t level) const {
+  if (!grayBuffer) return;
+
+  int phyX = 0;
+  int phyY = 0;
+  rotateCoordinates(orientation, x, y, &phyX, &phyY, panelWidth, panelHeight);
+
+  if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) return;
+
+  // Store raw 8-bit level (0=Black, 255=White)
+  grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = level;
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
@@ -934,6 +964,7 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   if constexpr (C == Color::Black || C == Color::White) {
     // Solid fill. Framebuffer: 0 = black, 1 = white.
     const uint8_t fillByte = (C == Color::Black) ? 0x00u : 0xFFu;
+    const uint8_t grayFill = (C == Color::Black) ? 0 : 255;
     for (int py = phyY0; py <= phyY1; ++py) {
       uint8_t* row = target + static_cast<int32_t>(py - originY) * panelStride;
       if (byteStart == byteEnd) {
@@ -958,9 +989,18 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
           row[byteEnd] |= tailMask;
         }
       }
+
+      // Update 8-bit buffer
+      if (grayBuffer && !_stripActive) {
+        uint8_t* grayRow = grayBuffer + static_cast<uint32_t>(py) * panelWidth;
+        memset(grayRow + phyX0, grayFill, phyX1 - phyX0 + 1);
+      }
     }
   } else {
-    // Dither (LightGray / DarkGray). Both patterns have period 2 in logical
+    // Dither (LightGray / DarkGray).
+    const uint8_t grayFill = (C == Color::LightGray) ? 170 : 85;
+
+    // ... (logic from original fillRectImpl)
     // (x, y), so per physical row we precompute one byte that represents the
     // pattern across an 8-pixel stretch — every full byte in the row uses
     // that same value.
@@ -1048,6 +1088,12 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
           memset(row + byteStart + 1, whiteMask, byteEnd - byteStart - 1);
         }
         row[byteEnd] = static_cast<uint8_t>((row[byteEnd] & ~tailMask) | (tailMask & whiteMask));
+      }
+
+      // Update 8-bit buffer
+      if (grayBuffer && !_stripActive) {
+        uint8_t* grayRow = grayBuffer + static_cast<uint32_t>(py) * panelWidth;
+        memset(grayRow + phyX0, grayFill, phyX1 - phyX0 + 1);
       }
     }
   }
@@ -1205,27 +1251,15 @@ void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, con
   }
 }
 
-void GfxRenderer::drawImage(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
-  int rotatedX = 0;
-  int rotatedY = 0;
-  rotateCoordinates(orientation, x, y, &rotatedX, &rotatedY, panelWidth, panelHeight);
-  // Rotate origin corner
-  switch (orientation) {
-    case Portrait:
-      rotatedY = rotatedY - height;
-      break;
-    case PortraitInverted:
-      rotatedX = rotatedX - width;
-      break;
-    case LandscapeClockwise:
-      rotatedY = rotatedY - height;
-      rotatedX = rotatedX - width;
-      break;
-    case LandscapeCounterClockwise:
-      break;
+void GfxRenderer::drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const {
+  const int rowBytes = (width + 7) / 8;
+  for (int row = 0; row < height; row++) {
+    for (int col = 0; col < width; col++) {
+      const uint8_t byte = bitmap[row * rowBytes + (col >> 3)];
+      const bool ink = ((byte >> (7 - (col & 7))) & 1) == 0;
+      drawPixel(x + col, y + row, ink);
+    }
   }
-  // TODO: Rotate bits
-  display.drawImage(bitmap, rotatedX, rotatedY, width, height);
 }
 
 void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, const int size) const {
@@ -1286,9 +1320,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   }
   LOG_DBG("GFX", "Scaling by %f - %s", scale, isScaled ? "scaled" : "not scaled");
 
-  // Calculate output row size (2 bits per pixel, packed into bytes)
-  // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
-  const int outputRowSize = (bitmap.getWidth() + 3) / 4;
+  const bool is8BitMode = (renderMode == GRAYSCALE_8BIT && grayBuffer);
+  const int outputRowSize = is8BitMode ? bitmap.getWidth() : (bitmap.getWidth() + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
 
@@ -1311,11 +1344,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
-      LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
-      return;
+    if (is8BitMode) {
+      if (bitmap.readNextRowGray8(outputRow, rowBytes) != BmpReaderError::Ok) break;
+    } else {
+      if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) break;
     }
 
     if (screenY < 0) {
@@ -1323,7 +1355,6 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
 
     if (bmpY < cropPixY) {
-      // Skip the row if it's outside the crop area
       continue;
     }
 
@@ -1340,14 +1371,18 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
         continue;
       }
 
-      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
+      if (is8BitMode) {
+        drawPixelGray(screenX, screenY, outputRow[bmpX]);
+      } else {
+        const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
+        if (renderMode == BW && val < 3) {
+          drawPixel(screenX, screenY);
+        } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
+          drawPixel(screenX, screenY, false);
+        } else if (renderMode == GRAYSCALE_LSB && val == 1) {
+          drawPixel(screenX, screenY, false);
+        }
       }
     }
   }
@@ -1495,6 +1530,12 @@ void GfxRenderer::clearScreen(const uint8_t color) const {
     memset(_stripBuf, color, static_cast<size_t>(panelWidthBytes) * _stripRows);
     return;
   }
+
+  if (grayBuffer) {
+    // ALWAYS clear the 8-bit buffer if it exists to avoid ghosting from previous renders.
+    memset(grayBuffer, color, static_cast<size_t>(panelWidth) * panelHeight);
+  }
+
   display.clearScreen(color);
 }
 
@@ -1538,12 +1579,24 @@ void GfxRenderer::invertScreen() const {
 }
 
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
-  display.displayBuffer(refreshMode, false);
+  auto elapsed = millis() - start_ms;
+  LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
+#if FREEINK_DEVICE_LILYGO_H716
+  if (grayBuffer) {
+    display.displayGray8Bit(grayBuffer, refreshMode, fadingFix);
+  } else {
+    display.displayBuffer(refreshMode, fadingFix);
+  }
+#else
+  display.displayBuffer(refreshMode, fadingFix);
+#endif
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) const {
+  // The async path has no turn-off-screen hook, which the sunlight fading fix
+  // relies on; keep those users on the blocking path.
   if (fadingFix) {
-    display.displayBuffer(refreshMode, false);
+    display.displayBuffer(refreshMode, fadingFix);
     return;
   }
   display.displayBufferAsync(refreshMode);
@@ -1772,7 +1825,13 @@ size_t GfxRenderer::getRegionByteSize(int lx, int ly, int lw, int lh) const {
   const int byteX1 = x1 / 8;
   const int bytesPerRow = byteX1 - byteX0 + 1;
   const int rowCount = y1 - y0 + 1;
-  return static_cast<size_t>(bytesPerRow) * static_cast<size_t>(rowCount);
+
+  size_t size = static_cast<size_t>(bytesPerRow) * rowCount;
+  if (grayBuffer) {
+    // Add space for the 8-bit buffer too
+    size += static_cast<size_t>(x1 - x0 + 1) * rowCount;
+  }
+  return size;
 }
 
 bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* buf, size_t bufSize) const {
@@ -1784,12 +1843,30 @@ bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* bu
   const int byteX1 = x1 / 8;
   const int bytesPerRow = byteX1 - byteX0 + 1;
   const int rowCount = y1 - y0 + 1;
-  const size_t needed = static_cast<size_t>(bytesPerRow) * static_cast<size_t>(rowCount);
+
+  const int grayBytesPerRow = x1 - x0 + 1;
+  size_t needed = static_cast<size_t>(bytesPerRow) * rowCount;
+  if (grayBuffer) needed += static_cast<size_t>(grayBytesPerRow) * rowCount;
+
   if (bufSize < needed || !frameBuffer || !buf) return false;
+
+  uint8_t* p = buf;
+  // Copy 1-bit data
   for (int row = 0; row < rowCount; row++) {
     const uint8_t* src = frameBuffer + (y0 + row) * panelWidthBytes + byteX0;
-    memcpy(buf + row * bytesPerRow, src, bytesPerRow);
+    memcpy(p, src, bytesPerRow);
+    p += bytesPerRow;
   }
+
+  // Copy 8-bit data
+  if (grayBuffer) {
+    for (int row = 0; row < rowCount; row++) {
+      const uint8_t* src = grayBuffer + static_cast<uint32_t>(y0 + row) * panelWidth + x0;
+      memcpy(p, src, grayBytesPerRow);
+      p += grayBytesPerRow;
+    }
+  }
+
   return true;
 }
 
@@ -1802,12 +1879,30 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
   const int byteX1 = x1 / 8;
   const int bytesPerRow = byteX1 - byteX0 + 1;
   const int rowCount = y1 - y0 + 1;
-  const size_t needed = static_cast<size_t>(bytesPerRow) * static_cast<size_t>(rowCount);
+
+  const int grayBytesPerRow = x1 - x0 + 1;
+  size_t needed = static_cast<size_t>(bytesPerRow) * rowCount;
+  if (grayBuffer) needed += static_cast<size_t>(grayBytesPerRow) * rowCount;
+
   if (bufSize < needed || !frameBuffer || !buf) return false;
+
+  const uint8_t* p = buf;
+  // Restore 1-bit data
   for (int row = 0; row < rowCount; row++) {
     uint8_t* dst = frameBuffer + (y0 + row) * panelWidthBytes + byteX0;
-    memcpy(dst, buf + row * bytesPerRow, bytesPerRow);
+    memcpy(dst, p, bytesPerRow);
+    p += bytesPerRow;
   }
+
+  // Restore 8-bit data
+  if (grayBuffer) {
+    for (int row = 0; row < rowCount; row++) {
+      uint8_t* dst = grayBuffer + static_cast<uint32_t>(y0 + row) * panelWidth + x0;
+      memcpy(dst, p, grayBytesPerRow);
+      p += grayBytesPerRow;
+    }
+  }
+
   return true;
 }
 
@@ -2048,7 +2143,7 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 // void GfxRenderer::grayscaleRevert() const { display.grayscaleRevert(); }
 
 void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback) const {
-  display.displayGrayscaleBase(fallback, false);
+  display.displayGrayscaleBase(fallback, fadingFix);
 }
 
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }
@@ -2075,7 +2170,17 @@ void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuff
 
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
-void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(false); }
+void GfxRenderer::displayGrayBuffer() const {
+  if (grayBuffer) {
+    display.displayGray8Bit(grayBuffer, HalDisplay::FAST_REFRESH, fadingFix);
+  }
+}
+
+void GfxRenderer::displayGray8Bit(HalDisplay::RefreshMode mode) const {
+  if (grayBuffer) {
+    display.displayGray8Bit(grayBuffer, mode, fadingFix);
+  }
+}
 
 void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const {
   // Guard the uint16_t casts below: a negative would wrap to a huge length.
@@ -2101,11 +2206,9 @@ void GfxRenderer::freeBwBufferChunks() {
  * Returns true if buffer was stored successfully, false if allocation failed.
  */
 bool GfxRenderer::storeBwBuffer() {
-  // Allocate and copy each chunk
+  // Allocate and copy each chunk for 1-bit buffer
   for (size_t i = 0; i < bwBufferChunks.size(); i++) {
-    // Check if any chunks are already allocated
     if (bwBufferChunks[i]) {
-      LOG_ERR("GFX", "!! BW buffer chunk %zu already stored - this is likely a bug, freeing chunk", i);
       free(bwBufferChunks[i]);
       bwBufferChunks[i] = nullptr;
     }
@@ -2115,8 +2218,6 @@ bool GfxRenderer::storeBwBuffer() {
     bwBufferChunks[i] = static_cast<uint8_t*>(malloc(chunkSize));
 
     if (!bwBufferChunks[i]) {
-      LOG_ERR("GFX", "!! Failed to allocate BW buffer chunk %zu (%zu bytes)", i, chunkSize);
-      // Free previously allocated chunks
       freeBwBufferChunks();
       return false;
     }
@@ -2124,40 +2225,58 @@ bool GfxRenderer::storeBwBuffer() {
     memcpy(bwBufferChunks[i], frameBuffer + offset, chunkSize);
   }
 
-  LOG_DBG("GFX", "Stored BW buffer in %zu chunks (%zu bytes each)", bwBufferChunks.size(), BW_BUFFER_CHUNK_SIZE);
-  return true;
-}
+  // Allocate and copy each chunk for 8-bit buffer
+  if (grayBuffer) {
+    const size_t graySize = static_cast<size_t>(panelWidth) * panelHeight;
+    for (size_t i = 0; i < grayBufferChunks.size(); i++) {
+      if (grayBufferChunks[i]) {
+        free(grayBufferChunks[i]);
+        grayBufferChunks[i] = nullptr;
+      }
 
-/**
- * This can only be called if `storeBwBuffer` was called prior to the grayscale render.
- * It should be called to restore the BW buffer state after grayscale rendering is complete.
- * Uses chunked restoration to match chunked storage.
- */
-void GfxRenderer::restoreBwBuffer() {
-  // Check if all chunks are allocated
-  bool missingChunks = false;
-  for (const auto& bwBufferChunk : bwBufferChunks) {
-    if (!bwBufferChunk) {
-      missingChunks = true;
-      break;
+      const size_t offset = i * BW_BUFFER_CHUNK_SIZE;
+      const size_t chunkSize = std::min(BW_BUFFER_CHUNK_SIZE, static_cast<size_t>(graySize - offset));
+      grayBufferChunks[i] = static_cast<uint8_t*>(malloc(chunkSize));
+
+      if (!grayBufferChunks[i]) {
+        freeBwBufferChunks();
+        return false;
+      }
+
+      memcpy(grayBufferChunks[i], grayBuffer + offset, chunkSize);
     }
   }
 
-  if (missingChunks) {
-    freeBwBufferChunks();
-    return;
+  LOG_DBG("GFX", "Stored buffers in chunks");
+  return true;
+}
+
+void GfxRenderer::restoreBwBuffer() {
+  // Restore 1-bit data
+  for (size_t i = 0; i < bwBufferChunks.size(); i++) {
+    if (bwBufferChunks[i]) {
+      const size_t offset = i * BW_BUFFER_CHUNK_SIZE;
+      const size_t chunkSize = std::min(BW_BUFFER_CHUNK_SIZE, static_cast<size_t>(frameBufferSize - offset));
+      memcpy(frameBuffer + offset, bwBufferChunks[i], chunkSize);
+    }
   }
 
-  for (size_t i = 0; i < bwBufferChunks.size(); i++) {
-    const size_t offset = i * BW_BUFFER_CHUNK_SIZE;
-    const size_t chunkSize = std::min(BW_BUFFER_CHUNK_SIZE, static_cast<size_t>(frameBufferSize - offset));
-    memcpy(frameBuffer + offset, bwBufferChunks[i], chunkSize);
+  // Restore 8-bit data
+  if (grayBuffer) {
+    const size_t graySize = static_cast<size_t>(panelWidth) * panelHeight;
+    for (size_t i = 0; i < grayBufferChunks.size(); i++) {
+      if (grayBufferChunks[i]) {
+        const size_t offset = i * BW_BUFFER_CHUNK_SIZE;
+        const size_t chunkSize = std::min(BW_BUFFER_CHUNK_SIZE, static_cast<size_t>(graySize - offset));
+        memcpy(grayBuffer + offset, grayBufferChunks[i], chunkSize);
+      }
+    }
   }
 
   display.cleanupGrayscaleBuffers(frameBuffer);
 
   freeBwBufferChunks();
-  LOG_DBG("GFX", "Restored and freed BW buffer chunks");
+  LOG_DBG("GFX", "Restored and freed buffer chunks");
 }
 
 /**

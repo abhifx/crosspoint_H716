@@ -230,7 +230,10 @@ void enterDeepSleep(bool fromTimeout = false) {
 
 void setupDisplayAndFonts(bool seamless = false) {
   display.begin(seamless);
-  renderer.begin();
+  // Pass nullptr to renderer.begin() for H716.
+  // This forces the renderer to allocate its own software grayscale buffer,
+  // separate from the driver's hardware-mapped buffer, enabling true 16-level fidelity.
+  renderer.begin(nullptr);
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
 
@@ -530,7 +533,6 @@ void loop() {
     screenshotComboActive = false;
   }
 
-  /*
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
@@ -538,7 +540,6 @@ void loop() {
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
-  */
 
   if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
       gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {

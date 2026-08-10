@@ -216,6 +216,7 @@ class FreeInkDisplay {
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen = false);
   void displayGrayBuffer(bool turnOffScreen = false, const unsigned char* lut = nullptr, bool factoryMode = false);
+  void displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
   void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
@@ -247,6 +248,7 @@ class FreeInkDisplay {
 
   // Access to frame buffer
   uint8_t* getFrameBuffer() const { return frameBuffer; }
+  uint8_t* getInternalGrayBuffer() const { return _driver ? _driver->getInternalGrayBuffer() : nullptr; }
   bool framebufferReady() const { return frameBuffer != nullptr; }
 
   // Copy the just-displayed frame (frameBufferActive) back into the write buffer.

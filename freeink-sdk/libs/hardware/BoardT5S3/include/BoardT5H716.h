@@ -20,6 +20,7 @@ class ScopedI2CLock {
 void begin();
 void beginI2C();
 void pushShiftRegister(uint8_t data);
+void pushShiftRegisterFast(uint8_t data);
 void setSrBit(uint8_t bit, bool high);
 void prepareSdBus();
 

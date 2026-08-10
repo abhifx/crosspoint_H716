@@ -282,6 +282,61 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   return BmpReaderError::Ok;
 }
 
+BmpReaderError Bitmap::readNextRowGray8(uint8_t* data, uint8_t* rowBuffer) const {
+  if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
+
+  uint8_t* outPtr = data;
+
+  switch (bpp) {
+    case 32: {
+      const uint8_t* p = rowBuffer;
+      for (int x = 0; x < width; x++) {
+        *outPtr++ = (77u * p[2] + 150u * p[1] + 29u * p[0]) >> 8;
+        p += 4;
+      }
+      break;
+    }
+    case 24: {
+      const uint8_t* p = rowBuffer;
+      for (int x = 0; x < width; x++) {
+        *outPtr++ = (77u * p[2] + 150u * p[1] + 29u * p[0]) >> 8;
+        p += 3;
+      }
+      break;
+    }
+    case 8: {
+      for (int x = 0; x < width; x++) {
+        *outPtr++ = paletteLum[rowBuffer[x]];
+      }
+      break;
+    }
+    case 4: {
+      for (int x = 0; x < width; x++) {
+        const uint8_t nibble = (x & 1) ? (rowBuffer[x >> 1] & 0x0F) : (rowBuffer[x >> 1] >> 4);
+        *outPtr++ = paletteLum[nibble];
+      }
+      break;
+    }
+    case 2: {
+      for (int x = 0; x < width; x++) {
+        *outPtr++ = paletteLum[(rowBuffer[x >> 2] >> (6 - ((x & 3) * 2))) & 0x03];
+      }
+      break;
+    }
+    case 1: {
+      for (int x = 0; x < width; x++) {
+        const uint8_t palIndex = (rowBuffer[x >> 3] & (0x80 >> (x & 7))) ? 1 : 0;
+        *outPtr++ = paletteLum[palIndex];
+      }
+      break;
+    }
+    default:
+      return BmpReaderError::UnsupportedBpp;
+  }
+
+  return BmpReaderError::Ok;
+}
+
 BmpReaderError Bitmap::rewindToData() const {
   if (!file.seek(bfOffBits)) {
     return BmpReaderError::SeekPixelDataFailed;

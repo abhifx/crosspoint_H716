@@ -118,6 +118,7 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 
 void HalGPIO::begin() {
 #if FREEINK_DEVICE_LILYGO_H716
+  BoardConfig::selectDevice(BoardConfig::Board::LilyGoT5H716);
   BoardT5H716::begin();
 #elif FREEINK_MCU_C3
   _deviceType = detectDeviceTypeWithFingerprint();

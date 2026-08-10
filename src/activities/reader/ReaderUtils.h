@@ -132,9 +132,17 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
 // Grayscale anti-aliasing pass. Renders content twice (LSB + MSB) to build
 // the grayscale buffer. Only the content callback is re-rendered — status bars
 // and other overlays should be drawn before calling this.
+//
+// On 8-bit capable devices (H716), this is a no-op as the primary render pass
+// already wrote high-fidelity anti-aliasing into the 8-bit gray buffer.
+//
 // Kept as a template to avoid std::function overhead; instantiated once per reader type.
 template <typename RenderFn>
 void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
+  if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+    return;  // High-fidelity grayscale already rendered in primary pass
+  }
+
   if (!renderer.storeBwBuffer()) {
     LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
     return;

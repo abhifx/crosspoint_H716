@@ -223,6 +223,13 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
     renderer.invertScreen();
   }
 
+#if FREEINK_DEVICE_LILYGO_H716
+  // On H716, we use the unified 8-bit grayscale path. Everything was already
+  // rendered into grayBuffer by drawBitmap.
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  return;
+#endif
+
   if (hasGreyscale) {
     // OEM grayscale pipeline base. Must stay HALF: the gray nudge LUT is
     // calibrated against the pixel state the single-pass HALF waveform leaves

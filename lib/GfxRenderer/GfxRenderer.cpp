@@ -1597,6 +1597,14 @@ void GfxRenderer::invertScreen() const {
   for (uint32_t i = 0; i < frameBufferSize; i++) {
     frameBuffer[i] = ~frameBuffer[i];
   }
+#if FREEINK_DEVICE_LILYGO_H716
+  if (grayBuffer) {
+    const uint32_t totalPixels = static_cast<uint32_t>(panelWidth) * panelHeight;
+    for (uint32_t i = 0; i < totalPixels; i++) {
+      grayBuffer[i] = 255 - grayBuffer[i];
+    }
+  }
+#endif
 }
 
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {

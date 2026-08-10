@@ -15,8 +15,8 @@
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
 // ============================================================================
-constexpr bool USE_8BIT_OUTPUT = false;
-constexpr bool USE_ATKINSON = true;
+constexpr bool USE_8BIT_OUTPUT = true;
+constexpr bool USE_ATKINSON = false;
 constexpr bool USE_FLOYD_STEINBERG = false;
 constexpr bool USE_PRESCALE = true;
 // ============================================================================

@@ -108,23 +108,39 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
 void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
   if (!_painterFb || !grayBuf) return;
 
-  // Accurate Physical Mapping: No Dithering.
-  // grayBuf: 0=Black, 255=White.
-  // H716_LEVEL_LUM: HardwareLevel (0=White, 15=Black) -> Physical Luminance (255=White, 0=Black).
-  for (uint32_t i = 0; i < (uint32_t)_w * _h; i++) {
-    uint8_t targetLum = grayBuf[i];
+  // 4x4 Bayer matrix to smooth transitions between 16 hardware levels.
+  static const int8_t bayer4x4[4][4] = {
+      {-8, 0, -6, 2},
+      {4, -4, 6, -2},
+      {-5, 3, -7, 1},
+      {7, -1, 5, -3},
+  };
 
-    // Find closest hardware shade
-    uint8_t bestLevel = 0;
-    int minDiff = 256;
-    for (uint8_t level = 0; level < 16; level++) {
-      int diff = abs((int)targetLum - (int)H716_LEVEL_LUM[level]);
-      if (diff < minDiff) {
-        minDiff = diff;
-        bestLevel = level;
-      } else break; // Monotonic search
+  for (uint32_t y = 0; y < _h; y++) {
+    const uint8_t* srcRow = grayBuf + (static_cast<size_t>(y) * _w);
+    uint8_t* dstRow = _painterFb + (static_cast<size_t>(y) * _w);
+    const int8_t* bayerRow = bayer4x4[y & 3];
+
+    for (uint32_t x = 0; x < _w; x++) {
+      int16_t targetLum = srcRow[x];
+
+      // Apply spatial dither (approx +/- 8, covering half the ~17-unit step between hardware levels)
+      targetLum += bayerRow[x & 3];
+      if (targetLum < 0) targetLum = 0;
+      if (targetLum > 255) targetLum = 255;
+
+      // Find closest hardware shade
+      uint8_t bestLevel = 0;
+      int minDiff = 256;
+      for (uint8_t level = 0; level < 16; level++) {
+        int diff = abs((int)targetLum - (int)H716_LEVEL_LUM[level]);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestLevel = level;
+        } else break; // Monotonic search
+      }
+      dstRow[x] = bestLevel;
     }
-    _painterFb[i] = bestLevel;
   }
 }
 

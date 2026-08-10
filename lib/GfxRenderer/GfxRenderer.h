@@ -277,7 +277,12 @@ class GfxRenderer {
   int getTextHeight(int fontId) const;
 
   // Grayscale functions
-  void setRenderMode(const RenderMode mode) { this->renderMode = mode; }
+  void setRenderMode(const RenderMode mode) {
+#if FREEINK_DEVICE_LILYGO_H716
+    if (grayBuffer) return; // Stay in GRAYSCALE_8BIT to preserve high-fidelity UI and images
+#endif
+    this->renderMode = mode;
+  }
   RenderMode getRenderMode() const { return renderMode; }
   // Grayscale preconditioning settle pass (no-op on X4). The rect overload
   // takes the gray region in LOGICAL screen coordinates and rotates it to the

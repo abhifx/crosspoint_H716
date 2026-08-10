@@ -138,7 +138,6 @@ void GfxRenderer::begin(uint8_t* externalGrayBuffer) {
 #endif
 
   bwBufferChunks.assign((frameBufferSize + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
-  grayBufferChunks.assign((static_cast<size_t>(panelWidth) * panelHeight + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
 }
 
 void GfxRenderer::releaseFrameBufferForBuild() {
@@ -527,8 +526,9 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     rowY = static_cast<uint32_t>(phyY - _stripY0);
   }
 
-  // In 8-bit mode, all primitives also write to the gray buffer
-  if (renderMode == GRAYSCALE_8BIT && grayBuffer) {
+  // If grayBuffer is available, all primitives also write to it regardless of current renderMode.
+  // This ensures the high-quality 8-bit canvas remains the Source of Truth on H716.
+  if (grayBuffer && !_stripActive) {
     grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = state ? 0 : 255;
   }
 
@@ -536,8 +536,11 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
-  if (state) target[byteIndex] &= ~(1 << bitPosition);
-  else target[byteIndex] |= 1 << bitPosition;
+  if (state) {
+    target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
+  } else {
+    target[byteIndex] |= 1 << bitPosition;  // Set bit
+  }
 }
 
 void GfxRenderer::drawPixelGray(const int x, const int y, const uint8_t level) const {
@@ -547,10 +550,18 @@ void GfxRenderer::drawPixelGray(const int x, const int y, const uint8_t level) c
   int phyY = 0;
   rotateCoordinates(orientation, x, y, &phyX, &phyY, panelWidth, panelHeight);
 
-  if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) return;
+  if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) {
+    return;
+  }
 
   // Store raw 8-bit level (0=Black, 255=White)
   grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = level;
+}
+
+void GfxRenderer::displayGray8Bit(HalDisplay::RefreshMode mode) const {
+  if (grayBuffer) {
+    display.displayGray8Bit(grayBuffer, mode, fadingFix);
+  }
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
@@ -964,7 +975,6 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   if constexpr (C == Color::Black || C == Color::White) {
     // Solid fill. Framebuffer: 0 = black, 1 = white.
     const uint8_t fillByte = (C == Color::Black) ? 0x00u : 0xFFu;
-    const uint8_t grayFill = (C == Color::Black) ? 0 : 255;
     for (int py = phyY0; py <= phyY1; ++py) {
       uint8_t* row = target + static_cast<int32_t>(py - originY) * panelStride;
       if (byteStart == byteEnd) {
@@ -990,17 +1000,15 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
         }
       }
 
-      // Update 8-bit buffer
+      // Update 8-bit buffer regardless of renderMode
       if (grayBuffer && !_stripActive) {
         uint8_t* grayRow = grayBuffer + static_cast<uint32_t>(py) * panelWidth;
+        const uint8_t grayFill = (C == Color::Black) ? 0 : 255;
         memset(grayRow + phyX0, grayFill, phyX1 - phyX0 + 1);
       }
     }
   } else {
-    // Dither (LightGray / DarkGray).
-    const uint8_t grayFill = (C == Color::LightGray) ? 170 : 85;
-
-    // ... (logic from original fillRectImpl)
+    // Dither (LightGray / DarkGray). Both patterns have period 2 in logical
     // (x, y), so per physical row we precompute one byte that represents the
     // pattern across an 8-pixel stretch — every full byte in the row uses
     // that same value.
@@ -1090,9 +1098,10 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
         row[byteEnd] = static_cast<uint8_t>((row[byteEnd] & ~tailMask) | (tailMask & whiteMask));
       }
 
-      // Update 8-bit buffer
+      // Update 8-bit buffer for dithered colors
       if (grayBuffer && !_stripActive) {
         uint8_t* grayRow = grayBuffer + static_cast<uint32_t>(py) * panelWidth;
+        const uint8_t grayFill = (C == Color::LightGray) ? 192 : 64; // Approximations for 8-bit buffer
         memset(grayRow + phyX0, grayFill, phyX1 - phyX0 + 1);
       }
     }
@@ -1251,15 +1260,27 @@ void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, con
   }
 }
 
-void GfxRenderer::drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const {
-  const int rowBytes = (width + 7) / 8;
-  for (int row = 0; row < height; row++) {
-    for (int col = 0; col < width; col++) {
-      const uint8_t byte = bitmap[row * rowBytes + (col >> 3)];
-      const bool ink = ((byte >> (7 - (col & 7))) & 1) == 0;
-      drawPixel(x + col, y + row, ink);
-    }
+void GfxRenderer::drawImage(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
+  int rotatedX = 0;
+  int rotatedY = 0;
+  rotateCoordinates(orientation, x, y, &rotatedX, &rotatedY, panelWidth, panelHeight);
+  // Rotate origin corner
+  switch (orientation) {
+    case Portrait:
+      rotatedY = rotatedY - height;
+      break;
+    case PortraitInverted:
+      rotatedX = rotatedX - width;
+      break;
+    case LandscapeClockwise:
+      rotatedY = rotatedY - height;
+      rotatedX = rotatedX - width;
+      break;
+    case LandscapeCounterClockwise:
+      break;
   }
+  // TODO: Rotate bits
+  display.drawImage(bitmap, rotatedX, rotatedY, width, height);
 }
 
 void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, const int size) const {
@@ -1583,6 +1604,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
 #if FREEINK_DEVICE_LILYGO_H716
   if (grayBuffer) {
+    // Unified high-fidelity refresh
     display.displayGray8Bit(grayBuffer, refreshMode, fadingFix);
   } else {
     display.displayBuffer(refreshMode, fadingFix);
@@ -1828,7 +1850,6 @@ size_t GfxRenderer::getRegionByteSize(int lx, int ly, int lw, int lh) const {
 
   size_t size = static_cast<size_t>(bytesPerRow) * rowCount;
   if (grayBuffer) {
-    // Add space for the 8-bit buffer too
     size += static_cast<size_t>(x1 - x0 + 1) * rowCount;
   }
   return size;
@@ -1851,14 +1872,12 @@ bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* bu
   if (bufSize < needed || !frameBuffer || !buf) return false;
 
   uint8_t* p = buf;
-  // Copy 1-bit data
   for (int row = 0; row < rowCount; row++) {
     const uint8_t* src = frameBuffer + (y0 + row) * panelWidthBytes + byteX0;
     memcpy(p, src, bytesPerRow);
     p += bytesPerRow;
   }
 
-  // Copy 8-bit data
   if (grayBuffer) {
     for (int row = 0; row < rowCount; row++) {
       const uint8_t* src = grayBuffer + static_cast<uint32_t>(y0 + row) * panelWidth + x0;
@@ -1866,7 +1885,6 @@ bool GfxRenderer::copyRegionToBuffer(int lx, int ly, int lw, int lh, uint8_t* bu
       p += grayBytesPerRow;
     }
   }
-
   return true;
 }
 
@@ -1887,14 +1905,12 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
   if (bufSize < needed || !frameBuffer || !buf) return false;
 
   const uint8_t* p = buf;
-  // Restore 1-bit data
   for (int row = 0; row < rowCount; row++) {
     uint8_t* dst = frameBuffer + (y0 + row) * panelWidthBytes + byteX0;
     memcpy(dst, p, bytesPerRow);
     p += bytesPerRow;
   }
 
-  // Restore 8-bit data
   if (grayBuffer) {
     for (int row = 0; row < rowCount; row++) {
       uint8_t* dst = grayBuffer + static_cast<uint32_t>(y0 + row) * panelWidth + x0;
@@ -1902,7 +1918,6 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
       p += grayBytesPerRow;
     }
   }
-
   return true;
 }
 
@@ -2170,17 +2185,7 @@ void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuff
 
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
-void GfxRenderer::displayGrayBuffer() const {
-  if (grayBuffer) {
-    display.displayGray8Bit(grayBuffer, HalDisplay::FAST_REFRESH, fadingFix);
-  }
-}
-
-void GfxRenderer::displayGray8Bit(HalDisplay::RefreshMode mode) const {
-  if (grayBuffer) {
-    display.displayGray8Bit(grayBuffer, mode, fadingFix);
-  }
-}
+void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFix); }
 
 void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const {
   // Guard the uint16_t casts below: a negative would wrap to a huge length.
@@ -2206,7 +2211,7 @@ void GfxRenderer::freeBwBufferChunks() {
  * Returns true if buffer was stored successfully, false if allocation failed.
  */
 bool GfxRenderer::storeBwBuffer() {
-  // Allocate and copy each chunk for 1-bit buffer
+  // Allocate and copy each chunk for 1-bit
   for (size_t i = 0; i < bwBufferChunks.size(); i++) {
     if (bwBufferChunks[i]) {
       free(bwBufferChunks[i]);
@@ -2225,7 +2230,7 @@ bool GfxRenderer::storeBwBuffer() {
     memcpy(bwBufferChunks[i], frameBuffer + offset, chunkSize);
   }
 
-  // Allocate and copy each chunk for 8-bit buffer
+  // Allocate and copy each chunk for 8-bit
   if (grayBuffer) {
     const size_t graySize = static_cast<size_t>(panelWidth) * panelHeight;
     for (size_t i = 0; i < grayBufferChunks.size(); i++) {
@@ -2252,7 +2257,7 @@ bool GfxRenderer::storeBwBuffer() {
 }
 
 void GfxRenderer::restoreBwBuffer() {
-  // Restore 1-bit data
+  // Restore 1-bit
   for (size_t i = 0; i < bwBufferChunks.size(); i++) {
     if (bwBufferChunks[i]) {
       const size_t offset = i * BW_BUFFER_CHUNK_SIZE;
@@ -2261,7 +2266,7 @@ void GfxRenderer::restoreBwBuffer() {
     }
   }
 
-  // Restore 8-bit data
+  // Restore 8-bit
   if (grayBuffer) {
     const size_t graySize = static_cast<size_t>(panelWidth) * panelHeight;
     for (size_t i = 0; i < grayBufferChunks.size(); i++) {

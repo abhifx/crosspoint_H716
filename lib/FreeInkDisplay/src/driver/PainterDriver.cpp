@@ -43,15 +43,14 @@ void PainterDriver::begin(EpdBus& bus) {
 
   LOG_INF("PDR", "Setting 16 gray levels...");
   if (!_painter.setGreyLevels(16)) {
-    LOG_ERR("PDR", "setGreyLevels(16) FAILED! Falling back to 4 levels.");
+    LOG_ERR("PDR", "setGreyLevels(16) FAILED!");
   }
 
-  _painter.setQuality(EPD_Painter::Quality::QUALITY_HIGH); // High quality is required for photographic detail
+  _painter.setQuality(EPD_Painter::Quality::QUALITY_HIGH);
 
   auto& cfg = EPD_Painter_Access::getMutableConfig(_painter);
-  // Reverting to default timings which are known to work in Tony's demos
-  cfg.g16_pass_us_normal = 15000;
-  cfg.g16_pass_us_high   = 15000;
+  cfg.g16_pass_us_normal = 20000;
+  cfg.g16_pass_us_high   = 20000;
 
   size_t planeBytes = static_cast<size_t>(_wb) * _h;
   if (!_lsb) _lsb = (uint8_t*)heap_caps_malloc(planeBytes, MALLOC_CAP_SPIRAM);
@@ -64,9 +63,7 @@ void PainterDriver::begin(EpdBus& bus) {
      if (_painterFb) memset(_painterFb, 0x00, static_cast<size_t>(_w) * _h); // Start White (0)
   }
 
-  // Mandatory hardware clear on startup to sync state
   _painter.clear();
-
   LOG_INF("PDR", "PainterDriver ready.");
 }
 
@@ -80,16 +77,29 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
 
   for (uint32_t y = 0; y < _h; y++) {
     const uint8_t* brow = bw + y * _wb;
+    const uint8_t* lrow = lsb ? (lsb + y * _wb) : nullptr;
+    const uint8_t* mrow = msb ? (msb + y * _wb) : nullptr;
     uint8_t* drow = _painterFb + (static_cast<size_t>(y) * _w);
 
     for (uint16_t bx = 0; bx < _wb; bx++) {
       uint8_t b = brow[bx];
+      uint8_t l = lrow ? lrow[bx] : 0x00;
+      uint8_t m = mrow ? mrow[bx] : 0x00;
 
       for (int bit = 0; bit < 8; bit++) {
         uint8_t mask = 0x80 >> bit;
-        // CrossPoint 1-bit: 1=White, 0=Black.
-        // hardware 0=White, 15=Black.
-        drow[bx * 8 + bit] = (b & mask) ? 0 : 15;
+        uint8_t level = 0; // White (0)
+
+        if (!(b & mask)) {
+          // Pixel is inked (b=0).
+          bool mm = (m & mask);
+          bool ll = (l & mask);
+          // Fixed plane mapping logic from modern SDK copy
+          if (mm && ll) level = 10;
+          else if (mm && !ll) level = 5;
+          else level = 15;
+        }
+        drow[bx * 8 + bit] = level;
       }
     }
   }
@@ -98,18 +108,13 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
 void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
   if (!_painterFb || !grayBuf) return;
 
-  // Optimized Direct Mapping using measured hardware luminance levels.
-  // This replaces linear bit-shifting and manual contrast curves with
-  // accurate physical shade matching, eliminating banding.
+  // Accurate Physical Mapping: No Dithering.
   // grayBuf: 0=Black, 255=White.
-  // H716_LEVEL_LUM: index=HardwareLevel (0=White, 15=Black), value=PhysicalLuminance (255=White, 0=Black).
-
+  // H716_LEVEL_LUM: HardwareLevel (0=White, 15=Black) -> Physical Luminance (255=White, 0=Black).
   for (uint32_t i = 0; i < (uint32_t)_w * _h; i++) {
     uint8_t targetLum = grayBuf[i];
 
-    // Find hardware level whose luminance is closest to targetLum.
-    // Since H716_LEVEL_LUM is strictly monotonic (255 down to 0),
-    // we can use a fast search.
+    // Find closest hardware shade
     uint8_t bestLevel = 0;
     int minDiff = 256;
     for (uint8_t level = 0; level < 16; level++) {
@@ -117,26 +122,22 @@ void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
       if (diff < minDiff) {
         minDiff = diff;
         bestLevel = level;
-      } else if (diff > minDiff) {
-        // Since it's monotonic, as soon as diff starts increasing, we've passed the best match.
-        break;
-      }
+      } else break; // Monotonic search
     }
     _painterFb[i] = bestLevel;
   }
 }
 
 void PainterDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
-  // Sync 1-bit UI into the 16-level hardware buffer.
-  // This uses our new non-inverted mapping logic.
+  // 1-bit fallback path (UI assets, menus)
   syncToPainter(fb, nullptr, nullptr);
 
   if (mode == RefreshMode::Full) {
     _painter.clear();
   }
 
-  // Paint to hardware
   _painter.paint(_painterFb);
+  _painter.paint(_painterFb); // Double pass for stability
 
   if (turnOff) {
     _painter.shutdown();
@@ -154,18 +155,17 @@ void PainterDriver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
 void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut, bool factoryMode) {
   syncToPainter(fb, _lsb, _msb);
   _painter.paint(_painterFb);
+  _painter.paint(_painterFb);
 }
 
 void PainterDriver::displayGray8Bit(EpdBus& bus, const uint8_t* grayBuf, RefreshMode mode, bool turnOff) {
   syncToPainter8Bit(grayBuf);
 
   if (mode == RefreshMode::Full) {
-    LOG_INF("PDR", "Grayscale full refresh: clearing...");
     _painter.clear();
   }
 
   _painter.paint(_painterFb);
-  // Double paint ensures levels settle properly on H716 hardware
   _painter.paint(_painterFb);
 
   if (turnOff) {

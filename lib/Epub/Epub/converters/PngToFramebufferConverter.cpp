@@ -272,7 +272,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
         uint8_t val;
         if (ctx->renderer->getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           // Send raw 8-bit luminance. The driver will handle dithering.
-          val = gray;
+          val = adjustPixel(gray);
         } else if (useDithering) {
           val = applyBayerDither4Level(gray, outX, outY);
         } else {

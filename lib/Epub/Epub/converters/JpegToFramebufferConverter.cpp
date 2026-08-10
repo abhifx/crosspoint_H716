@@ -199,7 +199,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         uint8_t val;
         if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           // Send raw 8-bit luminance. The driver will perform high-quality dithering.
-          val = gray;
+          val = adjustPixel(gray);
         } else if (useDithering) {
           val = applyBayerDither4Level(gray, outX, outY);
         } else {
@@ -261,7 +261,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         uint8_t val;
         if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           // Send raw 8-bit luminance. The driver will perform high-quality dithering.
-          val = gray;
+          val = adjustPixel(gray);
         } else if (useDithering) {
           val = applyBayerDither4Level(gray, outX, outY);
         } else {
@@ -287,7 +287,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         uint8_t val;
         if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           // Send raw 8-bit luminance. The driver will perform high-quality dithering.
-          val = gray;
+          val = adjustPixel(gray);
         } else if (useDithering) {
           val = applyBayerDither4Level(gray, outX, outY);
         } else {
@@ -316,7 +316,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         uint8_t val;
         if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           // Send raw 8-bit luminance. The driver will perform high-quality dithering.
-          val = gray;
+          val = adjustPixel(gray);
         } else if (useDithering) {
           val = applyBayerDither4Level(gray, outX, outY);
         } else {
@@ -351,7 +351,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
       uint8_t val;
       if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
-        val = gray;
+        val = adjustPixel(gray);
       } else if (useDithering) {
         val = applyBayerDither4Level(gray, outX, outY);
       } else {

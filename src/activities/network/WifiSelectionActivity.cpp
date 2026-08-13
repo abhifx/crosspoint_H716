@@ -403,8 +403,9 @@ void WifiSelectionActivity::checkConnectionStatus() {
     autoConnecting = false;
 
 #if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 2
+    uint8_t* bssid = WiFi.BSSID();
     uint8_t connectedBssid[6] = {};
-    WiFi.BSSID(connectedBssid);
+    if (bssid) memcpy(connectedBssid, bssid, 6);
     LOG_DBG("WIFI", "Connected BSSID: %02x:%02x:%02x:%02x:%02x:%02x, channel: %d, RSSI: %d dBm",
             static_cast<unsigned>(connectedBssid[0]), static_cast<unsigned>(connectedBssid[1]),
             static_cast<unsigned>(connectedBssid[2]), static_cast<unsigned>(connectedBssid[3]),

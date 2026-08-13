@@ -10,7 +10,7 @@
 // 2-bit (4-level) grayscale. Images whose palette entries all map to native
 // gray levels (0, 85, 170, 255 ±21) are mapped directly without dithering.
 // For cover images, dithering is done in JpegToBmpConverter.cpp instead.
-constexpr bool USE_ATKINSON = true;  // Use Atkinson dithering instead of Floyd-Steinberg
+constexpr bool USE_ATKINSON = false;  // Use Atkinson dithering instead of Floyd-Steinberg
 // ============================================================================
 
 Bitmap::~Bitmap() {

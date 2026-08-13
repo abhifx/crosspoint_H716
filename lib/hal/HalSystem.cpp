@@ -6,9 +6,6 @@
 #include "HalStorage.h"
 #include "Logging.h"
 #include "esp_debug_helpers.h"
-#include "esp_private/esp_cpu_internal.h"
-#include "esp_private/esp_system_attr.h"
-#include "esp_private/panic_internal.h"
 
 #define MAX_PANIC_STACK_DEPTH 32
 #define PANIC_CAPTURE_MAGIC 0x50414E49u
@@ -161,7 +158,7 @@ std::string getPanicInfo(bool full) {
 
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
-  if (resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP) {
+  if (resetReason == ESP_RST_PANIC) {
     return true;
   }
 

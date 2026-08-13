@@ -15,6 +15,12 @@
 #include "DitherUtils.h"
 #include "PixelCache.h"
 
+#ifdef ARDUINO_ESP32S3_DEV
+extern "C" {
+void s3_png_rgb888_to_gray8_simd(const uint8_t* src, uint8_t* dst, int width);
+}
+#endif
+
 namespace {
 
 // Context struct passed through PNGdec callbacks to avoid global mutable state.
@@ -149,10 +155,14 @@ void convertLineToGray(const uint8_t* pPixels, uint8_t* grayLine, int width, int
       break;
 
     case PNG_PIXEL_TRUECOLOR:
+#ifdef ARDUINO_ESP32S3_DEV
+      s3_png_rgb888_to_gray8_simd(pPixels, grayLine, width);
+#else
       for (int x = 0; x < width; x++) {
         const uint8_t* p = &pPixels[x * 3];
         grayLine[x] = (uint8_t)((p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8);
       }
+#endif
       break;
 
     case PNG_PIXEL_INDEXED:
@@ -269,13 +279,8 @@ int pngDrawCallback(PNGDRAW* pDraw) {
       if (outX < screenWidth) {
         uint8_t gray = ctx->grayLineBuffer[srcX];
 
-        uint8_t ditheredGray;
-        if (useDithering) {
-          ditheredGray = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          ditheredGray = gray / 85;
-          if (ditheredGray > 3) ditheredGray = 3;
-        }
+        // Dithering removed: always quantize
+        uint8_t ditheredGray = applyBayerDither4Level(gray, outX, outY);
         pw.writePixel(outX, ditheredGray);
         if (caching) cw.writePixel(outX, ditheredGray);
       }

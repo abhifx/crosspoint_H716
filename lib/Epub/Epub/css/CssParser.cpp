@@ -63,8 +63,11 @@ constexpr char asciiToLower(const char c) { return (c >= 'A' && c <= 'Z') ? stat
 // Case-insensitive equality on ASCII. lowercaseKeyword MUST already be
 // lowercase; CSS keywords are ASCII by spec so byte-wise tolower is safe.
 constexpr bool iequalsAscii(std::string_view value, std::string_view lowercaseKeyword) {
-  return std::equal(value.begin(), value.end(), lowercaseKeyword.begin(), lowercaseKeyword.end(),
-                    [](char a, char b) { return asciiToLower(a) == b; });
+  if (value.size() != lowercaseKeyword.size()) return false;
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (asciiToLower(value[i]) != lowercaseKeyword[i]) return false;
+  }
+  return true;
 }
 
 // Walk s and invoke fn(token) for each non-empty run between delimiters.
@@ -109,8 +112,22 @@ bool tryParseNumber(std::string_view s, T& out) {
   const char* begin = s.data();
   const char* end = s.data() + s.size();
   if (begin < end && *begin == '+') ++begin;
-  const auto r = std::from_chars(begin, end, out);
-  return r.ec == std::errc{} && r.ptr == end;
+  if (begin == end) return false;
+
+  if constexpr (std::is_integral_v<T>) {
+    const auto r = std::from_chars(begin, end, out);
+    return r.ec == std::errc{} && r.ptr == end;
+  } else {
+    // GCC 8.x doesn't support from_chars for floats. Use strtof.
+    char buf[64];
+    const size_t len = end - begin;
+    if (len >= sizeof(buf)) return false;
+    memcpy(buf, begin, len);
+    buf[len] = '\0';
+    char* endptr = nullptr;
+    out = strtof(buf, &endptr);
+    return endptr == buf + len;
+  }
 }
 
 // Collect up to 4 whitespace-separated tokens for a CSS edge-value shorthand
@@ -481,7 +498,7 @@ void CssParser::processRuleBlockWithStyle(std::string_view selectorGroup, const 
 
         // Store or merge with existing. Hash/equal are case-insensitive, so two
         // selectors that differ only in ASCII case collide on insert and merge.
-        auto it = rulesBySelector_.find(sel);
+        auto it = rulesBySelector_.find(std::string(sel));
         if (it != rulesBySelector_.end()) {
           it->second.applyOver(style);
         } else {
@@ -652,17 +669,18 @@ CssStyle CssParser::resolveStyle(std::string_view tagName, std::string_view clas
 
   // 1. Apply element-level style (lowest priority). The map's hash/equal are
   // case-insensitive, so the raw tagName view can be used as the lookup key.
-  if (auto it = rulesBySelector_.find(tagName); it != rulesBySelector_.end()) {
+  if (auto it = rulesBySelector_.find(std::string(tagName)); it != rulesBySelector_.end()) {
     result.applyOver(it->second);
   }
 
   if (classAttr.empty()) return result;
 
   // TODO: Support combinations of classes (e.g. style on .class1.class2)
-  // 2. Apply class styles (medium priority). The transparent hash/equal accept
-  // a CompositeKey, so we never materialize the concatenation.
+  // 2. Apply class styles (medium priority).
   forEachDelimitedToken(classAttr, isCssWhitespace, [&](std::string_view cls) {
-    if (auto it = rulesBySelector_.find(CompositeKey{".", cls}); it != rulesBySelector_.end()) {
+    std::string key = ".";
+    key += cls;
+    if (auto it = rulesBySelector_.find(key); it != rulesBySelector_.end()) {
       result.applyOver(it->second);
     }
   });
@@ -670,7 +688,10 @@ CssStyle CssParser::resolveStyle(std::string_view tagName, std::string_view clas
   // TODO: Support combinations of classes (e.g. style on p.class1.class2)
   // 3. Apply element.class styles (higher priority).
   forEachDelimitedToken(classAttr, isCssWhitespace, [&](std::string_view cls) {
-    if (auto it = rulesBySelector_.find(CompositeKey{tagName, ".", cls}); it != rulesBySelector_.end()) {
+    std::string key = std::string(tagName);
+    key += ".";
+    key += cls;
+    if (auto it = rulesBySelector_.find(key); it != rulesBySelector_.end()) {
       result.applyOver(it->second);
     }
   });

@@ -6,7 +6,10 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <mbedtls/sha256.h>
-#include <spi_flash_mmap.h>
+
+#ifndef SPI_FLASH_SEC_SIZE
+#define SPI_FLASH_SEC_SIZE 4096
+#endif
 
 #include <algorithm>
 #include <cstring>

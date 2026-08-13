@@ -2,8 +2,11 @@
 
 #include <Logging.h>
 #include <esp_rom_crc.h>
-#include <spi_flash_mmap.h>
 #include <string.h>
+
+#ifndef SPI_FLASH_SEC_SIZE
+#define SPI_FLASH_SEC_SIZE 4096
+#endif
 
 namespace ota_boot {
 

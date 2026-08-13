@@ -20,7 +20,15 @@ struct PreviewKey {
   bool extraParagraphSpacing = false;
   bool focusReading = false;
   bool hyphenation = false;
-  bool operator==(const PreviewKey&) const = default;
+
+  bool operator==(const PreviewKey& other) const {
+    return fontId == other.fontId && fontPointSize == other.fontPointSize && screenMargin == other.screenMargin &&
+           textWidth == other.textWidth && lineCompression == other.lineCompression && alignment == other.alignment &&
+           extraParagraphSpacing == other.extraParagraphSpacing && focusReading == other.focusReading &&
+           hyphenation == other.hyphenation;
+  }
+
+  bool operator!=(const PreviewKey& other) const { return !(*this == other); }
 };
 
 // Cached engine preview lines + the key that produced them

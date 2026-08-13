@@ -21,14 +21,13 @@
 //
 
 template <typename T, typename... Args>
-  requires(!std::is_array_v<T>)
-std::unique_ptr<T> makeUniqueNoThrow(Args&&... args) {
+std::enable_if_t<!std::is_array<T>::value, std::unique_ptr<T>> makeUniqueNoThrow(Args&&... args) {
   return std::unique_ptr<T>(new (std::nothrow) T(std::forward<Args>(args)...));
 }
 
 template <typename T>
-  requires std::is_unbounded_array_v<T>
-std::unique_ptr<T> makeUniqueNoThrow(size_t count) {
+std::enable_if_t<std::is_array<T>::value && std::rank<T>::value == 1 && std::extent<T>::value == 0, std::unique_ptr<T>>
+makeUniqueNoThrow(size_t count) {
   using Elem = std::remove_extent_t<T>;
   return std::unique_ptr<T>(new (std::nothrow) Elem[count]());
 }

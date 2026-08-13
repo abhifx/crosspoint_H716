@@ -104,12 +104,12 @@ void rememberImageFailure(const std::string& path) {
 // across page turns.
 constexpr size_t PXC_CHUNK_SHIFT = 14;  // 16 KB chunks
 constexpr size_t PXC_CHUNK_SIZE = 1u << PXC_CHUNK_SHIFT;
-constexpr size_t PXC_MAX_CHUNKS = 6;  // 96 KB: a full-screen 2bpp image
+constexpr size_t PXC_MAX_CHUNKS = 10;  // 160 KB: large enough for full-screen H716 (127 KB)
 constexpr size_t PXC_HEAP_RESERVE = 24 * 1024;
 constexpr size_t PXC_MAX_ALLOC_RESERVE = 8 * 1024;
 // Rows can straddle a chunk boundary; they are reassembled into a stack
-// buffer. (screenWidth + 3) / 4 caps at 200 B for an 800px panel.
-constexpr int PXC_MAX_BYTES_PER_ROW = 208;
+// buffer. (screenWidth + 3) / 4 caps at 240 B for H716 (960px).
+constexpr int PXC_MAX_BYTES_PER_ROW = 256;
 
 std::unique_ptr<uint8_t[]> pxcChunks[PXC_MAX_CHUNKS];
 uint64_t pxcSlotHash = 0;
@@ -147,12 +147,17 @@ bool loadPxcSlot(uint64_t cacheHash, HalFile& cacheFile, uint16_t cachedWidth, u
   if (chunkCount == 0 || chunkCount > PXC_MAX_CHUNKS) {
     return false;
   }
+
+  const size_t freeHeap = (ESP.getPsramSize() > 0) ? ESP.getFreePsram() : ESP.getFreeHeap();
+  const size_t maxAlloc = (ESP.getPsramSize() > 0) ? ESP.getFreePsram() : ESP.getMaxAllocHeap(); // Simplification for S3 PSRAM
+
+  if (freeHeap < remaining + PXC_HEAP_RESERVE || maxAlloc < PXC_CHUNK_SIZE + PXC_MAX_ALLOC_RESERVE) {
+    LOG_DBG("IMG", "Skipping PXC slot: heap pressure (free=%zu, want=%zu)", freeHeap, remaining);
+    return false;
+  }
+
   for (size_t i = 0; i < chunkCount; i++) {
     const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
-    if (ESP.getFreeHeap() < remaining + PXC_HEAP_RESERVE || ESP.getMaxAllocHeap() < want + PXC_MAX_ALLOC_RESERVE) {
-      releasePxcSlot();
-      return false;
-    }
     pxcChunks[i] = makeUniqueNoThrow<uint8_t[]>(want);
     if (!pxcChunks[i] || cacheFile.read(pxcChunks[i].get(), want) != static_cast<int>(want)) {
       releasePxcSlot();

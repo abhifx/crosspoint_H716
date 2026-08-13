@@ -6,5 +6,14 @@
 // (EPUB, XTC, or TXT). Does nothing for other file types.
 void clearBookCache(const std::string& path);
 
+// Clears derived reading cache files while preserving user-owned state such as
+// progress and per-book stats. Returns false if the cache clear or state
+// preservation fails.
+bool clearBookCachePreservingUserState(const std::string& path);
+
+// Clears a known book cache directory while preserving dictionary lookup
+// history and per-book stats.
+bool clearBookCacheDirectoryPreservingStats(const std::string& cachePath);
+
 // Returns true if the directory name matches a book cache entry.
 bool isBookCacheDirectoryName(const char* name);

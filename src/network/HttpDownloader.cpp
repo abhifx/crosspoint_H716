@@ -3,294 +3,657 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <WiFi.h>
 #include <base64.h>
-
-#include <functional>
-#include <string>
-
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
-
-extern "C" void wolfSSL_Arduino_Serial_Print(const char* const msg) { LOG_DBG("WOLFSSL", "%s", msg); }
-#else
+#endif
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
-#endif
+#include <strings.h>
+
+#include <cstdio>
+#include <functional>
+#include <string>
+#include <utility>
+
+#include "network/WifiPowerSaveGuard.h"
 
 namespace {
-#if !defined(FREEINK_NET_WOLFSSL)
-// RX holds the response headers. Smaller buffers leave enough contiguous heap
-// for mbedTLS on redirect-heavy OPDS feeds while still preserving the headers
-// we read directly (Location, Content-Length).
-constexpr int HTTP_RX_BUF = 2048;
-constexpr int HTTP_TX_BUF = 512;
-#endif
-// Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
-// (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
-// slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
-// HTTPClient's uint16 setTimeout it doesn't silently truncate.
+constexpr size_t PROGRESS_UPDATE_BYTES = 64 * 1024;
+constexpr uint32_t PROGRESS_UPDATE_MS = 250;
+constexpr int HTTP_RX_BUF = 4096;
+constexpr int HTTP_TX_BUF = 1024;
 constexpr int HTTP_TIMEOUT_MS = 60000;
-constexpr size_t READ_CHUNK = 1024;
-constexpr int MAX_REDIRECTS = 5;
+constexpr int HTTP_READ_POLL_TIMEOUT_MS = 5000;
+constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 30000;
+constexpr size_t DEFAULT_DOWNLOAD_BUFFER_SIZE = 2048;
+constexpr uint8_t MAX_REDIRECTS = 5;
 
-struct Sink {
-  std::function<bool(const uint8_t*, size_t)> write;  // returns false to abort the transfer
-  HttpDownloader::ProgressCallback progress;
-  bool* cancelFlag = nullptr;
-  size_t total = 0;
-  size_t downloaded = 0;
-};
+void logNetworkState(const char* phase) {
+  LOG_DBG("HTTP", "%s: heap free=%u maxAlloc=%u wifi=%d rssi=%d", phase, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+          static_cast<int>(WiFi.status()), WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0);
+}
 
-bool isRedirect(int status) {
+void logDownloadState(const char* phase, const size_t downloaded, const size_t total, const uint32_t idleMs) {
+  LOG_ERR("HTTP", "%s after %zu/%zu bytes (idle=%lu ms, timeout=%lu ms)", phase, downloaded, total,
+          static_cast<unsigned long>(idleMs), static_cast<unsigned long>(DOWNLOAD_IDLE_TIMEOUT_MS));
+  logNetworkState(phase);
+}
+
+bool isRedirect(const int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
-#if defined(FREEINK_NET_WOLFSSL)
-HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
-                                         const std::string& password, Sink& sink) {
-  std::string url = startUrl;
+esp_err_t captureLocationHeader(esp_http_client_event_t* evt) {
+  auto* location = static_cast<std::string*>(evt->user_data);
+  if (evt->event_id == HTTP_EVENT_ON_HEADER && location != nullptr && evt->header_key != nullptr &&
+      evt->header_value != nullptr && strcasecmp(evt->header_key, "Location") == 0) {
+    location->assign(evt->header_value);
+  }
+  return ESP_OK;
+}
 
-  for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
+struct ParsedUrl {
+  bool https = false;
+  std::string host;
+  std::string path;
+  uint16_t port = 80;
+};
+
+bool parseUrl(const std::string& url, ParsedUrl& out) {
+  const size_t schemeEnd = url.find("://");
+  if (schemeEnd == std::string::npos) return false;
+
+  const std::string scheme = url.substr(0, schemeEnd);
+  out.https = scheme == "https";
+  if (!out.https && scheme != "http") return false;
+
+  const size_t hostStart = schemeEnd + 3;
+  const size_t pathStart = url.find('/', hostStart);
+  const std::string hostPort =
+      url.substr(hostStart, pathStart == std::string::npos ? std::string::npos : pathStart - hostStart);
+  out.path = pathStart == std::string::npos ? "/" : url.substr(pathStart);
+  out.port = out.https ? 443 : 80;
+
+  const size_t portSep = hostPort.rfind(':');
+  if (portSep != std::string::npos) {
+    out.host = hostPort.substr(0, portSep);
+    const std::string portText = hostPort.substr(portSep + 1);
+    if (portText.empty()) return false;
+    uint32_t parsedPort = 0;
+    for (const char c : portText) {
+      if (c < '0' || c > '9') return false;
+      parsedPort = parsedPort * 10 + static_cast<uint32_t>(c - '0');
+      if (parsedPort > UINT16_MAX) return false;
+    }
+    if (parsedPort == 0) return false;
+    out.port = static_cast<uint16_t>(parsedPort);
+  } else {
+    out.host = hostPort;
+  }
+
+  return !out.host.empty() && !out.path.empty();
+}
+
+bool sameOrigin(const ParsedUrl& a, const ParsedUrl& b) {
+  return a.https == b.https && a.port == b.port && strcasecmp(a.host.c_str(), b.host.c_str()) == 0;
+}
+
+const char* schemeName(const ParsedUrl& url) { return url.https ? "https" : "http"; }
+
+std::string buildRedirectUrl(const std::string& baseUrl, const std::string& location) {
+  if (location.find("://") != std::string::npos) return location;
+
+  ParsedUrl base;
+  if (!parseUrl(baseUrl, base)) return location;
+
+  std::string origin = base.https ? "https://" : "http://";
+  origin += base.host;
+  if ((base.https && base.port != 443) || (!base.https && base.port != 80)) {
+    origin += ":";
+    origin += std::to_string(base.port);
+  }
+
+  if (!location.empty() && location[0] == '/') return origin + location;
+
+  const size_t lastSlash = base.path.rfind('/');
+  const std::string parent = lastSlash == std::string::npos ? "/" : base.path.substr(0, lastSlash + 1);
+  return origin + parent + location;
+}
+
+bool isCancelRequested(bool* cancelFlag, const HttpDownloader::CancelCallback& shouldCancel) {
+  if (cancelFlag && *cancelFlag) return true;
+  if (shouldCancel && shouldCancel()) {
+    if (cancelFlag) *cancelFlag = true;
+    return true;
+  }
+  return false;
+}
+
+class ProgressNotifier {
+ public:
+  explicit ProgressNotifier(const HttpDownloader::ProgressCallback& progress) : progress_(&progress) {}
+
+  void setTotal(const size_t total) { total_ = total; }
+
+  void notify(size_t downloaded, bool force) {
+    if (!progress_ || !*progress_ || total_ == 0) return;
+
+    const uint32_t now = millis();
+    if (force || downloaded == total_ || downloaded - lastProgressBytes_ >= PROGRESS_UPDATE_BYTES ||
+        now - lastProgressMs_ >= PROGRESS_UPDATE_MS) {
+      lastProgressBytes_ = downloaded;
+      lastProgressMs_ = now;
+      (*progress_)(downloaded, total_);
+    }
+  }
+
+ private:
+  size_t total_ = 0;
+  size_t lastProgressBytes_ = 0;
+  uint32_t lastProgressMs_ = 0;
+  const HttpDownloader::ProgressCallback* progress_ = nullptr;
+};
+
+struct Sink {
+  HttpDownloader::DataCallback write;
+  HttpDownloader::ProgressCallback progress;
+  bool* cancelFlag = nullptr;
+  HttpDownloader::CancelCallback shouldCancel;
+  size_t resumeOffset = 0;
+  size_t downloaded = 0;
+  size_t total = 0;
+  bool rangeIgnored = false;
+};
+
+void setRequestHeaders(esp_http_client_handle_t client, const std::string& username, const std::string& password,
+                       size_t resumeOffset, bool sendAuthorization) {
+  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  esp_http_client_set_header(client, "Connection", "close");
+  if (resumeOffset > 0) {
+    char rangeHeader[40];
+    snprintf(rangeHeader, sizeof(rangeHeader), "bytes=%zu-", resumeOffset);
+    esp_http_client_set_header(client, "Range", rangeHeader);
+    LOG_DBG("HTTP", "Resuming download at byte %zu", resumeOffset);
+  }
+  if (sendAuthorization) {
+    const std::string credentials = username + ":" + password;
+    const String header = "Basic " + base64::encode(credentials.c_str());
+    esp_http_client_set_header(client, "Authorization", header.c_str());
+  }
+}
+
+void logTlsError(esp_http_client_handle_t client, const char* phase) {
+  int tlsError = 0;
+  int tlsFlags = 0;
+  const esp_err_t err = esp_http_client_get_and_clear_last_tls_error(client, &tlsError, &tlsFlags);
+  if (err != ESP_OK || tlsError != 0 || tlsFlags != 0) {
+    const int tlsCode = tlsError < 0 ? -tlsError : tlsError;
+    LOG_ERR("HTTP", "%s TLS error: err=%s mbedtls=0x%x flags=0x%x", phase, esp_err_to_name(err), tlsCode, tlsFlags);
+  }
+}
+
+#if defined(FREEINK_NET_WOLFSSL)
+HttpDownloader::DownloadError runGetWolfSsl(const std::string& url, const std::string& username,
+                                            const std::string& password, Sink& sink, const size_t bufferSize) {
+  (void)bufferSize;  // SecureHttpClient owns one fixed 1024-byte streaming buffer.
+  std::string currentUrl = url;
+
+  ParsedUrl credentialOrigin;
+  const bool hasCredentials = !username.empty() && !password.empty() && parseUrl(url, credentialOrigin);
+  ProgressNotifier progressNotifier(sink.progress);
+
+  for (uint8_t hop = 0; hop < MAX_REDIRECTS; ++hop) {
+    ParsedUrl currentOrigin;
+    const bool currentParsed = parseUrl(currentUrl, currentOrigin);
+    const bool sendAuthorization = hasCredentials && currentParsed && sameOrigin(currentOrigin, credentialOrigin);
+
     freeink::SecureHttpClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
+    // SecureNet does not yet expose ESP-IDF's CA bundle. This matches the
+    // existing KOSync transport; credentialed redirects remain same-origin.
     http.setInsecure();
-    if (!http.begin(url)) {
-      LOG_ERR("HTTP", "wolfSSL bad URL: %s", url.c_str());
+    if (!http.begin(currentUrl)) {
+      LOG_ERR("HTTP", "wolfSSL rejected URL: %s", currentUrl.c_str());
       return HttpDownloader::HTTP_ERROR;
     }
-    // setUserAgent replaces SecureHttpClient's built-in UA; addHeader would
-    // append a second User-Agent header, which strict servers reject (aiohttp
-    // answers 400 "Duplicate 'User-Agent' header found").
+    // Replace SecureHttpClient's built-in User-Agent so strict servers receive
+    // exactly one header while retaining CrossPoint's device/version identity.
     http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
-    if (!username.empty() && !password.empty()) {
+    if (sink.resumeOffset > 0) {
+      char rangeHeader[40];
+      snprintf(rangeHeader, sizeof(rangeHeader), "bytes=%zu-", sink.resumeOffset);
+      http.addHeader("Range", rangeHeader);
+      LOG_DBG("HTTP", "Resuming download at byte %zu", sink.resumeOffset);
+    }
+    if (sendAuthorization) {
       const std::string credentials = username + ":" + password;
       const String encoded = base64::encode(credentials.c_str());
       http.addHeader("Authorization", std::string("Basic ") + encoded.c_str());
     }
 
-    LOG_DBG("HTTP", "wolfSSL GET: %s", url.c_str());
+    LOG_DBG("HTTP", "wolfSSL GET: %s", currentUrl.c_str());
     const int status = http.GET(
-        [&http, &sink](const uint8_t* data, size_t len) {
-          if (http.getStatus() != 200) return true;
-          if (sink.total == 0 && http.hasContentLength()) sink.total = http.getContentLength();
+        [&http, &sink, &progressNotifier](const uint8_t* data, const size_t len) {
+          const int responseStatus = http.getStatus();
+          const bool isResumeResponse = sink.resumeOffset > 0 && responseStatus == 206;
+          if (responseStatus != 200 && !isResumeResponse) return true;
+          if (sink.resumeOffset > 0 && !isResumeResponse) {
+            sink.rangeIgnored = true;
+            return false;
+          }
+
+          if (sink.downloaded < sink.resumeOffset) sink.downloaded = sink.resumeOffset;
+          if (sink.total == 0 && http.hasContentLength()) {
+            sink.total = sink.resumeOffset + http.getContentLength();
+            progressNotifier.setTotal(sink.total);
+          }
           if (!sink.write(data, len)) return false;
           sink.downloaded += len;
-          if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+          progressNotifier.notify(sink.downloaded, false);
           return true;
         },
-        [&sink]() { return sink.cancelFlag && *sink.cancelFlag; });
+        [&sink]() { return isCancelRequested(sink.cancelFlag, sink.shouldCancel); });
 
     if (http.aborted()) return HttpDownloader::ABORTED;
-    if (status < 0) {
-      LOG_ERR("HTTP", "wolfSSL request failed: %s", url.c_str());
+    if (sink.rangeIgnored) {
+      LOG_DBG("HTTP", "Server ignored range request; restarting download");
+      sink.resumeOffset = 0;
       return HttpDownloader::HTTP_ERROR;
     }
+    if (status < 0) {
+      LOG_ERR("HTTP", "wolfSSL request failed: %s", currentUrl.c_str());
+      logNetworkState("wolfSSL request failure");
+      return HttpDownloader::HTTP_ERROR;
+    }
+
     if (isRedirect(status)) {
       const std::string location = http.getHeader("location");
-      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url)) {
-        LOG_ERR("HTTP", "wolfSSL bad redirect: %d", status);
+      if (location.empty()) {
+        LOG_ERR("HTTP", "Redirect missing Location header");
         return HttpDownloader::HTTP_ERROR;
       }
+
+      const std::string redirectUrl = buildRedirectUrl(currentUrl, location);
+      ParsedUrl redirect;
+      if (!parseUrl(redirectUrl, redirect)) {
+        LOG_ERR("HTTP", "Rejected redirect with unsupported Location");
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (currentParsed && currentOrigin.https && !redirect.https) {
+        LOG_ERR("HTTP", "Rejected HTTPS downgrade redirect to %s", redirect.host.c_str());
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (hasCredentials && !sameOrigin(redirect, credentialOrigin)) {
+        LOG_ERR("HTTP", "Rejected credentialed redirect to different origin: %s://%s:%u", schemeName(redirect),
+                redirect.host.c_str(), redirect.port);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      currentUrl = redirectUrl;
+      LOG_DBG("HTTP", "Redirecting to: %s", redirect.host.c_str());
       continue;
     }
-    if (status != 200) {
-      LOG_ERR("HTTP", "wolfSSL unexpected status: %d", status);
+
+    const bool isResumeResponse = sink.resumeOffset > 0 && status == 206;
+    if (status != 200 && !isResumeResponse) {
+      LOG_ERR("HTTP", "Unexpected status: %d", status);
       return HttpDownloader::HTTP_ERROR;
     }
-    if (http.callbackAborted()) return HttpDownloader::FILE_ERROR;
+    if (http.callbackAborted()) {
+      LOG_ERR("HTTP", "Write failed after %zu/%zu bytes", sink.downloaded, sink.total);
+      return HttpDownloader::FILE_ERROR;
+    }
     if (!http.responseComplete()) {
-      LOG_ERR("HTTP", "wolfSSL incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
+      LOG_ERR("HTTP", "Incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
       return HttpDownloader::HTTP_ERROR;
     }
+
+    if (sink.total == 0 && http.hasContentLength()) {
+      sink.total = sink.resumeOffset + http.getContentLength();
+      progressNotifier.setTotal(sink.total);
+    }
+    progressNotifier.notify(sink.downloaded, true);
     return HttpDownloader::OK;
   }
-  LOG_ERR("HTTP", "too many redirects");
+
+  LOG_ERR("HTTP", "Redirect limit exceeded");
   return HttpDownloader::HTTP_ERROR;
 }
 #endif
 
-#if !defined(FREEINK_NET_WOLFSSL)
-// Streams a GET body through sink.write in READ_CHUNK pieces. Uses the manual
-// open/fetch_headers/read path rather than esp_http_client_perform(): perform()
-// pushes the whole body through an event callback and reports a chunked body
-// that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
-// large/slow files and surfaces a short read directly.
-HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink) {
-  esp_http_client_config_t config = {};
-  config.url = url.c_str();
-  config.buffer_size = HTTP_RX_BUF;
-  config.buffer_size_tx = HTTP_TX_BUF;
-  config.timeout_ms = HTTP_TIMEOUT_MS;
-  // Verify HTTPS against the bundled CA roots. This build has esp-tls
-  // CONFIG_ESP_TLS_INSECURE off, so an unverified TLS handshake can't be set
-  // up at all; the model is public servers over verified https and local
-  // servers over plain http (esp_http_client picks the transport from the URL
-  // scheme, so http:// needs no cert config). The prior setInsecure() worked
-  // only because Arduino's ssl_client drives mbedtls directly.
-  config.crt_bundle_attach = esp_crt_bundle_attach;
-  config.keep_alive_enable = true;
+HttpDownloader::DownloadError runGetDefault(const std::string& url, const std::string& username,
+                                            const std::string& password, Sink& sink, const size_t bufferSize) {
+  std::string currentUrl = url;
 
-  esp_http_client_handle_t client = esp_http_client_init(&config);
-  if (!client) {
-    LOG_ERR("HTTP", "client init failed");
-    return HttpDownloader::HTTP_ERROR;
-  }
+  ParsedUrl credentialOrigin;
+  const bool hasCredentials = !username.empty() && !password.empty() && parseUrl(url, credentialOrigin);
 
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (!username.empty() && !password.empty()) {
-    // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
-    const std::string credentials = username + ":" + password;
-    const String header = "Basic " + base64::encode(credentials.c_str());
-    esp_http_client_set_header(client, "Authorization", header.c_str());
-  }
+  for (uint8_t hop = 0; hop < MAX_REDIRECTS; ++hop) {
+    ParsedUrl currentOrigin;
+    const bool currentParsed = parseUrl(currentUrl, currentOrigin);
+    const bool sendAuthorization = hasCredentials && currentParsed && sameOrigin(currentOrigin, credentialOrigin);
+    std::string redirectLocation;
 
-  // open()/read() does not auto-follow redirects (only perform() does), so step
-  // 30x responses manually. OPDS download endpoints and the GitHub release CDN
-  // both redirect.
-  esp_err_t err = esp_http_client_open(client, 0);
-  if (err != ESP_OK) {
-    LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(client);
-    return HttpDownloader::HTTP_ERROR;
-  }
-  int64_t contentLength = esp_http_client_fetch_headers(client);
-  int status = esp_http_client_get_status_code(client);
-  for (int hop = 0; isRedirect(status) && hop < MAX_REDIRECTS; ++hop) {
-    if (esp_http_client_set_redirection(client) != ESP_OK) break;
-    esp_http_client_close(client);
-    err = esp_http_client_open(client, 0);
+    esp_http_client_config_t config = {};
+    config.url = currentUrl.c_str();
+    config.buffer_size = HTTP_RX_BUF;
+    config.buffer_size_tx = HTTP_TX_BUF;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.keep_alive_enable = false;
+    config.event_handler = captureLocationHeader;
+    config.user_data = &redirectLocation;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+      LOG_ERR("HTTP", "Client init failed");
+      logNetworkState("Client init failure");
+      return HttpDownloader::HTTP_ERROR;
+    }
+
+    setRequestHeaders(client, username, password, sink.resumeOffset, sendAuthorization);
+
+    esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-      LOG_ERR("HTTP", "redirect open failed: %s", esp_err_to_name(err));
+      LOG_ERR("HTTP", "Open failed: %s", esp_err_to_name(err));
+      logTlsError(client, "Open failure");
+      logNetworkState("Open failure");
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
-    contentLength = esp_http_client_fetch_headers(client);
-    status = esp_http_client_get_status_code(client);
-  }
 
-  if (status != 200) {
-    LOG_ERR("HTTP", "unexpected status: %d", status);
-    esp_http_client_cleanup(client);
-    return HttpDownloader::HTTP_ERROR;
-  }
-
-  // fetch_headers returns 0 for a chunked response (no Content-Length); leave
-  // total at 0 so progress stays silent and the size check is skipped.
-  sink.total = contentLength > 0 ? static_cast<size_t>(contentLength) : 0;
-
-  auto buf = makeUniqueNoThrow<char[]>(READ_CHUNK);
-  if (!buf) {
-    LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)READ_CHUNK);
-    esp_http_client_cleanup(client);
-    return HttpDownloader::HTTP_ERROR;
-  }
-
-  while (true) {
-    if (sink.cancelFlag && *sink.cancelFlag) {
-      esp_http_client_cleanup(client);
-      return HttpDownloader::ABORTED;
-    }
-    const int read = esp_http_client_read(client, buf.get(), READ_CHUNK);
-    if (read < 0) {
-      LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
+    int64_t responseLength = esp_http_client_fetch_headers(client);
+    const int status = esp_http_client_get_status_code(client);
+    if (responseLength < 0) {
+      LOG_ERR("HTTP", "Fetch headers failed: %lld", static_cast<long long>(responseLength));
+      logNetworkState("Fetch headers failure");
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
-    if (read == 0) break;  // all data received
-    if (!sink.write(reinterpret_cast<const uint8_t*>(buf.get()), read)) {
+
+    if (isRedirect(status)) {
+      if (redirectLocation.empty()) {
+        LOG_ERR("HTTP", "Redirect missing Location header");
+        logNetworkState("Redirect missing Location");
+        esp_http_client_cleanup(client);
+        return HttpDownloader::HTTP_ERROR;
+      }
+
+      const std::string redirectUrl = buildRedirectUrl(currentUrl, redirectLocation);
+      ParsedUrl redirect;
+      if (!parseUrl(redirectUrl, redirect)) {
+        LOG_ERR("HTTP", "Rejected redirect with unsupported Location");
+        esp_http_client_cleanup(client);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (currentParsed && currentOrigin.https && !redirect.https) {
+        LOG_ERR("HTTP", "Rejected HTTPS downgrade redirect to %s", redirect.host.c_str());
+        esp_http_client_cleanup(client);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (hasCredentials && !sameOrigin(redirect, credentialOrigin)) {
+        LOG_ERR("HTTP", "Rejected credentialed redirect to different origin: %s://%s:%u", schemeName(redirect),
+                redirect.host.c_str(), redirect.port);
+        esp_http_client_cleanup(client);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      currentUrl = redirectUrl;
+      LOG_DBG("HTTP", "Redirecting to: %s", redirect.host.c_str());
       esp_http_client_cleanup(client);
-      return HttpDownloader::FILE_ERROR;
+      continue;
     }
-    sink.downloaded += read;
-    if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
-  }
 
-  const bool complete = esp_http_client_is_complete_data_received(client);
-  esp_http_client_cleanup(client);
-  if (!complete) {
-    LOG_ERR("HTTP", "incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
-    return HttpDownloader::HTTP_ERROR;
-  }
-  return HttpDownloader::OK;
-}
-#endif  // !FREEINK_NET_WOLFSSL
+    const bool isResumeResponse = sink.resumeOffset > 0 && status == 206;
+    if (status != 200 && !isResumeResponse) {
+      LOG_ERR("HTTP", "Unexpected status: %d", status);
+      logNetworkState("Unexpected status");
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
+    if (sink.resumeOffset > 0 && !isResumeResponse) {
+      LOG_DBG("HTTP", "Server ignored range request; restarting download");
+      sink.rangeIgnored = true;
+      sink.resumeOffset = 0;
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
 
-// All HTTP(S) fetches go through wolfSSL when it is the active TLS stack: it
-// speaks TLS 1.3 and reads large bodies from servers where the esp_http_client/
-// mbedTLS path fails to connect or stalls mid-stream. Plain-http URLs still use a
-// WiFiClient inside runGetWolf, so this is safe for non-TLS targets too.
-HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
-                                           const std::string& password, Sink& sink) {
-#if defined(FREEINK_NET_WOLFSSL)
-  return runGetWolf(url, username, password, sink);
-#else
-  return runGet(url, username, password, sink);
+    const size_t bodyLength = responseLength > 0 ? static_cast<size_t>(responseLength) : 0;
+    sink.total = bodyLength > 0 ? sink.resumeOffset + bodyLength : 0;
+    sink.downloaded = sink.resumeOffset;
+
+#ifdef ESP_ERR_HTTP_EAGAIN
+    err = esp_http_client_set_timeout_ms(client, HTTP_READ_POLL_TIMEOUT_MS);
+    if (err != ESP_OK) {
+      LOG_ERR("HTTP", "Failed to set read timeout: %s", esp_err_to_name(err));
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
 #endif
+
+    auto buffer = makeUniqueNoThrow<char[]>(bufferSize);
+    if (!buffer) {
+      LOG_ERR("HTTP", "Failed to allocate %zu byte download buffer", bufferSize);
+      logNetworkState("Download buffer allocation failure");
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
+
+    ProgressNotifier progressNotifier(sink.progress);
+    progressNotifier.setTotal(sink.total);
+#ifdef ESP_ERR_HTTP_EAGAIN
+    uint32_t lastReadMs = millis();
+#endif
+    while (true) {
+      if (isCancelRequested(sink.cancelFlag, sink.shouldCancel)) {
+        esp_http_client_cleanup(client);
+        return HttpDownloader::ABORTED;
+      }
+
+      const int bytesRead = esp_http_client_read(client, buffer.get(), (int)bufferSize);
+      if (bytesRead < 0) {
+#ifdef ESP_ERR_HTTP_EAGAIN
+        if (bytesRead == -ESP_ERR_HTTP_EAGAIN) {
+          const uint32_t idleMs = millis() - lastReadMs;
+          if (idleMs >= DOWNLOAD_IDLE_TIMEOUT_MS) {
+            logDownloadState("Read timed out", sink.downloaded, sink.total, idleMs);
+            esp_http_client_cleanup(client);
+            return HttpDownloader::HTTP_ERROR;
+          }
+          delay(1);
+          continue;
+        }
+#endif
+        LOG_ERR("HTTP", "Read error after %zu/%zu bytes", sink.downloaded, sink.total);
+        logNetworkState("Read error");
+        esp_http_client_cleanup(client);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (bytesRead == 0) break;
+
+      if (!sink.write(reinterpret_cast<const uint8_t*>(buffer.get()), static_cast<size_t>(bytesRead))) {
+        LOG_ERR("HTTP", "Write failed after %zu/%zu bytes", sink.downloaded, sink.total);
+        logNetworkState("Write failure");
+        esp_http_client_cleanup(client);
+        return HttpDownloader::FILE_ERROR;
+      }
+
+      sink.downloaded += static_cast<size_t>(bytesRead);
+#ifdef ESP_ERR_HTTP_EAGAIN
+      lastReadMs = millis();
+#endif
+      progressNotifier.notify(sink.downloaded, false);
+      if (sink.total > 0 && sink.downloaded >= sink.total) break;
+      delay(0);
+    }
+
+    const bool complete = esp_http_client_is_complete_data_received(client);
+    esp_http_client_cleanup(client);
+    progressNotifier.notify(sink.downloaded, true);
+    if (!complete) {
+      LOG_ERR("HTTP", "Incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
+      logNetworkState("Incomplete transfer");
+      return HttpDownloader::HTTP_ERROR;
+    }
+
+    return HttpDownloader::OK;
+  }
+
+  LOG_ERR("HTTP", "Redirect limit exceeded");
+  logNetworkState("Redirect limit exceeded");
+  return HttpDownloader::HTTP_ERROR;
+}
+
+HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
+                                     Sink& sink, const size_t bufferSize, const HttpDownloader::Transport transport) {
+#if defined(FREEINK_NET_WOLFSSL)
+  if (transport == HttpDownloader::Transport::WOLFSSL) {
+    return runGetWolfSsl(url, username, password, sink, bufferSize);
+  }
+#else
+  (void)transport;
+#endif
+  return runGetDefault(url, username, password, sink, bufferSize);
 }
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
                               const std::string& password) {
-  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
-  Sink sink;
-  sink.write = [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; };
-  return runGetSecure(url, username, password, sink) == OK;
+  return fetchUrl(
+      url, [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; }, username,
+      password);
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, const std::string& username,
                               const std::string& password) {
-  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
-  outContent.clear();  // start clean; the sink appends, so don't carry prior content
-  Sink sink;
-  sink.write = [&outContent](const uint8_t* data, size_t len) {
-    outContent.append(reinterpret_cast<const char*>(data), len);
-    return true;
-  };
-  return runGetSecure(url, username, password, sink) == OK;
+  outContent.clear();
+  return fetchUrl(
+      url,
+      [&outContent](const uint8_t* data, size_t len) {
+        outContent.append(reinterpret_cast<const char*>(data), len);
+        return true;
+      },
+      username, password);
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
                               const std::string& password) {
-  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
+  return streamUrl(url, onData, nullptr, username, password) == OK;
+}
+
+HttpDownloader::DownloadError HttpDownloader::streamUrl(const std::string& url, const DataCallback& onData,
+                                                        ProgressCallback progress, const std::string& username,
+                                                        const std::string& password, DownloadOptions options) {
+  WifiPowerSaveGuard wifiPowerSaveGuard;
+  (void)wifiPowerSaveGuard;
+
+  if (!onData) {
+    LOG_ERR("HTTP", "Fetch failed: missing data callback");
+    return HTTP_ERROR;
+  }
+
   Sink sink;
   sink.write = onData;
-  return runGetSecure(url, username, password, sink) == OK;
+  sink.progress = std::move(progress);
+  sink.shouldCancel = std::move(options.shouldCancel);
+  const size_t bufferSize = options.bufferSize > 0 ? options.bufferSize : DEFAULT_DOWNLOAD_BUFFER_SIZE;
+  return runGet(url, username, password, sink, bufferSize, options.transport);
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
-                                                             const std::string& username, const std::string& password) {
-  LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
+                                                             const std::string& username, const std::string& password,
+                                                             DownloadOptions options) {
+  WifiPowerSaveGuard wifiPowerSaveGuard;
+  (void)wifiPowerSaveGuard;
 
-  if (Storage.exists(destPath.c_str())) {
-    Storage.remove(destPath.c_str());
+  const size_t bufferSize = options.bufferSize > 0 ? options.bufferSize : DEFAULT_DOWNLOAD_BUFFER_SIZE;
+  size_t resumeOffset = 0;
+  if (options.resumePartial && Storage.exists(destPath.c_str())) {
+    HalFile existingFile;
+    if (Storage.openFileForRead("HTTP", destPath.c_str(), existingFile)) {
+      resumeOffset = (size_t)existingFile.size();
+      existingFile.close();
+    }
   }
-  HalFile file;
-  if (!Storage.openFileForWrite("HTTP", destPath.c_str(), file)) {
-    LOG_ERR("HTTP", "Failed to open file for writing");
-    return FILE_ERROR;
+
+  if (resumeOffset == 0 && Storage.exists(destPath.c_str())) {
+    Storage.remove(destPath.c_str());
   }
 
   Sink sink;
   sink.progress = std::move(progress);
   sink.cancelFlag = cancelFlag;
-  sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
+  sink.shouldCancel = std::move(options.shouldCancel);
+  sink.resumeOffset = resumeOffset;
 
-  const DownloadError result = runGetSecure(url, username, password, sink);
-  // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
-  // otherwise close only after the remove.
-  file.close();
+  HalFile file;
+  bool fileOpen = false;
+  auto openOutputFile = [&]() {
+    if (fileOpen) return true;
+    if (sink.resumeOffset > 0) {
+      file = Storage.open(destPath.c_str(), O_WRONLY | O_APPEND);
+    } else {
+      fileOpen = Storage.openFileForWrite("HTTP", destPath.c_str(), file);
+      if (!fileOpen) {
+        LOG_ERR("HTTP", "Failed to open file for writing");
+        return false;
+      }
+    }
+    fileOpen = (bool)file;
+    if (!fileOpen) {
+      LOG_ERR("HTTP", "Failed to open file for writing");
+    }
+    return fileOpen;
+  };
+
+  sink.write = [&](const uint8_t* data, size_t len) { return openOutputFile() && file.write(data, len) == len; };
+
+  DownloadError result = runGet(url, username, password, sink, bufferSize, options.transport);
+  if (sink.rangeIgnored) {
+    if (fileOpen) {
+      file.close();
+      fileOpen = false;
+    }
+    Storage.remove(destPath.c_str());
+    sink.rangeIgnored = false;
+    sink.resumeOffset = 0;
+    sink.downloaded = 0;
+    sink.total = 0;
+    sink.write = [&](const uint8_t* data, size_t len) { return openOutputFile() && file.write(data, len) == len; };
+    result = runGet(url, username, password, sink, bufferSize, options.transport);
+  }
+
+  if (fileOpen) {
+    file.flush();
+    file.close();
+  }
 
   if (result != OK) {
-    Storage.remove(destPath.c_str());
+    LOG_ERR("HTTP", "Transfer failed: error=%d downloaded=%zu expected=%zu preservePartial=%d resumePartial=%d",
+            static_cast<int>(result), sink.downloaded, sink.total, options.preservePartial, options.resumePartial);
+    if (result == ABORTED || !options.preservePartial) {
+      Storage.remove(destPath.c_str());
+    }
     return result;
   }
+
   if (sink.downloaded == 0) {
-    LOG_ERR("HTTP", "no data received");
-    Storage.remove(destPath.c_str());
+    LOG_ERR("HTTP", "Download failed: no data received");
+    if (!options.preservePartial) {
+      Storage.remove(destPath.c_str());
+    }
     return HTTP_ERROR;
   }
-  LOG_DBG("HTTP", "Downloaded %zu bytes", sink.downloaded);
+
+  if (sink.total > 0 && sink.downloaded != sink.total) {
+    LOG_ERR("HTTP", "Size mismatch: got %zu, expected %zu", sink.downloaded, sink.total);
+    if (!options.preservePartial) {
+      Storage.remove(destPath.c_str());
+    }
+    return HTTP_ERROR;
+  }
+
   return OK;
 }

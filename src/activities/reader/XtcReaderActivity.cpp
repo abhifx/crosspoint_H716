@@ -11,6 +11,8 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <PsramMemory.h>
 
 #include <algorithm>
 
@@ -325,6 +327,14 @@ void XtcReaderActivity::renderPage() {
     LOG_DBG("XTR", "Pixel distribution: White=%lu, DarkGrey=%lu, LightGrey=%lu, Black=%lu", pixelCounts[0],
             pixelCounts[1], pixelCounts[2], pixelCounts[3]);
 
+    // Create a backup of the BW baseline in PSRAM so grayscale passes don't clobber it.
+    // The H716 driver needs the original BW frame in the main buffer when displayGrayBuffer is called.
+    const size_t bwSize = renderer.getDisplayWidthBytes() * renderer.getDisplayHeight();
+    auto bwBackup = makeUniquePsram<uint8_t>(bwSize);
+    if (!bwBackup) {
+      LOG_ERR("XTR", "FAILED to allocate BW backup in PSRAM!");
+    }
+
     // Pass 1: BW buffer - draw all non-white pixels as black
     for (uint16_t y = 0; y < pageHeight; y++) {
       for (uint16_t x = 0; x < pageWidth; x++) {
@@ -332,6 +342,11 @@ void XtcReaderActivity::renderPage() {
           renderer.drawPixel(x, y, true);
         }
       }
+    }
+
+    // Save the BW baseline before grayscale passes clobber it.
+    if (bwBackup) {
+      memcpy(bwBackup.get(), renderer.getFrameBuffer(), bwSize);
     }
 
     if (pagesUntilFullRefresh <= 1) {
@@ -373,18 +388,24 @@ void XtcReaderActivity::renderPage() {
     }
     renderer.copyGrayscaleMsbBuffers();
 
-    // Display grayscale overlay
-    renderer.displayGrayBuffer();
-
-    // Pass 4: Re-render BW to framebuffer (restore for next frame, instead of restoreBwBuffer)
-    renderer.clearScreen();
-    for (uint16_t y = 0; y < pageHeight; y++) {
-      for (uint16_t x = 0; x < pageWidth; x++) {
-        if (getPixelValue(x, y) >= 1) {
-          renderer.drawPixel(x, y, true);
+    // Restore the BW baseline BEFORE calling displayGrayBuffer.
+    // syncToPainter needs the main framebuffer to contain the BW details.
+    if (bwBackup) {
+      memcpy(renderer.getFrameBuffer(), bwBackup.get(), bwSize);
+    } else {
+      // OOM fallback: re-render the BW frame
+      renderer.clearScreen();
+      for (uint16_t y = 0; y < pageHeight; y++) {
+        for (uint16_t x = 0; x < pageWidth; x++) {
+          if (getPixelValue(x, y) >= 1) {
+            renderer.drawPixel(x, y, true);
+          }
         }
       }
     }
+
+    // Display grayscale overlay
+    renderer.displayGrayBuffer();
 
     // Cleanup grayscale buffers with current frame buffer
     renderer.cleanupGrayscaleWithFrameBuffer();

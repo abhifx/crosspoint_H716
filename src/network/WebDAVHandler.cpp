@@ -1,14 +1,28 @@
 #include "WebDAVHandler.h"
 
+#include <Arduino.h>
+#include <Epub.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <new>
+
+#include "CrossPointSettings.h"
 #include "util/BookCacheUtils.h"
-#include "util/TaskWatchdog.h"
 
 namespace {
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
+constexpr size_t HIDDEN_ITEM_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS[0]);
+
+bool isProtectedPathSegment(const char* name) {
+  return (!SETTINGS.showHiddenFiles && name[0] == '.') ||
+         std::any_of(HIDDEN_ITEMS, HIDDEN_ITEMS + HIDDEN_ITEM_COUNT,
+                     [name](const char* item) { return strcmp(name, item) == 0; });
+}
 
 // RFC 1123 date format helper: "Sun, 06 Nov 1994 08:49:37 GMT"
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date
@@ -33,6 +47,9 @@ bool WebDAVHandler::canHandle(WebServer& server, HTTPMethod method, const String
     case HTTP_COPY:
     case HTTP_LOCK:
     case HTTP_UNLOCK:
+#if defined(HTTP_PATCH)
+    case HTTP_PATCH:
+#endif
       return true;
     default:
       return false;
@@ -84,7 +101,6 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
 
   } else if (raw.status == RAW_WRITE) {
     if (_putFile && _putOk) {
-      resetTaskWatchdogIfSubscribed();
       size_t written = _putFile.write(raw.buf, raw.currentSize);
       if (written != raw.currentSize) {
         _putOk = false;
@@ -225,23 +241,11 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
     char name[500];
     while (file) {
       file.getName(name, sizeof(name));
-      String fileName(name);
 
-      // Skip hidden/protected items
-      bool shouldHide = fileName.startsWith(".");
-      if (!shouldHide) {
-        for (const auto* item : HIDDEN_ITEMS) {
-          if (fileName.equals(item)) {
-            shouldHide = true;
-            break;
-          }
-        }
-      }
-
-      if (!shouldHide) {
+      if (!isProtectedPathSegment(name)) {
         String childPath = path;
         if (!childPath.endsWith("/")) childPath += "/";
-        childPath += fileName;
+        childPath += name;
 
         if (file.isDirectory()) {
           sendPropEntry(s, childPath, true, 0, FIXED_DATE);
@@ -252,7 +256,6 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
       file.close();
       yield();
-      resetTaskWatchdogIfSubscribed();
       file = root.openNextFile();
     }
   }
@@ -385,9 +388,8 @@ void WebDAVHandler::handlePut(WebServer& s) {
     return;
   }
 
-  clearBookCache(path.c_str());
+  clearBookCachePreservingUserState(path.c_str());
   s.send(_putExisted ? 204 : 201);
-  LOG_DBG("DAV", "PUT complete: %s", path.c_str());
 }
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
@@ -477,7 +479,6 @@ void WebDAVHandler::handleMkcol(WebServer& s) {
 
   if (Storage.mkdir(path.c_str())) {
     s.send(201);
-    LOG_DBG("DAV", "Created directory: %s", path.c_str());
   } else {
     s.send(500, "text/plain", "Failed to create directory");
   }
@@ -624,14 +625,21 @@ void WebDAVHandler::handleCopy(WebServer& s) {
     return;
   }
 
-  // Streaming copy with 4KB buffer on stack
-  uint8_t buf[4096];
+  constexpr size_t COPY_BUFFER_SIZE = 4096;
+  auto buf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[COPY_BUFFER_SIZE]);
+  if (!buf) {
+    srcFile.close();
+    dstFile.close();
+    Storage.remove(dstPath.c_str());
+    s.send(500, "text/plain", "Copy failed - out of memory");
+    return;
+  }
+
   bool copyOk = true;
   while (srcFile.available()) {
-    resetTaskWatchdogIfSubscribed();
-    int bytesRead = srcFile.read(buf, sizeof(buf));
+    int bytesRead = srcFile.read(buf.get(), COPY_BUFFER_SIZE);
     if (bytesRead <= 0) break;
-    size_t written = dstFile.write(buf, bytesRead);
+    size_t written = dstFile.write(buf.get(), bytesRead);
     if (written != (size_t)bytesRead) {
       copyOk = false;
       break;
@@ -772,11 +780,7 @@ bool WebDAVHandler::isProtectedPath(const String& path) const {
 
     String segment = path.substring(start, end);
 
-    if (segment.startsWith(".")) return true;
-
-    for (const auto* item : HIDDEN_ITEMS) {
-      if (segment.equals(item)) return true;
-    }
+    if (isProtectedPathSegment(segment.c_str())) return true;
 
     start = end + 1;
   }

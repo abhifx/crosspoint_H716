@@ -9,6 +9,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <PsramMemory.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -152,6 +153,7 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 }  // namespace
 
 void EpubReaderActivity::onEnter() {
+  pagesUntilFullRefresh = 1;
   Activity::onEnter();
 
   if (!epub) {
@@ -1584,6 +1586,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool pageHasImagesNeedingDecode = pageHasImages && page->hasImagesNeedingDecode();
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
+
+  // H716: single-pass parallel driver. Skipping the intermediate B/W pass
+  // H716: single-pass parallel driver. Skipping the intermediate B/W pass
+  // doubles the perceived speed. We skip it for normal fast page turns AND
+  // image pages (Painter handles the full image paint). Forced refreshes
+  // still use it to ensure a deep clean if the user requests it.
+  const bool h716 = (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716);
+  const bool cleanBaseNeeded = manualRefreshPending || pagesUntilFullRefresh <= 1 || pageHasImages;
+  const bool skipBwPass = h716 ? !manualRefreshPending : !cleanBaseNeeded;
+
   // The reader starts with zero here, which means the normal refresh cycle
   // would use a HALF refresh for its first page. Keep that same clean base for
   // image pages: their double-FAST path otherwise runs directly over the
@@ -1618,7 +1630,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (pageHasImages) {
+  if (pageHasImages && !gpio.isXteinkDevice() && !skipBwPass) {
     // Double FAST_REFRESH with selective image blanking (pablohc's technique):
     // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
     // Instead, blank only the image area and do two fast refreshes.
@@ -1648,7 +1660,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // HALF ghost-cleanup path, which drives every pixel to its target
     // regardless of residue.
     pagesUntilFullRefresh = 1;
-  } else {
+  } else if (!skipBwPass) {
     // Async form: start the waveform and return so the grayscale plane rendering
     // below overlaps the panel's refresh time instead of following it.
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
@@ -1700,18 +1712,26 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // rationale as BACKGROUND_BUILD_MIN_MAX_ALLOC).
     constexpr size_t PLANE_BUF_MAX_ALLOC_RESERVE = 16 * 1024;
     const auto planeBufFits = [planeBytes] {
+      const size_t freePsram = ESP.getFreePsram();
+      if (freePsram > 0) {
+        // H716: always use plane buffers if they fit in PSRAM to hide render time.
+        return freePsram >= planeBytes * 2 + PLANE_BUF_HEADROOM;
+      }
       return ESP.getFreeHeap() >= planeBytes + PLANE_BUF_HEADROOM &&
              ESP.getMaxAllocHeap() >= planeBytes + PLANE_BUF_MAX_ALLOC_RESERVE;
     };
-    auto lsbPlaneBuf = (overlapRefresh && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-    auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
+    // H716: hide blocking B/W pass by overlapping render with a dummy refresh if needed,
+    // or just buffer everything in PSRAM.
+    const bool forceOverlap = (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716);
+    auto lsbPlaneBuf = ((overlapRefresh || forceOverlap) && planeBufFits()) ? makeUniquePsram<uint8_t>(planeBytes) : nullptr;
+    auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniquePsram<uint8_t>(planeBytes) : nullptr;
 
     if (lsbPlaneBuf) {
       renderPlaneToBuffer(true, lsbPlaneBuf.get());
       if (msbPlaneBuf) renderPlaneToBuffer(false, msbPlaneBuf.get());
       const auto tGrayRender = millis();
 
-      renderer.waitRefreshComplete();
+      if (!skipBwPass) renderer.waitRefreshComplete();
       const auto tWait = millis();
 
       renderer.writeGrayscalePlaneStrip(true, lsbPlaneBuf.get(), 0, gh);
@@ -1724,7 +1744,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       const auto tGrayWrite = millis();
 
       renderer.setRenderMode(GfxRenderer::BW);
-      renderer.displayGrayBuffer();
+      renderer.displayGrayBuffer(cleanBaseNeeded);
       const auto tGrayDisplay = millis();
 
       // BW framebuffer is intact; re-sync controller RAM for the next
@@ -1742,7 +1762,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // The strip writes below need the panel idle, so wait out any pending
       // async refresh first (no-op on blocking panels).
       auto scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * STRIP_ROWS);
-      renderer.waitRefreshComplete();
+      if (!skipBwPass) renderer.waitRefreshComplete();
       if (!scratch) {
         LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
         if (overlapRefresh) {
@@ -1779,7 +1799,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         const auto tGrayMsb = millis();
 
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.displayGrayBuffer();
+        renderer.displayGrayBuffer(cleanBaseNeeded);
         const auto tGrayDisplay = millis();
 
         // BW framebuffer is intact; re-sync controller RAM for the next
@@ -1824,7 +1844,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       const auto tGrayMsb = millis();
 
       // display grayscale part
-      renderer.displayGrayBuffer();
+      renderer.displayGrayBuffer(cleanBaseNeeded);
       const auto tGrayDisplay = millis();
       renderer.setRenderMode(GfxRenderer::BW);
       renderer.restoreBwBuffer();

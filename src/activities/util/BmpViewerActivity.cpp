@@ -107,15 +107,37 @@ void BmpViewerActivity::onEnter() {
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
       renderer.clearScreen();
-      // Assuming drawBitmap defaults to 0,0 crop if omitted, or pass explicitly: drawBitmap(bitmap, x, y, pageWidth,
-      // pageHeight, 0, 0)
       renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
 
       // Draw UI hints on the base layer
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-      // Single pass for non-grayscale images
 
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      if (bitmap.hasGreyscale()) {
+        // Grayscale rendering path for H716 and other grayscale-capable devices
+        if (renderer.storeBwBuffer()) {
+          bitmap.rewindToData();
+          renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+          renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
+          renderer.copyGrayscaleLsbBuffers();
+
+          bitmap.rewindToData();
+          renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+          renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
+          renderer.copyGrayscaleMsbBuffers();
+
+          // On H716, displayGrayBuffer(true) triggers a hardware clear to eliminate ghosting
+          renderer.displayGrayBuffer(true);
+
+          renderer.setRenderMode(GfxRenderer::BW);
+          renderer.restoreBwBuffer();
+        } else {
+          // Fallback to BW if OOM
+          renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        }
+      } else {
+        // Single pass for 1-bit images, use HALF_REFRESH to ensure clean screen
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      }
 
     } else {
       // Handle file parsing error

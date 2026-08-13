@@ -915,4 +915,7 @@ inline bool hasTempHumidity() { return ACTIVE.sensors.tempHumidityAddr != 0; }
 inline bool hasImu() { return ACTIVE.sensors.imuAddr != 0; }
 inline bool hasLeds() { return ACTIVE.leds.data != PIN_UNASSIGNED && ACTIVE.leds.count > 0; }
 
+// Global I2C status for shared buses
+extern bool i2cBegun;
+
 }  // namespace BoardConfig

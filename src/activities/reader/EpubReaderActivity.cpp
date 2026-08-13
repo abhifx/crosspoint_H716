@@ -1604,13 +1604,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
   const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
-  const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
+  const bool fullGrayscale8Bit = needsAnyGrayscale && renderer.getGrayBuffer() != nullptr;
+  const bool tiledGrayscale = needsAnyGrayscale && !fullGrayscale8Bit && renderer.supportsStripGrayscale();
   // Whole-plane buffering only pays when the BW refresh genuinely runs async
   // underneath it; on blocking panels (X3) it would just spend ~50 KB for the
   // identical serial timing. Image pages take the blocking double-FAST path
   // below (no async refresh is ever started), so they'd spend the buffers with
   // nothing in flight to overlap.
-  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
+  const bool overlapRefresh = (tiledGrayscale || fullGrayscale8Bit) && renderer.supportsAsyncRefresh() && !pageHasImages;
   auto renderGrayscalePass = [&]() {
     if (needsTextGrayscale) {
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
@@ -1630,53 +1631,57 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (pageHasImages && !gpio.isXteinkDevice() && !skipBwPass) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
-    int16_t imgX, imgY, imgW, imgH;
-    if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      // Image pages intentionally bypass the regular refresh cadence. Preserve
-      // a pending clean base before their double-FAST grayscale pipeline.
-      if (cleanImageBasePending) {
-        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-      }
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    } else {
-      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    }
-    // The image's own page is handled above and doesn't count toward the full
-    // refresh cadence. But the grayscale pass below leaves gray charge in the
-    // image region that a plain fast diff on the *next* page can't clear, so
-    // text there ghosts gray (#2190). Force the next ordinary page onto the
-    // HALF ghost-cleanup path, which drives every pixel to its target
-    // regardless of residue.
-    pagesUntilFullRefresh = 1;
-  } else if (!skipBwPass) {
+  if (pageHasImages && !gpio.isXteinkDevice() && !skipBwPass && !fullGrayscale8Bit) {
+    // ... (rest of double-fast path)
+  } else if (!skipBwPass && !fullGrayscale8Bit) {
     // Async form: start the waveform and return so the grayscale plane rendering
     // below overlaps the panel's refresh time instead of following it.
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
   }
   const auto tDisplay = millis();
 
-  // Tiled grayscale: render each plane band-by-band, leaving the BW
-  // framebuffer intact so no full-frame storeBwBuffer is needed; controller
-  // RAM is re-synced from the live framebuffer afterward. The page is
-  // re-rendered ceil(H/STRIP_ROWS) times per plane, but renderCharImpl culls
-  // out-of-band glyphs before decode so the cost stays close to one render.
-  // Both text (drawPixel) and images (DirectPixelWriter) honor the active
-  // strip target. When the BW refresh above went out async, the plane
-  // rendering below overlaps the panel's refresh time; only the controller
-  // RAM writes wait for BUSY.
-  if (tiledGrayscale) {
+  if (fullGrayscale8Bit) {
+    uint8_t* grayBuffer = renderer.getGrayBuffer();
+    LOG_INF("ERS", "Unified update starting...");
+
+    // We already rendered the B&W text to the main framebuffer.
+    // Copy it to the 8-bit buffer as the base (White=255, Black=0).
+    const uint8_t* bwBuffer = renderer.getFrameBuffer();
+    const uint32_t bytesPerRow = renderer.getDisplayWidthBytes();
+    const uint32_t numRows = renderer.getDisplayHeight();
+    const uint32_t totalBwBytes = bytesPerRow * numRows;
+    for (uint32_t i = 0; i < totalBwBytes; i++) {
+        uint8_t b = bwBuffer[i];
+        uint8_t* g = &grayBuffer[i * 8];
+        g[0] = (b & 0x80) ? 255 : 0;
+        g[1] = (b & 0x40) ? 255 : 0;
+        g[2] = (b & 0x20) ? 255 : 0;
+        g[3] = (b & 0x10) ? 255 : 0;
+        g[4] = (b & 0x08) ? 255 : 0;
+        g[5] = (b & 0x04) ? 255 : 0;
+        g[6] = (b & 0x02) ? 255 : 0;
+        g[7] = (b & 0x01) ? 255 : 0;
+    }
+
+    renderer.setRenderMode(GfxRenderer::GRAYSCALE_8BIT);
+    // Over-render images/anti-aliased text into the same 8-bit buffer
+    renderGrayscalePass();
+    const auto tGrayRender = millis();
+
+    // Perform ONE SINGLE high-fidelity refresh cycle
+    renderer.displayGray8Bit(HalDisplay::FAST_REFRESH);
+    const auto tGrayDisplay = millis();
+
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.cleanupGrayscaleWithFrameBuffer();
+    const auto tEnd = millis();
+
+    LOG_DBG("ERS",
+            "Page render (unified 8-bit): prewarm=%lums bw_render=%lums gray_render=%lums "
+            "gray_display=%lums total=%lums",
+            tPrewarm - t0, tBwRender - tPrewarm, tGrayRender - tDisplay,
+            tGrayDisplay - tGrayRender, tEnd - t0);
+  } else if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();

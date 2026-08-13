@@ -116,8 +116,9 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const std::deque<std::string
   }
 }
 
-void GfxRenderer::begin() {
+void GfxRenderer::begin(uint8_t* externalGrayBuffer) {
   frameBuffer = display.getFrameBuffer();
+  grayBuffer = externalGrayBuffer;
   if (!frameBuffer) {
     LOG_ERR("GFX", "!! No framebuffer");
     assert(false);
@@ -448,6 +449,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           if (renderMode == GfxRenderer::BW && bmpVal < 3) {
             // Black (also paints over the grays in BW mode)
             renderer.drawPixel(screenX, screenY, pixelState);
+          } else if (renderMode == GfxRenderer::GRAYSCALE_8BIT) {
+            static const uint8_t grayMap[] = {0, 85, 170, 255};
+            renderer.drawPixelGray(screenX, screenY, grayMap[bmpVal]);
           } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
             // Light gray (also mark the MSB if it's going to be a dark gray too)
             // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
@@ -513,6 +517,11 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   }
 
   // Calculate byte position and bit position
+  if (renderMode == GRAYSCALE_8BIT && grayBuffer) {
+    grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = state ? 0 : 255;
+    return;
+  }
+
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
@@ -521,6 +530,23 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   } else {
     target[byteIndex] |= 1 << bitPosition;  // Set bit
   }
+}
+
+void GfxRenderer::drawPixelGray(const int x, const int y, const uint8_t level) const {
+  if (renderMode != GRAYSCALE_8BIT || !grayBuffer) return;
+
+  int phyX = 0;
+  int phyY = 0;
+
+  // Note: this call should be inlined for better performance
+  rotateCoordinates(orientation, x, y, &phyX, &phyY, panelWidth, panelHeight);
+
+  // Bounds checking against runtime panel dimensions
+  if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) {
+    return;
+  }
+
+  grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = level;
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
@@ -1288,9 +1314,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   }
   LOG_DBG("GFX", "Scaling by %f - %s", scale, isScaled ? "scaled" : "not scaled");
 
-  // Calculate output row size (2 bits per pixel, packed into bytes)
+  // Calculate output row size
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
-  const int outputRowSize = (bitmap.getWidth() + 3) / 4;
+  const bool use8BitBuffer = (renderMode == GRAYSCALE_8BIT);
+  const int outputRowSize = use8BitBuffer ? bitmap.getWidth() : (bitmap.getWidth() + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
 
@@ -1313,7 +1340,14 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+    BmpReaderError err;
+    if (use8BitBuffer) {
+      err = bitmap.readNextRow8Bit(outputRow, rowBytes);
+    } else {
+      err = bitmap.readNextRow(outputRow, rowBytes);
+    }
+
+    if (err != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       free(outputRow);
       free(rowBytes);
@@ -1342,14 +1376,18 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
         continue;
       }
 
-      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
+      if (use8BitBuffer) {
+        drawPixelGray(screenX, screenY, outputRow[bmpX]);
+      } else {
+        const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
+        if (renderMode == BW && val < 3) {
+          drawPixel(screenX, screenY);
+        } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
+          drawPixel(screenX, screenY, false);
+        } else if (renderMode == GRAYSCALE_LSB && val == 1) {
+          drawPixel(screenX, screenY, false);
+        }
       }
     }
   }
@@ -1422,7 +1460,9 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
 
       // For 1-bit source: 0 or 1 -> map to black (0,1,2) or white (3)
       // val < 3 means black pixel (draw it)
-      if (val < 3) {
+      if (renderMode == GRAYSCALE_8BIT) {
+        drawPixelGray(screenX, screenY, (val < 3) ? 0 : 255);
+      } else if (val < 3) {
         drawPixel(screenX, screenY, true);
       }
       // White pixels (val == 3) are not drawn (leave background)
@@ -2127,6 +2167,10 @@ void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuff
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
 void GfxRenderer::displayGrayBuffer(bool forceFullRefresh) const { display.displayGrayBuffer(fadingFix, forceFullRefresh); }
+
+void GfxRenderer::displayGray8Bit(const HalDisplay::RefreshMode mode) const {
+  display.displayGray8Bit(grayBuffer, mode);
+}
 
 void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const {
   // Guard the uint16_t casts below: a negative would wrap to a huge length.

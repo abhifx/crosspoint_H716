@@ -35,6 +35,9 @@ TwoWire& gaugeWire() {
 
 bool g_wireReady = false;
 void ensureWire() {
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716) {
+    return;
+  }
   if (g_wireReady) return;
   const auto& g = BoardConfig::ACTIVE.batteryGauge;
   gaugeWire().begin(g.i2cSda, g.i2cScl, g.i2cHz);

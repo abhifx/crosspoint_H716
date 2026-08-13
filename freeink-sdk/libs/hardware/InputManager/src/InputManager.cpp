@@ -836,9 +836,13 @@ void InputManager::beginGt911() {
   }
 
   if (t.sda >= 0 && t.scl >= 0) {
-    const uint32_t freq = (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716) ? 100000 : 400000;
-    Wire.begin(t.sda, t.scl, freq);
-    Wire.setTimeOut(50); // increased timeout for stability
+    // LilyGo H716 uses a shared bus already initialized in BoardT5H716::begin()
+    // Calling begin() here triggers ESP_ERR_INVALID_STATE (259) on S3.
+    if (BoardConfig::ACTIVE.board != BoardConfig::Board::LilyGoT5H716) {
+      const uint32_t freq = 400000;
+      Wire.begin(t.sda, t.scl, freq);
+      Wire.setTimeOut(50);
+    }
   }
 
   auto resetWithIntLevel = [&](const uint8_t level) {

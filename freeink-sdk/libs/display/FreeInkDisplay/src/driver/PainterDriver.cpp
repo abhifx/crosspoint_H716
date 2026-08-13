@@ -47,12 +47,27 @@ void PainterDriver::begin(EpdBus& bus) {
     LOG_ERR("PDR", "setGreyLevels(16) FAILED!");
   }
 
-  LOG_INF("PDR", "Setting quality...");
-  _painter.setQuality(EPD_Painter::Quality::QUALITY_HIGH);
+  LOG_INF("PDR", "Setting quality to NORMAL...");
+  _painter.setQuality(EPD_Painter::Quality::QUALITY_NORMAL);
 
   auto& cfg = EPD_Painter_Access::getMutableConfig(_painter);
   cfg.g16_pass_us_normal = 15000; // Fast pass for normal turns
   cfg.g16_pass_us_high   = 30000; // Thorough pass for ghost clearing
+
+  // Precompute 8-bit to 16-level LUT using measured H716_LEVEL_LUM.
+  // This avoids division in the hot path and improves tonal accuracy.
+  for (int i = 0; i < 256; i++) {
+    uint8_t bestLevel = 0;
+    uint16_t minDiff = 1000;
+    for (uint8_t lvl = 0; uint8_t(lvl) < 16; lvl++) {
+      uint16_t diff = std::abs(i - H716_LEVEL_LUM[lvl]);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestLevel = lvl;
+      }
+    }
+    _grayLUT[i] = bestLevel;
+  }
 
   LOG_INF("PDR", "Allocating planes...");
   size_t planeBytes = static_cast<size_t>(_wb) * _h;
@@ -125,14 +140,14 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
 
         if (b_inked) {
           if (m_inked && l_inked) {
-            level = 14; // Value 1: Dark Gray
+            level = 9; // Value 1: Dark Gray (~82 lum)
           } else if (m_inked) {
-            level = 11; // Value 2: Light Gray
+            level = 5; // Value 2: Light Gray (~160 lum)
           } else {
-            level = 15; // Value 0: Black
+            level = 15; // Value 0: Black (0 lum)
           }
         } else {
-          level = 0; // Value 3: White
+          level = 0; // Value 3: White (255 lum)
         }
 
         drow[bx * 8 + bit] = level;
@@ -149,31 +164,20 @@ void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
   if (!_painterFb || !grayBuf) return;
 
   uint32_t levelCounts[16] = {0};
+
   for (uint32_t y = 0; y < _h; y++) {
     const uint8_t* srcRow = grayBuf + (static_cast<size_t>(y) * _w);
     uint8_t* dstRow = _painterFb + (static_cast<size_t>(y) * _w);
 
     for (uint32_t x = 0; x < _w; x++) {
-      int16_t targetLum = srcRow[x];
-
-      // H716_LEVEL_LUM is sorted 255 (level 0) down to 0 (level 15).
-      uint8_t level = 0;
-      if (targetLum >= 250) {
-        level = 0;
-      } else if (targetLum <= 5) {
-        level = 15;
-      } else {
-        // Direct linear mapping to 16 levels to avoid metallic grain
-        // targetLum 255 -> 0, targetLum 0 -> 15
-        level = 15 - (targetLum * 15 / 255);
-      }
-
+      // Direct LUT lookup based on measured panel luminance (H716_LEVEL_LUM)
+      uint8_t level = _grayLUT[srcRow[x]];
       dstRow[x] = level;
       levelCounts[level & 0xF]++;
     }
     if (y % 50 == 0) yield();
   }
-  LOG_INF("PDR", "syncToPainter8Bit: [0]=%u [15]=%u (Linear 16-level)",
+  LOG_INF("PDR", "syncToPainter8Bit: Levels [0]=%u [15]=%u (Panel-Calibrated LUT)",
           (unsigned)levelCounts[0], (unsigned)levelCounts[15]);
 }
 
@@ -189,7 +193,7 @@ void PainterDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev,
     _ghostClearCounter = 0;
   } else {
     _painter.setQuality(EPD_Painter::Quality::QUALITY_NORMAL);
-    if (mode != RefreshMode::Fast) _ghostClearCounter++;
+    _ghostClearCounter++;
   }
 
   _painter.paint(_painterFb);
@@ -217,7 +221,7 @@ void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
   LOG_INF("PDR", "displayGray called: fb=%p lsb=%p msb=%p (counter=%d)", fb, _lsb, _msb, _ghostClearCounter);
   syncToPainter(fb, _lsb, _msb);
 
-  const bool forceClear = (factoryMode && _ghostClearCounter >= GHOST_CLEAR_INTERVAL); // Only clear if requested AND interval reached
+  const bool forceClear = (factoryMode || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (Gray)");
@@ -235,10 +239,19 @@ void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
 
 void PainterDriver::displayGray8Bit(EpdBus& bus, const uint8_t* grayBuf, RefreshMode mode, bool turnOff) {
   syncToPainter8Bit(grayBuf);
-  if (mode == RefreshMode::Full) {
+
+  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+
+  if (forceClear) {
+    LOG_INF("PDR", "Periodic ghost clear triggered (Gray8)");
+    _painter.setQuality(EPD_Painter::Quality::QUALITY_HIGH);
     _painter.clear();
-    yield();
+    _ghostClearCounter = 0;
+  } else {
+    _painter.setQuality(EPD_Painter::Quality::QUALITY_NORMAL);
+    _ghostClearCounter++;
   }
+
   _painter.paint(_painterFb);
   if (turnOff) _painter.shutdown();
 }

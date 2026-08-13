@@ -42,6 +42,15 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+
+void waitForPowerRelease() {
+  gpio.update();
+  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
+    delay(50);
+    gpio.update();
+  }
+}
+
 // A wake hold must never become an in-app power-button action.  Boot may continue
 // while the button is held; swallow the one release that ends that wake gesture.
 static bool wakePowerReleasePending = false;
@@ -231,7 +240,7 @@ void enterDeepSleep(bool fromTimeout = false) {
 
 void setupDisplayAndFonts(bool seamless = false) {
   display.begin(seamless);
-  renderer.begin();
+  renderer.begin(display.getInternalGrayBuffer());
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
 
@@ -267,14 +276,21 @@ void setup() {
 
   t1 = millis();
 
+  const auto rawResetReason = esp_reset_reason();
+  const auto rawWakeupCause = esp_sleep_get_wakeup_cause();
+
 #ifdef ENABLE_SERIAL_LOG
   // Earliest possible Serial setup. The 250 ms stall before begin() lets the
   // USB Serial/JTAG peripheral finish power-on and lets the host complete USB
   // enumeration before we touch the CDC state — otherwise cold boot races
   // and the host has to be physically replugged for logs to flow. Warm reboot
   // worked without the delay because USB was already enumerated.
-  delay(1000);
-  esp_rom_printf("\n\n!! CROSSPOINT BOOT (esp_rom_printf) !!\n");
+  delay(250);
+  // Web Serial sends file data in 256-byte chunks and waits for a 1-byte ACK.
+  // HWCDC defaults to a 256-byte RX queue, which is fine for logs but too small
+  // for chunked file transfer.
+  logSerial.setRxBufferSize(1024);
+  logSerial.setTxBufferSize(1024);
   Serial.begin(115200);
 #if LOG_SERIAL_HAS_TX_TIMEOUT
   logSerial.setTxTimeoutMs(1);  // This is a load-bearing 1. Do not modify.
@@ -282,6 +298,8 @@ void setup() {
 #endif
 
   HalSystem::begin();
+  LOG_INF("BOOT", "Reset diagnostic: reset=%d sleepWake=%d", (int)rawResetReason, (int)rawWakeupCause);
+
   // checkPanic() clears the watchdog capture marker after a successful SD
   // dump, so retain the boot classification for the later activity route.
   const bool rebootedFromPanic = HalSystem::isRebootFromPanic();
@@ -299,7 +317,7 @@ void setup() {
   halTiltSensor.begin();
   halClock.begin();
 
-  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsH716() ? "H716" : gpio.deviceIsX3() ? "X3" : "X4");
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
@@ -332,9 +350,9 @@ void setup() {
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
-      // If USB power caused a cold boot, go back to sleep
-      LOG_DBG("MAIN", "Wakeup reason: After USB Power");
-      powerManager.startDeepSleep(gpio);
+      // If USB power caused a cold boot, proceed to boot normally.
+      // Misidentification of RESET as POWERON while plugged in was causing boot failures.
+      LOG_INF("MAIN", "Wakeup reason: After USB Power (proceeding to boot)");
       break;
     case HalGPIO::WakeupReason::AfterFlash:
       // After flashing, just proceed to boot
@@ -461,6 +479,7 @@ void setup() {
     gpio.update();
   }
 
+  waitForPowerRelease();
   allowSleepAt = millis() + 2000;
 }
 

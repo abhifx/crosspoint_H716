@@ -38,6 +38,11 @@ TwoWire& sensorWire() {
 
 void ensureWire() {
   const auto& s = BoardConfig::ACTIVE.sensors;
+  // Skip I2C setup for LilyGo H716; it's handled globally.
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716) {
+    return;
+  }
+
   const uint8_t bus =
 #if SOC_I2C_NUM > 1
       s.i2cBus == 1 ? 1 : 0;

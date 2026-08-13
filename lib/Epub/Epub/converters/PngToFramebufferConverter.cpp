@@ -279,10 +279,14 @@ int pngDrawCallback(PNGDRAW* pDraw) {
       if (outX < screenWidth) {
         uint8_t gray = ctx->grayLineBuffer[srcX];
 
-        // Dithering removed: always quantize
-        uint8_t ditheredGray = applyBayerDither4Level(gray, outX, outY);
-        pw.writePixel(outX, ditheredGray);
-        if (caching) cw.writePixel(outX, ditheredGray);
+        if (ctx->renderer->getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          pw.writePixel(outX, gray);
+          if (caching) cw.writePixel(outX, 3);
+        } else {
+          uint8_t ditheredGray = applyBayerDither4Level(gray, outX, outY);
+          pw.writePixel(outX, ditheredGray);
+          if (caching) cw.writePixel(outX, ditheredGray);
+        }
       }
 
       // Bresenham-style stepping: advance srcX based on ratio srcWidth/dstWidth

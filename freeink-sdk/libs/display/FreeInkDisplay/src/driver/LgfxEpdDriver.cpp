@@ -37,6 +37,8 @@ class FreeInkBusEPD : public lgfx::Bus_EPD {
  private:
   // Helper to push to SR inside an ISR (MSB First for H716)
   static void IRAM_ATTR push_sr_isr(uint8_t data) {
+    // Pull STR (GPIO0) LOW during shift to prevent output glitches
+    lgfx::gpio_lo(H716_SR_STR);
     for (int i = 7; i >= 0; i--) {
       if (data & (1 << i)) lgfx::gpio_hi(H716_SR_DATA);
       else lgfx::gpio_lo(H716_SR_DATA);
@@ -45,9 +47,9 @@ class FreeInkBusEPD : public lgfx::Bus_EPD {
       lgfx::gpio_hi(H716_SR_CLK);
       asm volatile("nop; nop; nop; nop; nop; nop; nop; nop;");
     }
+    // Pulse STR HIGH and leave HIGH so BOOT strap pin is satisfied on reset
     lgfx::gpio_hi(H716_SR_STR);
     ets_delay_us(1);
-    lgfx::gpio_lo(H716_SR_STR);
   }
 
   static bool IRAM_ATTR h716_line_done_callback(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {

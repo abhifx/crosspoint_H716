@@ -130,34 +130,18 @@ class AtkinsonDitherer {
     // Quantize to 4 levels
     uint8_t quantized;
     int quantizedValue;
-    if (false) {  // original thresholds
-      if (adjusted < 43) {
-        quantized = 0;
-        quantizedValue = 0;
-      } else if (adjusted < 128) {
-        quantized = 1;
-        quantizedValue = 85;
-      } else if (adjusted < 213) {
-        quantized = 2;
-        quantizedValue = 170;
-      } else {
-        quantized = 3;
-        quantizedValue = 255;
-      }
-    } else {  // fine-tuned to X4 eink display
-      if (adjusted < 30) {
-        quantized = 0;
-        quantizedValue = 15;
-      } else if (adjusted < 50) {
-        quantized = 1;
-        quantizedValue = 30;
-      } else if (adjusted < 140) {
-        quantized = 2;
-        quantizedValue = 80;
-      } else {
-        quantized = 3;
-        quantizedValue = 210;
-      }
+    if (adjusted < 80) {
+      quantized = 0;
+      quantizedValue = 0;
+    } else if (adjusted < 160) {
+      quantized = 1;
+      quantizedValue = 82;
+    } else if (adjusted < 240) {
+      quantized = 2;
+      quantizedValue = 160;
+    } else {
+      quantized = 3;
+      quantizedValue = 255;
     }
 
     // Calculate error (only distribute 6/8 = 75%)
@@ -231,37 +215,21 @@ class FloydSteinbergDitherer {
     if (adjusted < 0) adjusted = 0;
     if (adjusted > 255) adjusted = 255;
 
-    // Quantize to 4 levels (0, 85, 170, 255)
+    // Quantize to 4 levels (0, 82, 160, 255)
     uint8_t quantized;
     int quantizedValue;
-    if (false) {  // original thresholds
-      if (adjusted < 43) {
-        quantized = 0;
-        quantizedValue = 0;
-      } else if (adjusted < 128) {
-        quantized = 1;
-        quantizedValue = 85;
-      } else if (adjusted < 213) {
-        quantized = 2;
-        quantizedValue = 170;
-      } else {
-        quantized = 3;
-        quantizedValue = 255;
-      }
-    } else {  // fine-tuned to X4 eink display
-      if (adjusted < 30) {
-        quantized = 0;
-        quantizedValue = 15;
-      } else if (adjusted < 50) {
-        quantized = 1;
-        quantizedValue = 30;
-      } else if (adjusted < 140) {
-        quantized = 2;
-        quantizedValue = 80;
-      } else {
-        quantized = 3;
-        quantizedValue = 210;
-      }
+    if (adjusted < 80) {
+      quantized = 0;
+      quantizedValue = 0;
+    } else if (adjusted < 160) {
+      quantized = 1;
+      quantizedValue = 82;
+    } else if (adjusted < 240) {
+      quantized = 2;
+      quantizedValue = 160;
+    } else {
+      quantized = 3;
+      quantizedValue = 255;
     }
 
     // Calculate error

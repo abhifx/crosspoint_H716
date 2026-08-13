@@ -8,6 +8,8 @@
 #include <freertos/semphr.h>
 #include <driver/gpio.h>
 #include <soc/gpio_struct.h>
+#include <Logging.h>
+#include <BoardConfig.h>
 
 namespace BoardT5H716 {
 namespace {
@@ -44,8 +46,10 @@ void pushShiftRegister(uint8_t data) {
   pinMode(H716_SR_CLK, OUTPUT);
   pinMode(H716_SR_STR, OUTPUT);
 
+  // Keep STR LOW during shifting to avoid glitching storage register outputs
   digitalWrite(H716_SR_STR, LOW);
   shiftOut(H716_SR_DATA, H716_SR_CLK, MSBFIRST, data);
+  // Pulse STR HIGH to transfer data from shift register to storage register
   digitalWrite(H716_SR_STR, HIGH);
   delayMicroseconds(10);
   digitalWrite(H716_SR_STR, LOW);
@@ -59,6 +63,7 @@ void pushShiftRegisterFast(uint8_t data) {
   const uint32_t clk = (1U << 12);
   const uint32_t dat = (1U << 13);
 
+  // Pull STR LOW during shift
   GPIO.out_w1tc = str;
   ets_delay_us(1);
   for (int i = 0; i < 8; i++) {
@@ -71,6 +76,7 @@ void pushShiftRegisterFast(uint8_t data) {
     data <<= 1;
   }
   ets_delay_us(1);
+  // Pulse STR HIGH
   GPIO.out_w1ts = str;
   ets_delay_us(1);
   GPIO.out_w1tc = str;
@@ -84,9 +90,12 @@ void setSrBit(uint8_t bit, bool high) {
 
 void beginI2C() {
   ensureI2CMutex();
+  LOG_INF("H716", "Initializing shared I2C bus (SDA=%d SCL=%d)...", T5H716_SDA, T5H716_SCL);
   Wire.begin(T5H716_SDA, T5H716_SCL);
   Wire.setClock(T5H716_I2C_FREQ);
-  Wire.setTimeOut(50);
+  Wire.setTimeOut(100); // Higher timeout for charger/touch sharing
+
+  BoardConfig::i2cBegun = true;
 }
 
 void prepareSdBus() {
@@ -96,12 +105,23 @@ void prepareSdBus() {
 }
 
 void begin() {
+  // Reset any previous sleep hold on the Shift Register strobe (GPIO 0 / BOOT)
+  // to allow it to be driven by pushShiftRegister.
+  gpio_hold_dis((gpio_num_t)H716_SR_STR);
+
   // Initialize Shift Register for Power
+  // This enables OE, MODE, SCAN, STV, NEG_PWR, POS_PWR
   pushShiftRegister(H716_SR_BASE);
-  delay(300);
+
+  // CRITICAL: Give the power rails and I2C chips time to fully stabilize.
+  // The ED047TC1 rails draw a massive inrush current.
+  delay(800);
 
   beginI2C();
   pinMode(T5H716_BOOT_BTN, INPUT_PULLUP);
+
+  // Hardware USB detect pin
+  pinMode(43, INPUT);
 
   prepareSdBus();
 
@@ -115,7 +135,6 @@ void deinitForSleep() {
   // Disable display power rails and output enable via shift register
   pushShiftRegister(current_sr_state & ~(SR_BIT_POS_PWR | SR_BIT_NEG_PWR | SR_BIT_OE));
 
-  // No gpio_hold_en here to match reference board behavior
   pinMode(T5H716_SD_CS, INPUT);
 }
 
@@ -125,7 +144,9 @@ bool readButton() {
 }
 
 bool isUsbConnected() {
-  // Use I2C to check BQ25896 charger status (VBUS_STAT in REG0B)
+  // Check BQ25896 charger status (VBUS_STAT in REG0B) over I2C
+  if (!BoardConfig::i2cBegun) return false;
+
   ScopedI2CLock lock;
   Wire.beginTransmission(0x6B); // BQ25896
   Wire.write(0x0B);             // REG0B

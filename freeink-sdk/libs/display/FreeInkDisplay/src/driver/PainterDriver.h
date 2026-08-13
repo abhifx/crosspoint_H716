@@ -42,6 +42,10 @@ class PainterDriver final : public PanelDriver {
   uint16_t _ghostClearCounter = 0;
   static constexpr uint16_t GHOST_CLEAR_INTERVAL = 8;
 
+  uint8_t _lsbLUT[256];
+  uint8_t _msbLUT[256];
+  uint8_t _grayLUT[256];
+
   void syncToPainter(const uint8_t* bw, const uint8_t* lsb, const uint8_t* msb);
   void syncToPainter8Bit(const uint8_t* grayBuf);
 };

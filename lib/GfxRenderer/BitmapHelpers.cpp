@@ -6,26 +6,20 @@
 #include "Bitmap.h"
 
 // Brightness/Contrast adjustments:
-constexpr bool USE_BRIGHTNESS = false;       // true: apply brightness/gamma adjustments
-constexpr int BRIGHTNESS_BOOST = 10;         // Brightness offset (0-50)
-constexpr bool GAMMA_CORRECTION = false;     // Gamma curve (brightens midtones)
-constexpr float CONTRAST_FACTOR = 1.15f;     // Contrast multiplier (1.0 = no change, >1 = more contrast)
+constexpr bool USE_BRIGHTNESS = true;        // true: apply brightness/gamma adjustments
+constexpr int BRIGHTNESS_BOOST = -20;        // Brightness offset (negative = darker)
+constexpr bool GAMMA_CORRECTION = true;      // Gamma curve (darkens midtones)
+constexpr float CONTRAST_FACTOR = 1.35f;     // Contrast multiplier (1.0 = no change, >1 = more contrast)
 constexpr bool USE_NOISE_DITHERING = false;  // Hash-based noise dithering
 
-// Integer approximation of gamma correction (brightens midtones)
-// Uses a simple curve: out = 255 * sqrt(in/255) ≈ sqrt(in * 255)
+// Integer approximation of gamma correction
+// Uses a Gamma 2.0 curve to darken midtones: out = in^2 / 255
 static inline int applyGamma(int gray) {
   if (!GAMMA_CORRECTION) return gray;
-  // Fast integer square root approximation for gamma ~0.5 (brightening)
-  // This brightens dark/mid tones while preserving highlights
-  const int product = gray * 255;
-  // Newton-Raphson integer sqrt (2 iterations for good accuracy)
-  int x = gray;
-  if (x > 0) {
-    x = (x + product / x) >> 1;
-    x = (x + product / x) >> 1;
-  }
-  return x > 255 ? 255 : x;
+  // This pushes midtones darker, helping visibility on E-Ink
+  const uint32_t val = static_cast<uint32_t>(gray);
+  const uint32_t res = (val * val) / 255;
+  return res > 255 ? 255 : static_cast<int>(res);
 }
 
 // Apply contrast adjustment around midpoint (128)
@@ -53,16 +47,16 @@ int adjustPixel(int gray) {
   return gray;
 }
 // Simple quantization without dithering - divide into 4 levels
-// The thresholds are fine-tuned to the X4 display
+// The thresholds are adjusted for LilyGo H716's 16-level capabilities
 uint8_t quantizeSimple(int gray) {
-  if (gray < 45) {
-    return 0;
-  } else if (gray < 70) {
-    return 1;
-  } else if (gray < 140) {
-    return 2;
+  if (gray < 80) {
+    return 0; // Black
+  } else if (gray < 160) {
+    return 1; // Dark Gray
+  } else if (gray < 240) {
+    return 2; // Light Gray
   } else {
-    return 3;
+    return 3; // White
   }
 }
 

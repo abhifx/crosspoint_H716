@@ -114,7 +114,32 @@ void BmpViewerActivity::onEnter() {
 
       if (bitmap.hasGreyscale()) {
         // Grayscale rendering path for H716 and other grayscale-capable devices
-        if (renderer.storeBwBuffer()) {
+        uint8_t* grayBuffer = renderer.getGrayBuffer();
+        if (grayBuffer) {
+          // Copy BW layer (UI hints) to 8-bit buffer
+          const uint8_t* bwBuffer = renderer.getFrameBuffer();
+          const uint32_t bytesPerRow = renderer.getDisplayWidthBytes();
+          const uint32_t numRows = renderer.getDisplayHeight();
+          for (uint32_t i = 0; i < bytesPerRow * numRows; i++) {
+            uint8_t b = bwBuffer[i];
+            uint8_t* g = &grayBuffer[i * 8];
+            g[0] = (b & 0x80) ? 255 : 0;
+            g[1] = (b & 0x40) ? 255 : 0;
+            g[2] = (b & 0x20) ? 255 : 0;
+            g[3] = (b & 0x10) ? 255 : 0;
+            g[4] = (b & 0x08) ? 255 : 0;
+            g[5] = (b & 0x04) ? 255 : 0;
+            g[6] = (b & 0x02) ? 255 : 0;
+            g[7] = (b & 0x01) ? 255 : 0;
+          }
+
+          // Optimized 8-bit path (matches ebook quality)
+          renderer.setRenderMode(GfxRenderer::GRAYSCALE_8BIT);
+          renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
+          renderer.displayGray8Bit(HalDisplay::HALF_REFRESH);
+          renderer.setRenderMode(GfxRenderer::BW);
+        } else if (renderer.storeBwBuffer()) {
+          // 4-level fallback (legacy)
           bitmap.rewindToData();
           renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
           renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);

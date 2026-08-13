@@ -196,10 +196,15 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
-        // Dithering removed: always quantize
-        uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          pw.writePixel(outX, gray);
+          if (caching) cw.writePixel(outX, 3); // Cache still uses 2-bit for now
+        } else {
+          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
+          pw.writePixel(outX, dithered);
+          if (caching) cw.writePixel(outX, dithered);
+        }
       }
     }
     return 1;
@@ -250,10 +255,14 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        // Dithering removed: always quantize
-        uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          pw.writePixel(outX, gray);
+          if (caching) cw.writePixel(outX, 3);
+        } else {
+          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
+          pw.writePixel(outX, dithered);
+          if (caching) cw.writePixel(outX, dithered);
+        }
       }
 
       // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
@@ -268,10 +277,14 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        // Dithering removed: always quantize
-        uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          pw.writePixel(outX, gray);
+          if (caching) cw.writePixel(outX, 3);
+        } else {
+          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
+          pw.writePixel(outX, dithered);
+          if (caching) cw.writePixel(outX, dithered);
+        }
       }
 
       // Right edge (with X boundary clamping)
@@ -289,10 +302,14 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        // Dithering removed: always quantize
-        uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-        pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+          pw.writePixel(outX, gray);
+          if (caching) cw.writePixel(outX, 3);
+        } else {
+          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
+          pw.writePixel(outX, dithered);
+          if (caching) cw.writePixel(outX, dithered);
+        }
       }
     }
     return 1;
@@ -317,10 +334,14 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       if (lx >= validW) lx = validW - 1;
       uint8_t gray = row[lx];
 
-      // Dithering removed: always quantize
-      uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-      pw.writePixel(outX, dithered);
-      if (caching) cw.writePixel(outX, dithered);
+      if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
+        pw.writePixel(outX, gray);
+        if (caching) cw.writePixel(outX, 3);
+      } else {
+        uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
+        pw.writePixel(outX, dithered);
+        if (caching) cw.writePixel(outX, dithered);
+      }
     }
   }
 

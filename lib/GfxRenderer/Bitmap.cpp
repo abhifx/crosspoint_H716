@@ -198,8 +198,8 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
       color = fsDitherer->processPixel(adjustPixel(lum), currentX);
     } else {
       if (nativePalette) {
-        // Palette matches native gray levels: direct mapping (still apply brightness/contrast/gamma)
-        color = static_cast<uint8_t>(adjustPixel(lum) >> 6);
+        // Palette matches native gray levels: apply adjustments and quantize
+        color = quantizeSimple(adjustPixel(lum));
       } else {
         // Non-native palette with dithering disabled: simple quantization
         color = quantize(adjustPixel(lum), currentX, prevRowY);
@@ -278,6 +278,64 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
 
   // Flush remaining bits if width is not a multiple of 4
   if (bitShift != 6) *outPtr = currentOutByte;
+
+  return BmpReaderError::Ok;
+}
+
+BmpReaderError Bitmap::readNextRow8Bit(uint8_t* data, uint8_t* rowBuffer) const {
+  if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
+
+  uint8_t* outPtr = data;
+
+  switch (bpp) {
+    case 32: {
+      const uint8_t* p = rowBuffer;
+      for (int x = 0; x < width; x++) {
+        uint8_t lum = (77u * p[2] + 150u * p[1] + 29u * p[0]) >> 8;
+        *outPtr++ = adjustPixel(lum);
+        p += 4;
+      }
+      break;
+    }
+    case 24: {
+      const uint8_t* p = rowBuffer;
+      for (int x = 0; x < width; x++) {
+        uint8_t lum = (77u * p[2] + 150u * p[1] + 29u * p[0]) >> 8;
+        *outPtr++ = adjustPixel(lum);
+        p += 3;
+      }
+      break;
+    }
+    case 8: {
+      for (int x = 0; x < width; x++) {
+        *outPtr++ = adjustPixel(paletteLum[rowBuffer[x]]);
+      }
+      break;
+    }
+    case 4: {
+      for (int x = 0; x < width; x++) {
+        const uint8_t nibble = (x & 1) ? (rowBuffer[x >> 1] & 0x0F) : (rowBuffer[x >> 1] >> 4);
+        *outPtr++ = adjustPixel(paletteLum[nibble]);
+      }
+      break;
+    }
+    case 2: {
+      for (int x = 0; x < width; x++) {
+        uint8_t val = (rowBuffer[x >> 2] >> (6 - ((x & 3) * 2))) & 0x03;
+        *outPtr++ = adjustPixel(paletteLum[val]);
+      }
+      break;
+    }
+    case 1: {
+      for (int x = 0; x < width; x++) {
+        const uint8_t palIndex = (rowBuffer[x >> 3] & (0x80 >> (x & 7))) ? 1 : 0;
+        *outPtr++ = adjustPixel(paletteLum[palIndex]);
+      }
+      break;
+    }
+    default:
+      return BmpReaderError::UnsupportedBpp;
+  }
 
   return BmpReaderError::Ok;
 }

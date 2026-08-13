@@ -36,10 +36,16 @@ struct DirectPixelWriter {
   int rowPhyXBase, rowPhyYBase;
 
   void init(GfxRenderer& renderer) {
-    fb = renderer.getWriteTarget();
-    originY = renderer.getWriteOriginY();
-    clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
+    if (mode == GfxRenderer::GRAYSCALE_8BIT) {
+      fb = renderer.getGrayBuffer();
+      originY = 0;
+      clipRows = renderer.getDisplayHeight();
+    } else {
+      fb = renderer.getWriteTarget();
+      originY = renderer.getWriteOriginY();
+      clipRows = renderer.getWriteRows();
+    }
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -174,6 +180,12 @@ struct DirectPixelWriter {
     // mode) and any out-of-frame row (full-frame mode) in one branch.
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
+
+    if (mode == GfxRenderer::GRAYSCALE_8BIT) {
+      // Direct byte write for 8-bit grayscale. fb is actually a uint8_t* grayBuffer here.
+      fb[static_cast<uint32_t>(phyY) * (displayWidthBytes * 8) + phyX] = pixelValue;
+      return;
+    }
 
     const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
     const uint8_t bitMask = 1 << (7 - (phyX & 7));

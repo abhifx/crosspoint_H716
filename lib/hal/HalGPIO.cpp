@@ -6,6 +6,11 @@
 #include <Wire.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
+#include <BoardConfig.h>
+
+#if FREEINK_DEVICE_LILYGO_H716
+#include <BoardT5H716.h>
+#endif
 
 // Global HalGPIO instance
 HalGPIO gpio;
@@ -132,6 +137,10 @@ void HalGPIO::begin() {
     pinMode(BAT_GPIO0, INPUT);
     pinMode(UART0_RXD, INPUT);
   }
+#elif FREEINK_DEVICE_LILYGO_H716
+  _deviceType = DeviceType::X4; // S3 uses X4 logic for some structures, but we'll use deviceIsH716() for branching
+  BoardConfig::selectDevice(BoardConfig::Board::LilyGoT5H716);
+  BoardT5H716::begin();
 #else
   _deviceType = DeviceType::X4;
 #endif
@@ -140,6 +149,13 @@ void HalGPIO::begin() {
 
 void HalGPIO::update() {
   inputMgr.update();
+  if (inputMgr.isDebouncePending()) {
+    // The SDK commits a state change after it remains stable for more than
+    // 5 ms. Re-poll before the low-power loop's next ~100 ms sample so short
+    // physical button presses are not discarded.
+    delay(6);
+    inputMgr.update();
+  }
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
@@ -191,6 +207,22 @@ bool HalGPIO::isXteinkDevice() const {
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4;
 }
 
+bool HalGPIO::deviceIsH716() const {
+#if FREEINK_DEVICE_LILYGO_H716
+  return BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5H716;
+#else
+  return false;
+#endif
+}
+
+void HalGPIO::deinitForSleep() {
+#if FREEINK_DEVICE_LILYGO_H716
+  if (deviceIsH716()) {
+    BoardT5H716::deinitForSleep();
+  }
+#endif
+}
+
 bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed) {
   // Boards without a power button (or M5Paper's latch circuit) cannot verify a
   // hold; treat the wake as valid.
@@ -233,6 +265,13 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
+#if FREEINK_DEVICE_LILYGO_H716
+  if (deviceIsH716()) {
+    // Use physical USB detect pin (GPIO 43) for H716 Standard.
+    // I2C charger status is less reliable during early boot.
+    return digitalRead(43) == HIGH;
+  }
+#endif
   if (deviceIsX3()) {
     // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
     // Positive current means charging.
@@ -254,6 +293,8 @@ bool HalGPIO::isUsbConnected() const {
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
+
+  LOG_INF("GPIO", "Wakeup check: reason=%d cause=%d", (int)resetReason, (int)wakeupCause);
 
   const bool usbConnected = isUsbConnected();
 

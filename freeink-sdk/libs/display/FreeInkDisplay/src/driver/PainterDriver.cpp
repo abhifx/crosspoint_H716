@@ -180,7 +180,7 @@ void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
 void PainterDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
   syncToPainter(fb, nullptr, nullptr);
 
-  const bool forceClear = (mode == RefreshMode::Full || mode == RefreshMode::Half || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (BW)");
@@ -189,7 +189,7 @@ void PainterDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev,
     _ghostClearCounter = 0;
   } else {
     _painter.setQuality(EPD_Painter::Quality::QUALITY_NORMAL);
-    _ghostClearCounter++;
+    if (mode != RefreshMode::Fast) _ghostClearCounter++;
   }
 
   _painter.paint(_painterFb);
@@ -217,7 +217,7 @@ void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
   LOG_INF("PDR", "displayGray called: fb=%p lsb=%p msb=%p (counter=%d)", fb, _lsb, _msb, _ghostClearCounter);
   syncToPainter(fb, _lsb, _msb);
 
-  const bool forceClear = (factoryMode || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+  const bool forceClear = (factoryMode && _ghostClearCounter >= GHOST_CLEAR_INTERVAL); // Only clear if requested AND interval reached
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (Gray)");

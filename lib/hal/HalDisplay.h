@@ -94,6 +94,9 @@ class HalDisplay {
   void displayGrayBuffer(bool turnOffScreen = false, bool forceFullRefresh = false);
   void displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
+  // Set the refresh interval (pages between full refreshes) for drivers that support it.
+  void setRefreshInterval(uint16_t pages);
+
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See
   // EInkDisplay::writeGrayscalePlaneStrip.

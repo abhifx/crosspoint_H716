@@ -143,6 +143,7 @@ class PanelDriver {
   virtual uint16_t fastRefreshCutoffMs() const { return 0; }
   virtual void grayscaleRevert(EpdBus& bus, const uint8_t* fb) { (void)bus; (void)fb; }
   virtual void setCustomLut(EpdBus& bus, bool enabled, const unsigned char* data) { (void)bus; (void)enabled; (void)data; }
+  virtual void setRefreshInterval(uint16_t pages) { (void)pages; }
 };
 
 }  // namespace freeink

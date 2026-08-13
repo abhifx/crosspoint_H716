@@ -10,6 +10,10 @@ inline const uint8_t bayer4x4[4][4] = {
     {15, 7, 13, 5},
 };
 
+#if defined(FREEINK_MCU_S3) && !defined(SIMULATOR)
+extern "C" void s3_bayer_dither_8bpp_to_4level_simd(const uint8_t* src, uint8_t* dst, int width, int y);
+#endif
+
 // Apply Bayer dithering and quantize to 4 levels (0-3)
 // Stateless - works correctly with any pixel processing order
 inline uint8_t applyBayerDither4Level(uint8_t gray, int x, int y) {

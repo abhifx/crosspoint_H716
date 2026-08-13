@@ -40,6 +40,7 @@
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
+#include "util/SIMD_S3.h"
 
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
@@ -1650,6 +1651,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     const uint32_t bytesPerRow = renderer.getDisplayWidthBytes();
     const uint32_t numRows = renderer.getDisplayHeight();
     const uint32_t totalBwBytes = bytesPerRow * numRows;
+#if defined(FREEINK_MCU_S3) && !defined(SIMULATOR)
+    s3_expand_1bpp_to_8bpp(bwBuffer, grayBuffer, totalBwBytes);
+#else
     for (uint32_t i = 0; i < totalBwBytes; i++) {
         uint8_t b = bwBuffer[i];
         uint8_t* g = &grayBuffer[i * 8];
@@ -1662,6 +1666,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         g[6] = (b & 0x02) ? 255 : 0;
         g[7] = (b & 0x01) ? 255 : 0;
     }
+#endif
 
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_8BIT);
     // Over-render images/anti-aliased text into the same 8-bit buffer

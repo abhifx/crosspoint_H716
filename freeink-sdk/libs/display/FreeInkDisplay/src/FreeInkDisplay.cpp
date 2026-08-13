@@ -951,6 +951,10 @@ void FreeInkDisplay::setCustomLUT(bool enabled, const unsigned char* lutData) {
   if (_driver) _driver->setCustomLut(_bus, enabled, lutData);
 }
 
+void FreeInkDisplay::setRefreshInterval(uint16_t pages) {
+  if (_driver) _driver->setRefreshInterval(pages);
+}
+
 void FreeInkDisplay::deepSleep() {
   syncPendingAsync();
   if (_driver) _driver->deepSleep(_bus);

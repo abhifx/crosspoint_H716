@@ -450,7 +450,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             // Black (also paints over the grays in BW mode)
             renderer.drawPixel(screenX, screenY, pixelState);
           } else if (renderMode == GfxRenderer::GRAYSCALE_8BIT) {
-            static const uint8_t grayMap[] = {0, 85, 170, 255};
+            static const uint8_t grayMap[] = {0, 32, 85, 255};
             renderer.drawPixelGray(screenX, screenY, grayMap[bmpVal]);
           } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
             // Light gray (also mark the MSB if it's going to be a dark gray too)
@@ -546,7 +546,12 @@ void GfxRenderer::drawPixelGray(const int x, const int y, const uint8_t level) c
     return;
   }
 
-  grayBuffer[static_cast<uint32_t>(phyY) * panelWidth + phyX] = level;
+  const uint32_t offset = static_cast<uint32_t>(phyY) * panelWidth + phyX;
+  // Ink Priority blending: anti-aliasing can only make a pixel darker, never lighter.
+  // This prevents smooth edges from "eroding" the solid black centers of characters.
+  if (level < grayBuffer[offset]) {
+    grayBuffer[offset] = level;
+  }
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
@@ -1458,12 +1463,15 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
       // Get 2-bit value (result of readNextRow quantization)
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      // For 1-bit source: 0 or 1 -> map to black (0,1,2) or white (3)
-      // val < 3 means black pixel (draw it)
-      if (renderMode == GRAYSCALE_8BIT) {
-        drawPixelGray(screenX, screenY, (val < 3) ? 0 : 255);
-      } else if (val < 3) {
-        drawPixel(screenX, screenY, true);
+      // For 1-bit/2-bit source: map to proper gray levels.
+      // val < 3 means a non-white pixel (draw it).
+      if (val < 3) {
+        if (renderMode == GRAYSCALE_8BIT) {
+          static const uint8_t grayMap[] = {0, 32, 85, 255};
+          drawPixelGray(screenX, screenY, grayMap[val]);
+        } else {
+          drawPixel(screenX, screenY, true);
+        }
       }
       // White pixels (val == 3) are not drawn (leave background)
     }

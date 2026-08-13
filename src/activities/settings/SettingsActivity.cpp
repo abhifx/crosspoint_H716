@@ -326,6 +326,7 @@ void SettingsActivity::toggleCurrentSetting() {
                        currentValue, [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
                          SETTINGS.*valuePtr = idx;
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+                         display.setRefreshInterval(SETTINGS.getRefreshFrequency());
                          SETTINGS.saveToFile();
                          rebuildSettingsLists();
                        });
@@ -419,6 +420,7 @@ void SettingsActivity::toggleCurrentSetting() {
   }
 
   syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+  display.setRefreshInterval(SETTINGS.getRefreshFrequency());
   SETTINGS.saveToFile();
   rebuildSettingsLists();
   selectedSettingIndex = std::min(selectedSettingIndex, settingsCount);

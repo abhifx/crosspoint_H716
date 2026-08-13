@@ -37,15 +37,9 @@ struct DirectPixelWriter {
 
   void init(GfxRenderer& renderer) {
     mode = renderer.getRenderMode();
-    if (mode == GfxRenderer::GRAYSCALE_8BIT) {
-      fb = renderer.getGrayBuffer();
-      originY = 0;
-      clipRows = renderer.getDisplayHeight();
-    } else {
-      fb = renderer.getWriteTarget();
-      originY = renderer.getWriteOriginY();
-      clipRows = renderer.getWriteRows();
-    }
+    fb = renderer.getWriteTarget();
+    originY = renderer.getWriteOriginY();
+    clipRows = renderer.getWriteRows();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -167,6 +161,10 @@ struct DirectPixelWriter {
         draw = (pixelValue == 1);
         state = false;
         break;
+      case GfxRenderer::GRAYSCALE_8BIT:
+        draw = true;
+        state = false;
+        break;
       default:
         return;
     }
@@ -183,7 +181,9 @@ struct DirectPixelWriter {
 
     if (mode == GfxRenderer::GRAYSCALE_8BIT) {
       // Direct byte write for 8-bit grayscale. fb is actually a uint8_t* grayBuffer here.
-      fb[static_cast<uint32_t>(phyY) * (displayWidthBytes * 8) + phyX] = pixelValue;
+      // We MUST respect the sy offset for tiled/strip rendering to avoid memory corruption.
+      const uint32_t stride = displayWidthBytes * 8;
+      fb[static_cast<uint32_t>(sy) * stride + phyX] = pixelValue;
       return;
     }
 

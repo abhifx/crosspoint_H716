@@ -281,7 +281,10 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
         if (ctx->renderer->getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           pw.writePixel(outX, gray);
-          if (caching) cw.writePixel(outX, 3);
+          if (caching) {
+            uint8_t qVal = (gray > 200) ? 3 : (gray > 120) ? 2 : (gray > 50) ? 1 : 0;
+            cw.writePixel(outX, qVal);
+          }
         } else {
           uint8_t ditheredGray = applyBayerDither4Level(gray, outX, outY);
           pw.writePixel(outX, ditheredGray);

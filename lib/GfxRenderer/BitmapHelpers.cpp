@@ -6,7 +6,7 @@
 #include "Bitmap.h"
 
 // Brightness/Contrast adjustments:
-constexpr bool USE_BRIGHTNESS = true;        // true: apply brightness/gamma adjustments
+constexpr bool USE_BRIGHTNESS = false;       // true: apply brightness/gamma adjustments
 constexpr int BRIGHTNESS_BOOST = -20;        // Brightness offset (negative = darker)
 constexpr bool GAMMA_CORRECTION = true;      // Gamma curve (darkens midtones)
 constexpr float CONTRAST_FACTOR = 1.35f;     // Contrast multiplier (1.0 = no change, >1 = more contrast)
@@ -49,11 +49,11 @@ int adjustPixel(int gray) {
 // Simple quantization without dithering - divide into 4 levels
 // The thresholds are adjusted for LilyGo H716's 16-level capabilities
 uint8_t quantizeSimple(int gray) {
-  if (gray < 80) {
+  if (gray < 50) {
     return 0; // Black
-  } else if (gray < 160) {
+  } else if (gray < 120) {
     return 1; // Dark Gray
-  } else if (gray < 240) {
+  } else if (gray < 200) {
     return 2; // Light Gray
   } else {
     return 3; // White

@@ -229,17 +229,20 @@ uint8_t* g_lsb = nullptr;
 uint8_t* g_msb = nullptr;
 uint16_t g_w = 0, g_h = 0, g_wb = 0;
 
-constexpr uint8_t kGrayBlack = 0x00, kGrayDark = 0x55, kGrayLight = 0xAA, kGrayWhite = 0xFF;
+constexpr uint8_t kGrayBlack = 0x00, kGrayDark = 0x0B, kGrayLight = 0x38, kGrayWhite = 0xFF;
 
-// (base, lsb, msb) per pixel -> 4 gray levels, matching the reference port: a set
-// base bit is white; otherwise msb/lsb pick light/dark; clear is black.
+// Ink Priority blending: Combine the B/W base + buffered LSB/MSB planes into 4 gray levels.
+// Set bits in the planes can only make the result darker (lower luminance) than the base.
 inline uint8_t grayValue(uint8_t base, uint8_t lsb, uint8_t msb, uint8_t mask) {
-  if (base & mask) return kGrayWhite;
-  const bool l = lsb & mask, m = msb & mask;
-  if (m && l) return kGrayDark;
-  if (m) return kGrayLight;
-  if (l) return kGrayDark;
-  return kGrayBlack;
+  uint8_t val = (base & mask) ? 3 : 0; // Base: 0=Black, 3=White
+
+  if (msb & mask) {
+    uint8_t gVal = (lsb & mask) ? 1 : 2; // Grayscale: 1=Dark, 2=Light
+    if (gVal < val) val = gVal;
+  }
+
+  static const uint8_t grayMap[] = {kGrayBlack, kGrayDark, kGrayLight, kGrayWhite};
+  return grayMap[val];
 }
 
 void allocCanvas(uint16_t w, uint16_t h) {

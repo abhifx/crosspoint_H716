@@ -230,6 +230,9 @@ class FreeInkDisplay {
   // LUT control
   void setCustomLUT(bool enabled, const unsigned char* lutData = nullptr);
 
+  // Refresh interval control
+  void setRefreshInterval(uint16_t pages);
+
   // Power management
   void deepSleep();
 

@@ -140,6 +140,8 @@ void HalDisplay::displayGray8Bit(const uint8_t* grayBuf, RefreshMode mode, bool 
   einkDisplay.displayGray8Bit(grayBuf, convertRefreshMode(mode), turnOffScreen);
 }
 
+void HalDisplay::setRefreshInterval(uint16_t pages) { einkDisplay.setRefreshInterval(pages); }
+
 void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows) {
   einkDisplay.writeGrayscalePlaneStrip(lsbPlane ? EInkDisplay::GRAY_PLANE_LSB : EInkDisplay::GRAY_PLANE_MSB, rows,
                                        yStart, numRows);

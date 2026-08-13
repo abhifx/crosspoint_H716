@@ -31,6 +31,7 @@ class PainterDriver final : public PanelDriver {
   uint8_t* getInternalGrayBuffer() override { return _painterFb; }
   void cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) override;
   bool supportsStripGrayscale() const override { return true; }
+  void setRefreshInterval(uint16_t pages) override { _ghostClearInterval = pages; }
 
  private:
   EPD_Painter _painter;
@@ -40,7 +41,7 @@ class PainterDriver final : public PanelDriver {
   uint16_t _w, _h;
   uint32_t _wb;
   uint16_t _ghostClearCounter = 0;
-  static constexpr uint16_t GHOST_CLEAR_INTERVAL = 8;
+  uint16_t _ghostClearInterval = 8;
 
   uint8_t _lsbLUT[256];
   uint8_t _msbLUT[256];

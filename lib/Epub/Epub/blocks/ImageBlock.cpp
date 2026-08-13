@@ -178,6 +178,9 @@ void renderRowsFromPxcSlot(GfxRenderer& renderer, int x, int y) {
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  const bool use8Bit = (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT);
+  static const uint8_t grayMap[] = {0, 32, 85, 255};
+
   for (int row = 0; row < pxcSlotHeight; row++) {
     const uint8_t* rowBuffer = pxcRowPtr((size_t)row * bytesPerRow, bytesPerRow, tempRow);
     pw.beginRow(y + row);
@@ -187,7 +190,12 @@ void renderRowsFromPxcSlot(GfxRenderer& renderer, int x, int y) {
       const int byteIdx = col >> 2;            // col / 4
       const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
       const uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
-      pw.writePixel(x + col, pixelValue);
+
+      if (use8Bit) {
+        pw.writePixel(x + col, grayMap[pixelValue]);
+      } else {
+        pw.writePixel(x + col, pixelValue);
+      }
     }
   }
 }
@@ -259,6 +267,9 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  const bool use8Bit = (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT);
+  static const uint8_t grayMap[] = {0, 32, 85, 255};
+
   int rowsInBuffer = 0;
   int bufferRow = 0;
   for (int row = 0; row < cachedHeight; row++) {
@@ -288,7 +299,11 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
       const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
       uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
 
-      pw.writePixel(x + col, pixelValue);
+      if (use8Bit) {
+        pw.writePixel(x + col, grayMap[pixelValue]);
+      } else {
+        pw.writePixel(x + col, pixelValue);
+      }
     }
   }
 

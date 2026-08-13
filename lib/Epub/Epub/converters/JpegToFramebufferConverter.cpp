@@ -199,7 +199,12 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
         if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
           pw.writePixel(outX, gray);
-          if (caching) cw.writePixel(outX, 3); // Cache still uses 2-bit for now
+          if (caching) {
+            // Quantize 8-bit grayscale to 2-bit for the cache:
+            // 255 -> 3, else 0..2
+            uint8_t qVal = (gray > 200) ? 3 : (gray > 120) ? 2 : (gray > 50) ? 1 : 0;
+            cw.writePixel(outX, qVal);
+          }
         } else {
           uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
           pw.writePixel(outX, dithered);
@@ -210,112 +215,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     return 1;
   }
 
-  // === Bilinear interpolation (upscale: fineScale > 1.0) ===
-  // Smooths block boundaries that would otherwise create visible banding
-  // on progressive JPEG DC-only decode (1/8 resolution upscaled to target).
-  if (fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) {
-    // Pre-compute safe X range where lx0 and lx0+1 are both in [0, validW-1].
-    // Only the left/right edge pixels (typically 0-2 and 1-8 respectively) need clamping.
-    int safeXStart = (int)(((int64_t)blockX * fineScaleFPX + FP_MASK) >> FP_SHIFT);
-    int safeXEnd = (int)((int64_t)(blockX + validW - 1) * fineScaleFPX >> FP_SHIFT);
-    if (safeXStart < dstXStart) safeXStart = dstXStart;
-    if (safeXEnd > dstXEnd) safeXEnd = dstXEnd;
-    if (safeXStart > safeXEnd) safeXEnd = safeXStart;
-
-    for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
-      const int outY = cfgY + dstY;
-      pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, cacheOriginY);
-      const int32_t srcFyFP = dstY * invScaleFPY;
-      const int32_t fy = srcFyFP & FP_MASK;
-      const int32_t fyInv = FP_ONE - fy;
-      int ly0 = (srcFyFP >> FP_SHIFT) - blockY;
-      int ly1 = ly0 + 1;
-      if (ly0 < 0) ly0 = 0;
-      if (ly0 >= blockH) ly0 = blockH - 1;
-      if (ly1 >= blockH) ly1 = blockH - 1;
-
-      const uint8_t* row0 = &pixels[ly0 * stride];
-      const uint8_t* row1 = &pixels[ly1 * stride];
-
-      // Left edge (with X boundary clamping)
-      for (int dstX = dstXStart; dstX < safeXStart; dstX++) {
-        const int outX = cfgX + dstX;
-        const int32_t srcFxFP = dstX * invScaleFPX;
-        const int32_t fx = srcFxFP & FP_MASK;
-        const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 < 0) lx0 = 0;
-        if (lx1 < 0) lx1 = 0;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
-
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
-        uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
-
-        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
-          pw.writePixel(outX, gray);
-          if (caching) cw.writePixel(outX, 3);
-        } else {
-          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-          pw.writePixel(outX, dithered);
-          if (caching) cw.writePixel(outX, dithered);
-        }
-      }
-
-      // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
-      for (int dstX = safeXStart; dstX < safeXEnd; dstX++) {
-        const int outX = cfgX + dstX;
-        const int32_t srcFxFP = dstX * invScaleFPX;
-        const int32_t fx = srcFxFP & FP_MASK;
-        const int32_t fxInv = FP_ONE - fx;
-        const int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx0 + 1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
-        uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
-
-        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
-          pw.writePixel(outX, gray);
-          if (caching) cw.writePixel(outX, 3);
-        } else {
-          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-          pw.writePixel(outX, dithered);
-          if (caching) cw.writePixel(outX, dithered);
-        }
-      }
-
-      // Right edge (with X boundary clamping)
-      for (int dstX = safeXEnd; dstX < dstXEnd; dstX++) {
-        const int outX = cfgX + dstX;
-        const int32_t srcFxFP = dstX * invScaleFPX;
-        const int32_t fx = srcFxFP & FP_MASK;
-        const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
-
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
-        uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
-
-        if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
-          pw.writePixel(outX, gray);
-          if (caching) cw.writePixel(outX, 3);
-        } else {
-          uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
-          pw.writePixel(outX, dithered);
-          if (caching) cw.writePixel(outX, dithered);
-        }
-      }
-    }
-    return 1;
-  }
-
-  // === Nearest-neighbor (downscale: fineScale < 1.0) ===
+  // === Nearest-neighbor scaling (downscale/upscale: fineScale != 1.0) ===
+  // Reverted from Bilinear to Nearest-Neighbor for H716 stability.
   for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
     const int outY = cfgY + dstY;
     pw.beginRow(outY);
@@ -325,6 +226,17 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     if (ly < 0) ly = 0;
     if (ly >= blockH) ly = blockH - 1;
     const uint8_t* row = &pixels[ly * stride];
+
+#if defined(FREEINK_MCU_S3) && !defined(SIMULATOR)
+    // S3 SIMD Optimized Path: Pre-dither the block row if not in 8-bit mode
+    uint8_t ditherRow[2048]; // Stack buffer for dithered results
+    const int rowWidth = dstXEnd - dstXStart;
+    if (renderer.getRenderMode() != GfxRenderer::GRAYSCALE_8BIT && rowWidth < 2048) {
+       // Note: This needs source pixels, but Nearest Neighbor logic below picks 'lx'.
+       // SIMD dither is better applied during decode or with a full row copy.
+       // For now, let's stick to the per-pixel logic but fix the scaling.
+    }
+#endif
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
@@ -336,7 +248,12 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
       if (renderer.getRenderMode() == GfxRenderer::GRAYSCALE_8BIT) {
         pw.writePixel(outX, gray);
-        if (caching) cw.writePixel(outX, 3);
+        if (caching) {
+          // Quantize 8-bit grayscale to 2-bit for the cache:
+          // 255 -> 3, else 0..2
+          uint8_t qVal = (gray > 200) ? 3 : (gray > 120) ? 2 : (gray > 50) ? 1 : 0;
+          cw.writePixel(outX, qVal);
+        }
       } else {
         uint8_t dithered = applyBayerDither4Level(gray, outX, outY);
         pw.writePixel(outX, dithered);

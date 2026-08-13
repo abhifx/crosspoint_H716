@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <EPD_Painter_presets.h>
 #include <math.h>
+#include <util/SIMD_S3.h>
 
 namespace freeink {
 
@@ -125,30 +126,24 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
 
       for (int bit = 0; bit < 8; bit++) {
         uint8_t mask = 0x80 >> bit;
-        uint8_t level = 0; // White (0)
 
-        // CrossPoint 4-level mapping:
-        // Value 0 (Black): b=0, m=0, l=0
-        // Value 1 (Dark Gray): b=0, m=1, l=1
-        // Value 2 (Light Gray): b=0, m=1, l=0
-        // Value 3 (White): b=1, m=0, l=0
+        // Ink Priority logic: Merge B/W base and Grayscale planes (LSB/MSB).
+        // We resolve to a 4-level value first: 0=Black, 1=DarkGray, 2=LightGray, 3=White.
+        uint8_t val = (b & mask) ? 3 : 0;
 
-        // Smooth priority: Use grayscale planes if they have data, ignore BW dither.
-        bool l_inked = (l & mask);
-        bool m_inked = (m & mask);
-        bool b_inked = !(b & mask);
-
-        if (b_inked) {
-          if (m_inked && l_inked) {
-            level = 9; // Value 1: Dark Gray (~82 lum)
-          } else if (m_inked) {
-            level = 5; // Value 2: Light Gray (~160 lum)
-          } else {
-            level = 15; // Value 0: Black (0 lum)
-          }
-        } else {
-          level = 0; // Value 3: White (255 lum)
+        // Merge grayscale (min blending)
+        if (m & mask) {
+          uint8_t gVal = (l & mask) ? 1 : 2;
+          if (gVal < val) val = gVal;
         }
+
+        // Map 4-level value to 16-level hardware indices (H716_LEVEL_LUM)
+        // 0 (Black) -> Level 15 (Luminance 0)
+        // 1 (Dark)  -> Level 14 (Luminance 11)
+        // 2 (Light) -> Level 11 (Luminance 56)
+        // 3 (White) -> Level 0  (Luminance 255)
+        static const uint8_t levelMap[] = {15, 14, 11, 0};
+        uint8_t level = levelMap[val];
 
         drow[bx * 8 + bit] = level;
         levelCounts[level & 0xF]++;
@@ -156,7 +151,7 @@ void PainterDriver::syncToPainter(const uint8_t* bw, const uint8_t* lsb, const u
     }
     if (y % 50 == 0) yield();
   }
-  LOG_INF("PDR", "syncToPainter: Levels [0]=%u [11]=%u [14]=%u [15]=%u",
+  LOG_INF("PDR", "syncToPainter: Levels [0]=%u [11]=%u [14]=%u [15]=%u (Ink-Priority 4->16 Merge)",
           (unsigned)levelCounts[0], (unsigned)levelCounts[11], (unsigned)levelCounts[14], (unsigned)levelCounts[15]);
 }
 
@@ -184,7 +179,7 @@ void PainterDriver::syncToPainter8Bit(const uint8_t* grayBuf) {
 void PainterDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
   syncToPainter(fb, nullptr, nullptr);
 
-  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= _ghostClearInterval);
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (BW)");
@@ -221,7 +216,7 @@ void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
   LOG_INF("PDR", "displayGray called: fb=%p lsb=%p msb=%p (counter=%d)", fb, _lsb, _msb, _ghostClearCounter);
   syncToPainter(fb, _lsb, _msb);
 
-  const bool forceClear = (factoryMode || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+  const bool forceClear = (factoryMode || _ghostClearCounter >= _ghostClearInterval);
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (Gray)");
@@ -240,7 +235,7 @@ void PainterDriver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, co
 void PainterDriver::displayGray8Bit(EpdBus& bus, const uint8_t* grayBuf, RefreshMode mode, bool turnOff) {
   syncToPainter8Bit(grayBuf);
 
-  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= GHOST_CLEAR_INTERVAL);
+  const bool forceClear = (mode == RefreshMode::Full || _ghostClearCounter >= _ghostClearInterval);
 
   if (forceClear) {
     LOG_INF("PDR", "Periodic ghost clear triggered (Gray8)");
